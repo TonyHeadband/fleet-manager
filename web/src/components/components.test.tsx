@@ -633,6 +633,64 @@ describe("PreviewPane diff tab", () => {
   });
 });
 
+describe("PreviewPane as a carousel", () => {
+  const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
+  const report = { workspaces: [{ repo: "core", diff: "+hello", truncated: false }] };
+  const track = () => document.querySelector<HTMLElement>(".pane-frame > .pane-track")!;
+  const slots = () => [...track().querySelectorAll<HTMLElement>(":scope > .pane-slot")];
+
+  it("tabs_slide_the_track", async () => {
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    expect(track().style.getPropertyValue("--index")).toBe("0");
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(track().style.getPropertyValue("--index")).toBe("1");
+    // The Output pane stays mounted, out of reach while it is off to the side.
+    expect(screen.getByLabelText("Terminal preview")).toBeInTheDocument();
+    expect(slots()[0]).toHaveAttribute("inert");
+    expect(slots()[0]).toHaveAttribute("aria-hidden", "true");
+    expect(slots()[1]).not.toHaveAttribute("inert");
+  });
+
+  it("output_still_follows_the_end", async () => {
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    const pre = screen.getByLabelText("Terminal preview");
+    Object.defineProperty(pre, "scrollHeight", { configurable: true, get: () => 500 });
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    act(() => FakeEventSource.for("/terminal").emit("pane", "$ new line"));
+    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    expect(screen.getByLabelText("Terminal preview")).toBe(pre);
+    expect(pre.scrollTop).toBe(500);
+  });
+
+  it("diff_loads_on_first_visit_only", async () => {
+    const loadDiff = vi.fn().mockResolvedValue(report);
+    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    expect(loadDiff).not.toHaveBeenCalled();
+    expect(slots()[1]).toBeEmptyDOMElement();
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    await screen.findByText("+hello");
+    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(loadDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("the_breakdown_slot_exists_only_with_its_tab", () => {
+    const { rerender } = render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
+    expect(slots()).toHaveLength(1);
+    rerender(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ id: "breakdown", label: "Breakdown", first: false, node: <p>plan</p> }]} />);
+    expect(slots()).toHaveLength(3);
+  });
+
+  it("the_track_slides_in_motion_only", () => {
+    const css = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{[^@]*\.pane-track \{ transition: transform var\(--motion-slide\) var\(--ease-push\); \}/);
+    const panel = readFileSync("src/panel/panel.css", "utf8").replace(/\s+/g, " ");
+    expect(panel).toMatch(/\.pane-track \{[^}]*transform: translateX\(calc\(-100% \* var\(--index\)\)\);/);
+    expect(panel).toMatch(/\.pane-frame \{[^}]*overflow: hidden;/);
+    expect(panel).toMatch(/\.pane-slot \{[^}]*flex: 0 0 100%;[^}]*overflow: auto;/);
+  });
+});
+
 describe("PreviewPane as Lite draws it", () => {
   // Ported from crates/fleet-gui/tests/panels.rs; the names are Lite's.
   const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;

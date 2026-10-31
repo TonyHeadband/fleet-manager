@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { dragWidth, layoutOf, shownWidth, type Panel } from "./panel";
 import type { Agent } from "../api/generated/Agent";
 import { title } from "../api/schema";
@@ -24,14 +24,35 @@ interface Props {
   bands?: ReactNode;
   /** Pinned under the scrolling body, as Lite's bottom panel: the reply box. */
   reply?: ReactNode;
+  /** It was open as the view's entry started, so it wipes in with the view. */
+  enters?: boolean;
+  /** Pushing in, standing, or pulling out; the push and pull animate the side layout only. */
+  phase?: PanelPhase;
+  /** One of the panel's own animations ended, by name. */
+  onPhaseEnd?: (animation: string) => void;
 }
+
+export type PanelPhase = "opening" | "open" | "closing";
 
 /**
  * Lite's detail panel: at the board's right, resized by dragging its 1px left line, between its minimum and a cap
  * that keeps a quarter of the board. It covers the board when the person asks, or when the window is too narrow to
  * keep the board, and Esc leaves a fullscreen the person chose.
  */
-export function DetailPanel({ agent, panel, boardWidth, daemonHost, onTerminal, onClose, children, bands, reply }: Props) {
+export function DetailPanel({
+  agent,
+  panel,
+  boardWidth,
+  daemonHost,
+  onTerminal,
+  onClose,
+  children,
+  bands,
+  reply,
+  enters,
+  phase = "open",
+  onPhaseEnd,
+}: Props) {
   const mode = layoutOf(panel, boardWidth);
   const path = panelPath(agent);
   const blocked = terminalBlocked(agent, daemonHost, onTerminal !== null);
@@ -64,7 +85,13 @@ export function DetailPanel({ agent, panel, boardWidth, daemonHost, onTerminal, 
       className="detail outlined"
       aria-label="Detail"
       data-layout={mode.kind}
-      style={mode.kind === "side" ? { width: `${width}px` } : undefined}
+      data-enters={enters || undefined}
+      data-phase={phase}
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget) onPhaseEnd?.(e.animationName);
+      }}
+      // --panel-final: the contents keep the panel's width while it pushes and pulls, so nothing reflows inside.
+      style={mode.kind === "side" ? ({ width: `${width}px`, "--panel-final": `${width}px` } as CSSProperties) : undefined}
     >
       {mode.kind === "side" && (
         <div

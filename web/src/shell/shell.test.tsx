@@ -284,6 +284,8 @@ describe("Shell", () => {
     await userEvent.click(await screen.findByText("pie job"));
     expect(screen.getByRole("complementary", { name: "Detail" })).toBeInTheDocument();
     await userEvent.click(within(screen.getByRole("main")).getByText("pie job"));
+    // It pulls out first, then goes (push.test.tsx).
+    fireEvent.animationEnd(screen.getByRole("complementary", { name: "Detail" }), { animationName: "fui-pull" });
     expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
   });
 
@@ -292,6 +294,7 @@ describe("Shell", () => {
     snapshot(agent({ id: "a1", goal: "pie job" }));
     await userEvent.click(await screen.findByText("pie job"));
     await userEvent.click(screen.getByRole("region", { name: "Review" }).querySelector(".column-body")!);
+    fireEvent.animationEnd(screen.getByRole("complementary", { name: "Detail" }), { animationName: "fui-pull" });
     expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
   });
 

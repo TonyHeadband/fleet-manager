@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { browserEventSource, type EventSourceFactory } from "./api/events";
 import { withToken, type FleetClient } from "./api/client";
 import type { ActionDef } from "./api/generated/ActionDef";
@@ -63,6 +63,8 @@ import { useRestart } from "./settings/restart";
 import { useDaemonSettings } from "./settings/daemonSettings";
 import { SettingsView } from "./settings/SettingsView";
 import { useAppVersion, useUpdateCheck } from "./startup/update";
+import { motionOn, useEntry } from "./shell/entry";
+import type { PanelPhase } from "./shell/DetailPanel";
 import { Shell } from "./shell/Shell";
 import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
@@ -568,12 +570,39 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     />
   );
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
+  // The panel pushes in as it appears and pulls out before it goes, at the side only; fullscreen opens as it does.
+  const [panelPhase, setPanelPhase] = useState<PanelPhase>("open");
+  const pushes = () => motionOn() && layoutOf(panel, bodyWidth).kind === "side";
+  const panelShown = !!open;
+  useLayoutEffect(() => {
+    if (panelShown) setPanelPhase(pushes() ? "opening" : "open");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read as the panel appears
+  }, [panelShown]);
   // As Lite's close_preview: the next card opens at the side, not where the last one left off.
-  const closePanel = () => {
+  const finishClose = () => {
     setOpenId(null);
     panel.setChosenFull(false);
   };
-  const footer = <Footer connected={connected} agents={snapshot.agents} messages={messages} onClick={click} onSelect={setOpenId} onOpenLog={() => navigate(settingsHref("log"))} />;
+  const closePanel = () => (open && pushes() ? setPanelPhase("closing") : finishClose());
+  // A card pressed while the panel pulls out opens it again, whole.
+  const openAgent = (id: string) => {
+    setOpenId(id);
+    if (panelPhase === "closing") setPanelPhase("opening");
+  };
+  // Leaving the board unmounts the panel mid-motion: settle it, so coming back neither pulls out nor pushes in again.
+  useEffect(() => {
+    if (route === "kanban") return;
+    if (panelPhase === "closing") finishClose();
+    if (panelPhase !== "open") setPanelPhase("open");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on leaving the board only
+  }, [route]);
+  const phaseEnded = (name: string) => {
+    if (name === "fui-push" && panelPhase === "opening") setPanelPhase("open");
+    if (name === "fui-pull" && panelPhase === "closing") finishClose();
+  };
+  // Kanban enters once its columns and cards have arrived; every other view as it opens.
+  const entry = { key: route, ...useEntry(route, route !== "kanban" || (loaded && !!schema), !!open) };
+  const footer = <Footer connected={connected} agents={snapshot.agents} messages={messages} onClick={click} onSelect={openAgent} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
     <PersonaSetup
@@ -669,7 +698,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "settings") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <SettingsView
           tab={settingsTab}
           body={(tab) =>
@@ -702,7 +731,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   if (route === "fleet") {
     const rules = { native, daemon: daemonSettings, restart: daemonRestart };
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <FleetView
           tab={fleetTab}
           body={(tab) => {
@@ -770,7 +799,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "releases") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Releases</h1>} footer={footer} dialog={appDialogs(dialog)}>
         <ReleasesView
           client={client}
           product={product}
@@ -793,6 +822,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     const live = liveTasks(schema, snapshot.agents);
     return (
       <Shell
+        entry={entry}
         drawer={drawer}
         header={
           <>
@@ -851,7 +881,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "forms") {
     return (
-      <Shell drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
         {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
@@ -859,6 +889,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   return (
     <Shell
+      entry={entry}
       drawer={drawer}
       header={
         <>
@@ -885,6 +916,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       panel={
         open && (
           <DetailPanel
+            enters={entry.panelEnters}
+            phase={panelPhase}
+            onPhaseEnd={phaseEnded}
             agent={open}
             bands={
               schema && (
@@ -936,7 +970,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           onRestart={(task) => void restart(task)}
           onRun={run}
           // Pressing the open card again closes the panel, as does a click on the board's empty space.
-          onOpen={(a) => (a.id === open?.id ? closePanel() : setOpenId(a.id))}
+          onOpen={(a) => (a.id === open?.id && panelPhase !== "closing" ? closePanel() : openAgent(a.id))}
           onEmpty={closePanel}
         />
       ) : (

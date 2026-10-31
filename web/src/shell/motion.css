@@ -1,0 +1,126 @@
+/* The canvas's motion: stepped, tied to what the person does, never two things at once. Off under reduced motion
+   here, and under Settings → Motion by styles.css's rule. */
+/* A card's place in the entry's stagger; Shell sets it inline, in board order. */
+:is(.card, .fleet-row) {
+  --i: 0;
+}
+/* A view change enters once the drawer's marker has finished moving; the first load has no marker to wait for. */
+.content {
+  --after: 0ms;
+}
+.content[data-after-marker] {
+  --after: var(--motion-marker);
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Entering a view: each section wipes in from the left behind a 1px accent edge, staggered; the drawer never moves. */
+  .content[data-entering] .view-header {
+    --at: 0ms;
+  }
+  .content[data-entering] .view-body {
+    --at: var(--motion-at-board);
+  }
+  .content[data-entering] .detail[data-enters] {
+    --at: var(--motion-at-panel);
+  }
+  .content[data-entering] .footer {
+    --at: var(--motion-at-footer);
+  }
+  .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer) {
+    position: relative;
+    animation: fui-wipe var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
+  }
+  .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer)::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--fill);
+    pointer-events: none;
+    animation: fui-edge var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
+  }
+  /* Pressing a view in the drawer: its dash grows into the marker bar while the old one shrinks back, in steps. */
+  .marker {
+    transition:
+      height var(--motion-marker) steps(7),
+      width var(--motion-marker) steps(2),
+      background-color var(--motion-marker) steps(2);
+  }
+  .drawer-nav a {
+    transition: color var(--motion-marker) steps(2);
+  }
+  /* Then the cards and fleet rows step in, in board order. */
+  .content[data-entering] :is(.card, .fleet-row) {
+    animation: fui-step-in var(--motion-step-in) steps(3)
+      calc(var(--after) + var(--motion-at-board) + var(--motion-at-cards) + var(--i) * var(--motion-stagger)) both;
+  }
+}
+@keyframes fui-wipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+@keyframes fui-edge {
+  from {
+    right: 100%;
+  }
+  99.9% {
+    right: 0;
+    opacity: 1;
+  }
+  to {
+    right: 0;
+    opacity: 0;
+  }
+}
+@keyframes fui-step-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* Pressing a card: the panel pushes in from the right while the board gives way, its contents anchored to its right
+   edge at their final width, so nothing reflows inside; closing has its own keyframes, since a finished animation
+   does not run again reversed. Only its left line is the accent while it moves. */
+:root {
+  --panel-final: var(--layout-panel);
+  --ease-push: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-pull: cubic-bezier(0.4, 0, 0.8, 0.4);
+}
+.detail[data-phase="opening"],
+.detail[data-phase="closing"] {
+  border-left-color: var(--fill);
+  overflow: hidden;
+  align-items: flex-end;
+}
+.detail[data-phase="opening"] > *,
+.detail[data-phase="closing"] > * {
+  min-width: var(--panel-final);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .detail[data-phase="opening"] {
+    animation: fui-push var(--motion-push) var(--ease-push) both;
+  }
+  .detail[data-phase="closing"] {
+    animation: fui-pull var(--motion-pull) var(--ease-pull) both;
+  }
+  /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
+  .pane-track {
+    transition: transform var(--motion-slide) var(--ease-push);
+  }
+}
+@keyframes fui-push {
+  from {
+    width: 0;
+  }
+}
+@keyframes fui-pull {
+  to {
+    width: 0;
+  }
+}
