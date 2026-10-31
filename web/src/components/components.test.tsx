@@ -108,6 +108,9 @@ describe("Card", () => {
     for (const t of ["fix the tests", "Permission needed", "Bash", "5m"]) expect(within(card).getByText(t)).toBeInTheDocument();
     // The activity's words, the repo of a one-repo product and the persona's name are the panel's.
     for (const t of ["wants to run Bash", "core"]) expect(within(card).queryByText(t)).toBeNull();
+    // What it is about reads beside the avatar with the actions; the badge has the card's full width below, whole.
+    expect(within(card).getByText("Bash").closest(".card-row")).toHaveAttribute("data-row", "activity");
+    expect(within(card).getByText("Permission needed").closest(".card-row")).toHaveAttribute("data-row", "state");
     expect(card).toHaveAttribute("data-tone", "attention");
   });
 
@@ -147,6 +150,13 @@ describe("Card", () => {
     expect(screen.queryByTitle("Blocked")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Paused")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Has changes" })).toBeNull();
+  });
+
+  it("the_activity_reads_beside_the_avatar_with_the_actions", () => {
+    const { card } = draw(agent({ status: "working", activity: "running Bash" }));
+    const row = within(card).getByText("running Bash").closest(".card-row");
+    expect(row).toHaveAttribute("data-row", "activity");
+    expect(within(row as HTMLElement).getByRole("button", { name: "Pause" })).toBeInTheDocument();
   });
 
   it("clicking_the_card_body_returns_open", async () => {

@@ -100,9 +100,10 @@ function FoldToggle({ n, open, onFold }: { n: number; open: boolean; onFold: () 
 }
 
 /**
- * One agent's card, read at a glance: the persona's avatar (a portrait slot), then three fixed rows: title and time;
- * one state line (`stateLine`) with the changes dot and, in a product of several repos, the repo; the actions, shown
- * on hover or selection. A task's lead adds the fleet's tally row and the task's own controls; a fleet agent drawn in
+ * One agent's card, read at a glance, in three fixed rows (`stateLine` picks what they say). Beside the persona's
+ * avatar (a portrait slot): the title and time, then the activity or what a badge is about, with the actions on
+ * hover or selection. Under them, the card's full width: the badge, whole, the changes dot and, in a product of
+ * several repos, the repo. A task's lead adds the fleet's tally row and the task's own controls; a fleet agent drawn in
  * full adds a dashed outline. The rest (goal, activity, size, branch, persona) is the detail panel's.
  */
 export function Card({ schema, agent, now, selected = false, tag, repos: showRepos = false, kind = { type: "solo" }, onRun, onOpen }: Props) {
@@ -178,6 +179,13 @@ export function Card({ schema, agent, now, selected = false, tag, repos: showRep
             <Field key={f.key} def={f} agent={agent} now={now} />
           ))}
         </div>
+        <div className="card-row" data-row="activity">
+          <span className="card-left card-activity">{line.text}</span>
+          <span className="card-actions">
+            {actions.map(control)}
+            {lead && <TaskControls group={lead.group} onStopTask={lead.onStopTask} onRestart={lead.onRestart} />}
+          </span>
+        </div>
         <div className="card-row" data-row="state">
           <span className="card-left">
             {taskBadge ? (
@@ -194,7 +202,6 @@ export function Card({ schema, agent, now, selected = false, tag, repos: showRep
                 </Badge>
               )
             )}
-            {line.text && <span className="card-activity">{line.text}</span>}
             {repos && (
               <>
                 <span className="repo" title={repos.all}>
@@ -218,12 +225,6 @@ export function Card({ schema, agent, now, selected = false, tag, repos: showRep
             {lead.display !== "hide" && lead.group.fleet.length > 0 && <FoldToggle n={lead.group.fleet.length} open={lead.open} onFold={lead.onFold} />}
           </div>
         )}
-        <div className="card-row" data-row="actions">
-          <span className="card-actions">
-            {actions.map(control)}
-            {lead && <TaskControls group={lead.group} onStopTask={lead.onStopTask} onRestart={lead.onRestart} />}
-          </span>
-        </div>
       </div>
       {/* The right-hand corners only: the status edge owns the left side. */}
       {selected && (
