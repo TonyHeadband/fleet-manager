@@ -44,7 +44,9 @@
 .drawer-nav a[aria-current="page"] { color: var(--accent-text); }
 .drawer-nav a[aria-disabled="true"] { color: var(--text-low); opacity: 0.5; cursor: not-allowed; }
 .drawer-nav [role="separator"] { border-top: 1px solid var(--border); }
-.watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: calc(var(--layout-watermark) * var(--mark-spill-bottom) + var(--layout-section-gap)); width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: var(--watermark-alpha); pointer-events: none; }
+.watermark { position: absolute; left: calc(-1 * var(--layout-watermark-bleed)); bottom: calc(var(--layout-watermark) * var(--mark-spill-bottom) + var(--layout-section-gap)); width: var(--layout-watermark); height: var(--layout-watermark); color: var(--fill); opacity: calc(var(--watermark-alpha) * var(--watermark-boost)); pointer-events: none; }
+/* egui's watermark alpha doubled: the web's mark is finer (thin ring, small craft) and vanished at egui's. */
+:root { --watermark-boost: 2; }
 /* RadarMark sets the real spill inline, from the mark's geometry; this is the declared default. */
 :root { --mark-spill-bottom: 0; }
 .radar-ring[data-spin] { animation: radar-turn linear infinite; }

@@ -26,8 +26,16 @@ const at = (r: number, a: number): [number, number] => {
 const dots = ringAngles(DOTS).map((a) => at(DOT_RING_R, a));
 const ticks = ringAngles(4).map((a) => [at(TICK_IN_R, a), at(DOT_RING_R, a)] as const);
 
-/** `turnMs`: one turn of the ring while it spins. */
-export function RadarMark({ className, spin = false, turnMs = RING_TURN_MS }: { className?: string; spin?: boolean; turnMs?: number }) {
+interface Props {
+  className?: string;
+  spin?: boolean;
+  /** One turn of the ring while it spins. */
+  turnMs?: number;
+  /** The ring's dots, in mark units: small marks need bigger dots to show. */
+  dotSize?: number;
+}
+
+export function RadarMark({ className, spin = false, turnMs = RING_TURN_MS, dotSize = DOT_SIZE }: Props) {
   return (
     <svg
       className={className}
@@ -48,7 +56,7 @@ export function RadarMark({ className, spin = false, turnMs = RING_TURN_MS }: { 
       >
         <circle cx={HUB.x} cy={HUB.y} r={CIRCLE_R} fill="none" />
         {dots.map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r={DOT_SIZE} stroke="none" />
+          <circle key={i} cx={x} cy={y} r={dotSize} stroke="none" />
         ))}
         {ticks.map(([[x1, y1], [x2, y2]], i) => (
           <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />

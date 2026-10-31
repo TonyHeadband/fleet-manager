@@ -15,6 +15,8 @@ export const RING_SPILL_BOTTOM = (HUB.y + DOT_RING_R + DOT_SIZE - 64) / 64;
 export const RING_TURN_MS = 15000;
 /** The drawer's watermark turns slower: there it is background. */
 export const WATERMARK_TURN_MS = 30000;
+/** Its dots: twice the boot mark's, or they vanish at the drawer's scale. */
+export const WATERMARK_DOT_SIZE = 2 * DOT_SIZE;
 
 export const NOSE = "32,11 35.5,30 28.5,30";
 export const TAIL = "29.5,41.5 34.5,41.5 32,46.5";
