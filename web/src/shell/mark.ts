@@ -9,6 +9,8 @@ export const TICK_IN_R = 24.5 * RING_SCALE;
 export const DOT_SIZE = 0.35;
 /** About one dot every 3 units, rounded to a multiple of 4 so a dot sits at the end of each cardinal tick. */
 export const DOTS = 4 * Math.round((2 * Math.PI * 26.5) / 3 / 4);
+/** How far the ring's outer edge reaches below the 64-unit square, as a fraction of it. */
+export const RING_SPILL_BOTTOM = (HUB.y + DOT_RING_R + DOT_SIZE - 64) / 64;
 /** One turn of the ring, wherever it spins. */
 export const RING_TURN_MS = 15000;
 

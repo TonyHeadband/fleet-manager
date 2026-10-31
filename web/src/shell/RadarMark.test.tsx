@@ -16,4 +16,10 @@ describe("RadarMark", () => {
     expect(ring).toHaveAttribute("data-spin");
     expect(ring.style.animationDuration).toBe("15000ms");
   });
+
+  it("the_mark_says_how_far_its_ring_spills_below_the_square", () => {
+    const { container } = render(<RadarMark />);
+    const spill = container.querySelector("svg")!.style.getPropertyValue("--mark-spill-bottom");
+    expect(Number(spill)).toBeCloseTo((34 + 26.5 * 1.3 + 0.35 - 64) / 64);
+  });
 });

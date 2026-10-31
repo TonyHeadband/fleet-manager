@@ -11,6 +11,7 @@ import {
   NOSE,
   onRing,
   project,
+  RING_SPILL_BOTTOM,
   TAIL,
   TICK_IN_R,
   type Point3,
@@ -31,7 +32,7 @@ const TRAIL_MS = 350;
 // The ring spills past the square; the box grows by the overflow so nothing overlaps the bar.
 const OUTER = DOT_RING_R + DOT_SIZE;
 const PAD_TOP = (OUTER - HUB.y) * BOOT_UNIT_PX;
-const PAD_BOTTOM = (HUB.y + OUTER - 64) * BOOT_UNIT_PX;
+const PAD_BOTTOM = RING_SPILL_BOTTOM * 64 * BOOT_UNIT_PX;
 
 const angle = (i: number, n: number) => (2 * Math.PI * i) / n;
 // The two great circles at right angles to the ring: its plane turned onto YZ and onto XZ.

@@ -1,4 +1,19 @@
-import { C_PATH, CIRCLE_R, DOT_RING_R, DOT_SIZE, DOTS, HUB, NOSE, onRing, RING_TURN_MS, ringAngles, TAIL, TICK_IN_R } from "./mark";
+import type { CSSProperties } from "react";
+import {
+  C_PATH,
+  CIRCLE_R,
+  DOT_RING_R,
+  DOT_SIZE,
+  DOTS,
+  HUB,
+  NOSE,
+  onRing,
+  RING_SPILL_BOTTOM,
+  RING_TURN_MS,
+  ringAngles,
+  TAIL,
+  TICK_IN_R,
+} from "./mark";
 
 // The finished mark: the boot animation's end state (startup/BootMark draws the assembly). Its ring turns only where
 // asked (`spin`): the drawer's watermark and the browser's intro, while animations are on.
@@ -17,6 +32,8 @@ export function RadarMark({ className, spin = false }: { className?: string; spi
       className={className}
       viewBox="0 0 64 64"
       overflow="visible"
+      // The ring spills past the square; a placement that must keep it whole lifts the mark by this much.
+      style={{ "--mark-spill-bottom": RING_SPILL_BOTTOM } as CSSProperties}
       aria-hidden="true"
       fill="currentColor"
       stroke="currentColor"
