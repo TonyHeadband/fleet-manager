@@ -164,7 +164,6 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
         </Tabs>
       )}
       <div className="pane-frame">
-        {/* The index is the tab's place in the row, so the track also slides when Breakdown comes or goes. */}
         <Carousel ids={tabs.map((t) => t.id)} current={shownTab} keep="visited" render={pane} />
       </div>
     </div>

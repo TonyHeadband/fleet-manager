@@ -113,6 +113,9 @@
   .pane-track {
     transition: transform var(--motion-slide) var(--ease-push);
   }
+  .pane-track[data-jump] {
+    transition: none;
+  }
 }
 @keyframes fui-push {
   from {
