@@ -1,3 +1,4 @@
+import { configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { setChoiceStore } from "../shell/choices";
@@ -21,3 +22,9 @@ if (typeof window.AnimationEvent === "undefined") {
   }
   window.AnimationEvent = AnimationEventShim as unknown as typeof AnimationEvent;
 }
+
+// A closing dialog's still copy (Modal.tsx) is inert and hidden from assistive tech: queries skip it too, as they skip
+// scripts and styles.
+configure({ defaultIgnore: "script, style, [data-closing], [data-closing] *" });
+// …and do not outlive the test that closed them.
+afterEach(() => document.querySelectorAll("body > [data-closing]").forEach((c) => c.remove()));
