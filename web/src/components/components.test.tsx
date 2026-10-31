@@ -250,6 +250,23 @@ describe("Board by tasks", () => {
   };
   const rows = () => screen.queryAllByRole("button", { name: /, (working|needs you|queued|review|stopped)$/ }).map((r) => r.getAttribute("aria-label"));
 
+  it("a_click_on_empty_board_is_reported", async () => {
+    const onEmpty = vi.fn();
+    board([o()], { onEmpty });
+    await userEvent.click(screen.getByRole("region", { name: "Queued" }).querySelector(".column-body")!);
+    expect(onEmpty).toHaveBeenCalledTimes(1);
+  });
+
+  it("a_click_inside_a_card_never_counts_as_empty", async () => {
+    const onEmpty = vi.fn();
+    board([o(), f("f1")], { onEmpty, display: "show" });
+    await userEvent.click(screen.getByText("Fix login"));
+    await userEvent.click(screen.getAllByRole("button", { name: "Pause" })[0]!);
+    await userEvent.click(screen.getByRole("button", { name: /1 fleet/ }));
+    expect(onEmpty).not.toHaveBeenCalled();
+  });
+
+
   it("stuck_row_first_and_group_forced_open", async () => {
     const working = [o(), f("f1", { status_since: 900, goal: "write code" }), f("f2", { status_since: 500, goal: "drop cookie" })];
     const { onOpen, rerender } = board(working);

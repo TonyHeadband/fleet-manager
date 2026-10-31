@@ -42,6 +42,10 @@ describe("shell.css", () => {
       /\.view-title \{[^}]*font-family: var\(--font-mono\);[^}]*font-size: var\(--size-small\);[^}]*letter-spacing: var\(--track-caps\);[^}]*text-transform: uppercase;/,
     );
   });
+  it("the_footer_message_reads_as_prose", () => {
+    // The message line is a button only to be clickable: it keeps the sans voice, not the controls' mono caps.
+    expect(css).toMatch(/\.footer-text \{[^}]*font-family: inherit;[^}]*letter-spacing: normal;[^}]*text-transform: none;/);
+  });
   it("the_marker_rail", () => {
     // A dash at each view's left; the current view's grows into the accent bar.
     expect(css).toMatch(/\.marker \{[^}]*width: var\(--layout-dash\);[^}]*height: 1px;[^}]*background: var\(--dashed\);/);

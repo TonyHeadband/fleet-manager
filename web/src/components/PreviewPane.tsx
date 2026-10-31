@@ -150,19 +150,21 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
           )}
         </Tabs>
       )}
-      <div className="preview-body">
-        {extra ? (
-          extra.node
-        ) : shownTab === "diff" ? (
-          <DiffContent diff={diff} />
-        ) : (
-          <>
-            {closed && <p className="note ended">Session ended</p>}
-            <pre ref={pre} className="pane" aria-label="Terminal preview">
-              {screenText(text)}
-            </pre>
-          </>
-        )}
+      <div className="pane-frame">
+        <div className="preview-body">
+          {extra ? (
+            extra.node
+          ) : shownTab === "diff" ? (
+            <DiffContent diff={diff} />
+          ) : (
+            <>
+              {closed && <p className="note ended">Session ended</p>}
+              <pre ref={pre} className="pane" aria-label="Terminal preview">
+                {screenText(text)}
+              </pre>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

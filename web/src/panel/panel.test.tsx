@@ -106,3 +106,23 @@ describe("panel.css", () => {
     }
   });
 });
+
+describe("the panel on the canvas", () => {
+  const shell = readFileSync("src/shell/shell.css", "utf8");
+  const panelCss = readFileSync("src/panel/panel.css", "utf8");
+  const board = readFileSync("src/board/board.css", "utf8");
+  it("the_panel_is_an_outline_with_a_framed_pane", () => {
+    expect(shell).not.toMatch(/\.detail \{[^}]*background/);
+    expect(panelCss).toMatch(/\.preview > \.tabs \{[^}]*border-bottom: none;/);
+    expect(panelCss).toMatch(/\.pane-frame \{[^}]*margin: 0 var\(--layout-pane-inset\);[^}]*border: 1px solid var\(--border\);[^}]*background: var\(--surface\);/);
+    expect(panelCss).not.toMatch(/\.preview-body \{[^}]*background/);
+    // The pane fills the panel's height: the body is a column its preview grows in.
+    expect(shell).toMatch(/\.detail-body \{[^}]*display: flex;[^}]*flex-direction: column;/);
+    expect(shell).toMatch(/\.detail-body:last-child \{[^}]*padding-bottom: var\(--layout-pane-inset\);/);
+  });
+  it("the_reply_box_is_a_sunken_frame_with_no_line_above", () => {
+    expect(board).toMatch(/\.reply textarea \{[^}]*background: var\(--sunken\);/);
+    expect(board).not.toMatch(/\.reply \{[^}]*border-top/);
+    expect(board).not.toMatch(/\.reply \{[^}]*background/);
+  });
+});

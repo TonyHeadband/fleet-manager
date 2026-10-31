@@ -276,6 +276,23 @@ describe("Shell", () => {
     expect(footer).toHaveTextContent(/^live$/);
   });
 
+  it("pressing_the_selected_card_closes_the_panel", async () => {
+    start();
+    snapshot(agent({ id: "a1", goal: "pie job" }));
+    await userEvent.click(await screen.findByText("pie job"));
+    expect(screen.getByRole("complementary", { name: "Detail" })).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole("main")).getByText("pie job"));
+    expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
+  });
+
+  it("a_click_on_empty_board_closes_the_panel", async () => {
+    start();
+    snapshot(agent({ id: "a1", goal: "pie job" }));
+    await userEvent.click(await screen.findByText("pie job"));
+    await userEvent.click(screen.getByRole("region", { name: "Review" }).querySelector(".column-body")!);
+    expect(screen.queryByRole("complementary", { name: "Detail" })).toBeNull();
+  });
+
   it("the_theme_switch_sits_by_the_app_name", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });

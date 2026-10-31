@@ -935,7 +935,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           }}
           onRestart={(task) => void restart(task)}
           onRun={run}
-          onOpen={(a) => setOpenId(a.id)}
+          // Pressing the open card again closes the panel, as does a click on the board's empty space.
+          onOpen={(a) => (a.id === open?.id ? closePanel() : setOpenId(a.id))}
+          onEmpty={closePanel}
         />
       ) : (
         <p className="loading">Loading…</p>

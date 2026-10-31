@@ -15,7 +15,7 @@
 .view-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 .footer { grid-area: footer; }
 /* The detail panel: its 1px left line is the drag handle; fullscreen, it takes the body. */
-.detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; background: var(--surface); }
+.detail { flex: none; position: relative; display: flex; flex-direction: column; width: var(--layout-panel); min-width: 0; min-height: 0; }
 .detail[data-layout="full"] { flex: 1; width: auto; }
 .detail-handle { position: absolute; top: 0; bottom: 0; left: calc(-1 * var(--space-button-gap) / 2); width: var(--space-button-gap); cursor: col-resize; z-index: 1; touch-action: none; }
 .detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin); border-bottom: 1px solid var(--border); min-width: 0; }
@@ -24,7 +24,9 @@
 .detail-title { flex: none; padding: var(--panel-title-top) var(--panel-margin) var(--panel-title-bottom); }
 .detail-title h2 { margin: 0; font-size: var(--size-body); font-weight: 500; color: var(--text-high); overflow-wrap: anywhere; }
 .detail-goal { margin: 0; font-size: var(--size-small); color: var(--text-low); overflow-wrap: anywhere; }
-.detail-body { flex: 1; min-height: 0; overflow: auto; }
+.detail-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+/* Without a reply box under it, the pane keeps its inset from the panel's bottom line too. */
+.detail-body:last-child { padding-bottom: var(--layout-pane-inset); }
 
 /* The drawer: the one rectangle on the window's edge, its right line only; a header and a footer row as tall as the
    content's. */
@@ -65,7 +67,7 @@
 .footer .readout-rail { flex: 1; align-self: stretch; }
 .footer .readout-rail > * { align-self: stretch; display: flex; align-items: center; }
 .footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--layout-readout-x); min-width: 0; }
-.footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
+.footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-family: inherit; font-size: inherit; letter-spacing: normal; text-transform: none; text-align: left; }
 .footer-text[data-dimmed="true"] { color: var(--text-low); }
 /* A status mark: an upright bar of one size wherever it stands, never round (FUI); the changes mark a small square. */
 .dot, .log-dot, .log-dot-space { flex: none; width: var(--layout-bar-w); height: var(--layout-bar-h); }
