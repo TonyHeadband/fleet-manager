@@ -32,6 +32,23 @@ describe("Page", () => {
   });
 });
 
+describe("ScrollArea", () => {
+  it("a_tick_rail_reads_out_the_position_while_more_is_below", () => {
+    const { container } = render(<Page>x</Page>);
+    const page = container.querySelector<HTMLElement>(".scroller")!;
+    const rail = () => container.querySelector(".scroll-rail");
+    sized(page, { height: 200, view: 200, top: 0 });
+    expect(rail()).toBeNull();
+    sized(page, { height: 600, view: 200, top: 0 });
+    expect(rail()).toHaveTextContent("▼ 0%");
+    expect(rail()).toHaveAttribute("aria-hidden", "true");
+    sized(page, { height: 600, view: 200, top: 150 });
+    expect(rail()).toHaveTextContent("▼ 38%");
+    sized(page, { height: 600, view: 200, top: 400 });
+    expect(rail(), "the end: nothing more below").toBeNull();
+  });
+});
+
 describe("scroll affordance styles", () => {
   const css = readFileSync("src/styles.css", "utf8");
 
@@ -39,6 +56,12 @@ describe("scroll affordance styles", () => {
     // WebKitGTK's overlay scrollbars hide until hovered; a styled one is always drawn, in the theme.
     expect(css).toMatch(/::-webkit-scrollbar \{[^}]*width: var\(--layout-scrollbar\)/);
     expect(css).toMatch(/::-webkit-scrollbar-thumb \{[^}]*background: var\(--fill\)/);
+  });
+
+  it("the_rail_is_the_boards_ticks_in_the_accent", () => {
+    expect(readFileSync("src/ui/ui.css", "utf8")).toMatch(
+      /\.scroll-rail \{[^}]*repeating-linear-gradient\(to right, var\(--fill\) 0 1px, transparent 1px var\(--column-tick-step\)\)/,
+    );
   });
 
   it("nothing_fades_a_scrollers_edges", () => {

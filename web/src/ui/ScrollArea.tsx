@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useScrollEdges } from "./scrollEdges";
 
 interface Props {
@@ -12,16 +12,23 @@ interface Props {
 }
 
 /**
- * A scroller in a frame: the scroller marks the edges it goes on past (`data-more`), and the frame is where an
- * indicator for them is drawn.
+ * A scroller in a frame: while it goes on below, the frame draws a tick rail along its bottom edge with a readout of
+ * how far down it is.
  */
 export function ScrollArea({ as: Tag = "div", className, grow, label, hidden, children }: Props) {
-  const edges = useScrollEdges<HTMLElement>();
+  // Only the readout re-renders the frame: a scroll that moves it by less than a percent changes nothing.
+  const [more, setMore] = useState<number | null>(null);
+  const edges = useScrollEdges<HTMLElement>((e) => setMore(e.below ? e.progress : null));
   return (
     <div className="scroll-frame" data-grow={grow || undefined} hidden={hidden}>
       <Tag className={`${className} scroller`} aria-label={label} hidden={hidden} ref={edges}>
         {children}
       </Tag>
+      {more !== null && (
+        <div className="scroll-rail" aria-hidden="true">
+          <span className="scroll-readout">{`▼ ${more}%`}</span>
+        </div>
+      )}
     </div>
   );
 }
