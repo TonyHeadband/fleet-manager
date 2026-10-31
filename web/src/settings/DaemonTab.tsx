@@ -3,15 +3,19 @@ import type { DaemonInfo, Native } from "../native/native";
 import { Button } from "../ui/Button";
 import { Section } from "../ui/Section";
 import { ONLY_IN_APP } from "./General";
+import { DaemonSections } from "./DaemonSections";
+import type { DaemonSettingsApi } from "./daemonSettings";
 import type { RestartApi } from "./restart";
+import { SetupWizard } from "./SetupWizard";
 
 // A port of crates/fleet-gui/src/views/settings/daemon.rs: where the daemon listens, who started it, its paths and
-// PID, and Restart daemon.
+// PID, and Restart daemon; then the folders it keeps tasks and personas in, and the setup wizard.
 
 /** egui re-reads the pidfile on every frame the tab is drawn; once a second is the page's frame for it. */
 const EVERY_MS = 1000;
 
-export function DaemonTab({ native, restart }: { native: Native | null; restart: RestartApi }) {
+export function DaemonTab(props: { native: Native | null; daemon: DaemonSettingsApi; restart: RestartApi; onRelaunch: () => void }) {
+  const { native, daemon, restart, onRelaunch } = props;
   const [info, setInfo] = useState<DaemonInfo | null>(null);
   useEffect(() => {
     if (!native) return;
@@ -52,6 +56,8 @@ export function DaemonTab({ native, restart }: { native: Native | null; restart:
           {restart.restarting !== null && <span className="note">Restarting the daemon…</span>}
         </div>
       </Section>
+      <DaemonSections native={native} daemon={daemon} restart={restart} kinds={["tasksRoot", "personasDir"]} />
+      <SetupWizard onRelaunch={onRelaunch} />
     </div>
   );
 }

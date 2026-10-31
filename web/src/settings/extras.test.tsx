@@ -19,7 +19,7 @@ describe("Settings → Extras", () => {
     const recheckTools = vi.fn().mockResolvedValue(toolList({ claude: true, gh: true }));
     await settings(recheckTools);
     expect(recheckTools).not.toHaveBeenCalled();
-    await click("Extras");
+    await click("Tools");
     expect(await screen.findByText("Claude Code is not installed")).toBeInTheDocument();
     expect(recheckTools).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { name: "Required tools" })).toBeInTheDocument();
@@ -30,8 +30,8 @@ describe("Settings → Extras", () => {
     expect(
       screen.getByText("Checks the tools Fleet Manager needs and installs what is missing; the folders can be changed there too."),
     ).toBeInTheDocument();
-    await click("General");
-    await click("Extras");
+    await click("App");
+    await click("Tools");
     await waitFor(() => expect(recheckTools).toHaveBeenCalledTimes(2));
   });
 
@@ -39,7 +39,7 @@ describe("Settings → Extras", () => {
     const native = fakeNative();
     const recheckTools = vi.fn().mockResolvedValue(toolList({ claude: true, gh: true }, ["gh"]));
     await settings(recheckTools, { native, local: true });
-    await click("Extras");
+    await click("Tools");
     expect(await screen.findByText("GitHub CLI (gh) is not installed")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Extras" })).toBeInTheDocument();
     expect(screen.queryByText("Claude Code is not installed")).toBeNull();
@@ -52,7 +52,7 @@ describe("Settings → Extras", () => {
   it("extras_says_checking_until_the_first_answer", async () => {
     const held = pending<ToolList>();
     await settings(vi.fn().mockReturnValue(held.promise));
-    await click("Extras");
+    await click("Tools");
     expect(screen.getByText("Checking the tools…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
     await act(async () => held.resolve(toolList()));
@@ -63,7 +63,7 @@ describe("Settings → Extras", () => {
   it("a_failed_check_shows_its_error_and_keeps_the_list", async () => {
     const recheckTools = vi.fn().mockResolvedValueOnce(toolList()).mockRejectedValue(new Error("connection refused"));
     await settings(recheckTools);
-    await click("Extras");
+    await click("Tools");
     expect(await screen.findByText("✓ Claude Code 1.0")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Check again" }));
     expect(await screen.findByText("connection refused")).toBeInTheDocument();
@@ -75,7 +75,7 @@ describe("Settings → Extras", () => {
     const second = pending<ToolList>();
     const recheckTools = vi.fn().mockResolvedValueOnce(toolList()).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     await settings(recheckTools);
-    await click("Extras");
+    await click("Tools");
     await screen.findByText("✓ GitHub CLI (gh) 1.0");
     await userEvent.click(screen.getByRole("button", { name: "Check again" }));
     await userEvent.click(screen.getByRole("button", { name: "Check again" }));
@@ -88,7 +88,7 @@ describe("Settings → Extras", () => {
   it("an_answer_adopts_its_path_when_the_daemon_is_local", async () => {
     const native = fakeNative();
     await settings(vi.fn().mockResolvedValue({ ...toolList(), path: "/usr/local/bin:/usr/bin" }), { native, local: true });
-    await click("Extras");
+    await click("Tools");
     await waitFor(() => expect(native.adoptPath).toHaveBeenCalledWith());
   });
 });

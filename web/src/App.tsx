@@ -43,7 +43,7 @@ import {
   settingsHref,
   tasksRouteFromHash,
   useHash,
-  useManagementTab,
+  useFleetTab,
   useRoute,
   useSettingsTab,
   useTasksRoute,
@@ -51,6 +51,7 @@ import {
 } from "./shell/routes";
 import { choosePreference, currentPreferences, mergePreferences, usePreferences } from "./shell/preferences";
 import { ThemeSwitch } from "./shell/ThemeSwitch";
+import { DaemonSections } from "./settings/DaemonSections";
 import { DaemonTab } from "./settings/DaemonTab";
 import { Extras } from "./settings/Extras";
 import { LogTab } from "./settings/LogTab";
@@ -70,7 +71,8 @@ import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
 import { TasksView } from "./tasks/TasksView";
 import { NO_RELEASES_STATE, ReleasesView, type ReleasesState } from "./releases/ReleasesView";
-import { ManagementView } from "./management/ManagementView";
+import { FleetView } from "./management/FleetView";
+import { RulesPage } from "./management/RulesPage";
 import { NotYet } from "./ui/NotYet";
 import { Overview } from "./management/Overview";
 import { Workflow } from "./management/Workflow";
@@ -162,14 +164,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const daemonHost = new URL(client.baseUrl || window.location.href, window.location.href).hostname;
   const route = useRoute();
   const tasksRoute = useTasksRoute();
-  const managementTab = useManagementTab();
+  const fleetTab = useFleetTab();
   const agentConfig = useAgentConfig(client);
   const loadConfig = agentConfig.load;
-  // Loaded when Management is first opened, not at start; a failed load is asked again on each way back in, by
-  // view or by tab (egui's set_view and management_view).
+  // Loaded when Fleet is first opened, not at start; a failed load is asked again on each way back in, by view or by
+  // tab (egui's set_view and management_view).
   useEffect(() => {
-    if (route === "management") loadConfig();
-  }, [route, managementTab, loadConfig]);
+    if (route === "fleet") loadConfig();
+  }, [route, fleetTab, loadConfig]);
   const { messages, say: show, click } = useMessages();
   // egui's notices are tracing events: each one is a log line too, in the Log tab and in gui.log.
   const say = useMemo(() => loggedSay(native, show), [native, show]);
@@ -181,17 +183,17 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // Management's "+ New persona" and Resume open the setup in their modes, over the app.
   const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
   const loadDefinitions = definitions.loadList;
-  // Asked again on each way into a definitions tab, into Personas for its nickname fields and into Products for its
-  // specialists and override keys, so files changed on disk show (egui asks at start and after a save or reset).
+  // Asked again on each way into a definitions tab, into Personas for its nickname fields, into Products for its
+  // specialists and override keys and into Pull requests for its styles, so files changed on disk show (egui asks at
+  // start and after a save or reset).
   useEffect(() => {
-    if (route === "management" && (managementTab in DEF_TABS || managementTab === "personas" || managementTab === "products"))
-      loadDefinitions();
-  }, [route, managementTab, loadDefinitions]);
-  // Where Tasks, Management and Settings were left, so the drawer and the strip open them there again (egui keeps
+    if (route === "fleet" && (fleetTab in DEF_TABS || ["personas", "products", "pull-requests"].includes(fleetTab))) loadDefinitions();
+  }, [route, fleetTab, loadDefinitions]);
+  // Where Tasks, Fleet and Settings were left, so the drawer and the strip open them there again (egui keeps
   // their state).
   const hash = useHash();
   const lastHref = useRef<Partial<Record<Route, string>>>({});
-  if (route === "tasks" || route === "management" || route === "settings") lastHref.current[route] = hash || `#${route}`;
+  if (route === "tasks" || route === "fleet" || route === "settings") lastHref.current[route] = hash || `#${route}`;
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
@@ -212,16 +214,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // The relaunched setup wizard, over whatever view opened it.
   const [wizardOpen, setWizardOpen] = useState(false);
   const closeWizard = useCallback(() => setWizardOpen(false), []);
-  // Extras' tools: checked each time the tab opens, never before (egui `open_extras`).
+  // The Tools tab's tools: checked each time the tab opens, never before (egui `open_extras`).
   const extrasCheck = useToolCheck(client, native, { canInstall: native !== null && wizard.local, local: wizard.local });
   const recheckExtras = extrasCheck.recheck;
   useEffect(() => {
-    if (route === "settings" && settingsTab === "extras") recheckExtras();
+    if (route === "settings" && settingsTab === "tools") recheckExtras();
   }, [route, settingsTab, recheckExtras]);
-  // General's Pull request style lists the PR styles that load, as they are on disk now.
-  useEffect(() => {
-    if (route === "settings" && settingsTab === "general") loadDefinitions();
-  }, [route, settingsTab, loadDefinitions]);
   const [preferences, setPreferences] = usePreferences();
   const update = useUpdateCheck(native);
   const appVersion = useAppVersion(native);
@@ -533,7 +531,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     products,
     reloadProducts,
     reloadRepos,
-    route === "management" && managementTab === "products",
+    route === "fleet" && fleetTab === "products",
     productDeleted,
   );
   // egui's New product modal, from the drawer and from Management → Products.
@@ -673,7 +671,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         <SettingsView
           tab={settingsTab}
           body={(tab) =>
-            tab === "general" ? (
+            tab === "app" ? (
               <General
                 native={native}
                 preferences={preferences}
@@ -681,19 +679,15 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 update={update}
                 version={native ? appVersion : daemonVersion}
                 say={say}
-                daemon={daemonSettings}
-                restart={daemonRestart}
-                styles={definitions.st.list && usable(definitions.st.list, "pr_style")}
-                onRelaunch={() => setWizardOpen(true)}
                 shortcutsPick={shortcutsPick}
                 onShortcutsPick={setShortcutsPick}
               />
             ) : tab === "log" ? (
               <LogTab inApp={native !== null} app={log.app} daemon={log.daemon} live={log.live} />
-            ) : tab === "extras" ? (
+            ) : tab === "tools" ? (
               <Extras check={extrasCheck} native={native} onRelaunch={() => setWizardOpen(true)} />
             ) : tab === "daemon" ? (
-              <DaemonTab native={native} restart={daemonRestart} />
+              <DaemonTab native={native} daemon={daemonSettings} restart={daemonRestart} onRelaunch={() => setWizardOpen(true)} />
             ) : (
               <NotYet />
             )
@@ -703,11 +697,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     );
   }
 
-  if (route === "management") {
+  if (route === "fleet") {
+    const rules = { native, daemon: daemonSettings, restart: daemonRestart };
     return (
-      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Management</h1>} footer={footer} dialog={appDialogs(dialog)}>
-        <ManagementView
-          tab={managementTab}
+      <Shell drawer={drawer} tools={themeSwitch} header={<h1 className="view-title">Fleet</h1>} footer={footer} dialog={appDialogs(dialog)}>
+        <FleetView
+          tab={fleetTab}
           body={(tab) => {
             switch (tab) {
               case "overview":
@@ -729,8 +724,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                 const form = (schema && usableForm(schema, "instructions")) ?? null;
                 return <Instructions config={agentConfig} form={form} />;
               }
-              case "agent-settings":
-                return <AgentSettings config={agentConfig} />;
+              case "agents":
+                return <AgentSettings config={agentConfig} defaults={<DaemonSections {...rules} kinds={["agentDefaults"]} />} />;
+              case "limits":
+                return <RulesPage {...rules} kinds={["limits"]} />;
+              case "pull-requests":
+                return <RulesPage {...rules} kinds={["pr"]} styles={definitions.st.list && usable(definitions.st.list, "pr_style")} />;
               case "products":
                 return (
                   <Products

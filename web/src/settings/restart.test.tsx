@@ -24,6 +24,9 @@ function daemonTab(opts: AppOptions = {}) {
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
 
+/** The Daemon tab's own section, apart from the folders under it. */
+const daemonSection = () => screen.getByRole("heading", { name: "Daemon" }).closest("section")!;
+
 describe("The restart's words and blockers", () => {
   it("restart_blocker_names_the_first_reason_in_egui_s_order", () => {
     const queued = [agent({ status: "queued" })];
@@ -153,7 +156,7 @@ describe("Restart daemon", () => {
     const native = fakeNative({ saveAndRestart: vi.fn().mockReturnValue(held.promise) });
     await daemonTab({ native });
     await userEvent.click(restartButton());
-    expect(screen.getByText("Restarting the daemon…")).toBeInTheDocument();
+    expect(within(daemonSection()).getByText("Restarting the daemon…")).toBeInTheDocument();
     expect(restartButton()).toBeDisabled();
     expect(restartButton()).toHaveAttribute("title", "The daemon is restarting");
     await userEvent.click(restartButton());
@@ -242,7 +245,7 @@ describe("Restart daemon", () => {
 
   it("in_a_browser_the_daemon_tab_says_only_in_the_app", async () => {
     await openApp("Settings", "Daemon", {});
-    expect(screen.getByText("Only in the app")).toBeInTheDocument();
+    expect(within(daemonSection()).getByText("Only in the app")).toBeInTheDocument();
     expect(restartButton()).toBeDisabled();
     expect(restartButton()).toHaveAttribute("title", "Only in the app");
   });

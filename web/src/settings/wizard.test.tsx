@@ -41,7 +41,7 @@ beforeEach(() => localStorage.clear());
 
 describe("The relaunched wizard", () => {
   it("relaunch_opens_the_wizard_at_requirements", async () => {
-    const { recheckTools } = await settings(null);
+    const { recheckTools } = await settings("Daemon");
     expect(recheckTools).not.toHaveBeenCalled();
     await relaunch();
     expect(recheckTools).toHaveBeenCalledTimes(1);
@@ -50,7 +50,7 @@ describe("The relaunched wizard", () => {
   });
 
   it("a_folder_changed_in_the_relaunched_wizard_is_saved_and_offers_restart_now", async () => {
-    const { native } = await settings("Extras");
+    const { native } = await settings("Tools");
     await relaunch();
     await userEvent.click(await within(wizard()!).findByRole("button", { name: "Continue without it" }));
     expect(screen.getByRole("heading", { name: "Step 2 of 3 · Where Fleet Manager lives" })).toBeInTheDocument();
@@ -71,7 +71,7 @@ describe("The relaunched wizard", () => {
     expect(await within(footer()).findByText("Daemon restarted")).toBeInTheDocument();
     expect(native!.saveAndRestart).toHaveBeenCalledWith({ kind: "restart" });
     expect(wizard()).toBeNull();
-    await click("General");
+    await click("Daemon");
     await waitFor(() => expect(field("Tasks folder")).toHaveValue("~/tasks2"));
   });
 
@@ -79,7 +79,7 @@ describe("The relaunched wizard", () => {
     // Done waits for the config to be read again, so it never shows without the pending line (#420).
     const native = daemonMachine();
     const reread = pending<DaemonSettings>();
-    await settings("Extras", { native });
+    await settings("Tools", { native });
     vi.mocked(native.readDaemonSettings).mockReturnValueOnce(reread.promise);
     await relaunch();
     await changeTasksFolder("2");
@@ -93,7 +93,7 @@ describe("The relaunched wizard", () => {
     const first = pending<DaemonSettings>();
     const native = daemonMachine();
     vi.mocked(native.readDaemonSettings).mockReturnValueOnce(first.promise);
-    await settings("Extras", { native });
+    await settings("Tools", { native });
     await userEvent.click(await screen.findByRole("button", { name: "Relaunch setup wizard" }));
     await act(async () => first.resolve(DAEMON_SETTINGS));
     await userEvent.click(await within(wizard()!).findByRole("button", { name: /^Continue/ }));
@@ -102,7 +102,7 @@ describe("The relaunched wizard", () => {
   });
 
   it("the_relaunched_wizard_changing_nothing_just_closes", async () => {
-    const { native } = await settings(null);
+    const { native } = await settings("Daemon");
     await relaunch();
     await changeTasksFolder("");
     expect(await screen.findByRole("heading", { name: "Step 3 of 3 · Done" })).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe("The relaunched wizard", () => {
 
   it("the_done_step_waits_for_a_check_still_in_flight", async () => {
     const held = pending<ToolList>();
-    await settings(null, { tools: vi.fn().mockReturnValue(held.promise) });
+    await settings("Daemon", { tools: vi.fn().mockReturnValue(held.promise) });
     await relaunch();
     expect(within(wizard()!).getByText("Checking the tools…")).toBeInTheDocument();
     await changeTasksFolder("");
@@ -125,7 +125,7 @@ describe("The relaunched wizard", () => {
   });
 
   it("the_done_step_says_when_the_tools_could_not_be_checked", async () => {
-    await settings(null, { tools: vi.fn().mockRejectedValue(new Error("connection refused")) });
+    await settings("Daemon", { tools: vi.fn().mockRejectedValue(new Error("connection refused")) });
     await relaunch();
     expect(await within(wizard()!).findByText("connection refused")).toBeInTheDocument();
     await changeTasksFolder("");
@@ -133,7 +133,7 @@ describe("The relaunched wizard", () => {
   });
 
   it("a_failed_folder_write_stays_on_folders_with_its_error", async () => {
-    await settings(null, {
+    await settings("Daemon", {
       native: daemonMachine({ saveSettings: vi.fn().mockRejectedValue(new Error("Cannot write /c/config.toml: denied")) }),
     });
     await relaunch();
@@ -146,7 +146,7 @@ describe("The relaunched wizard", () => {
     const held = pending<typeof RESTARTED>();
     await settings("Daemon", { native: daemonMachine({ saveAndRestart: vi.fn().mockReturnValue(held.promise) }) });
     await userEvent.click(button("Restart daemon"));
-    await click("Extras");
+    await click("Tools");
     await relaunch();
     await userEvent.click(await within(wizard()!).findByRole("button", { name: /^Continue/ }));
     expect(button("Next →")).toBeDisabled();
@@ -155,7 +155,7 @@ describe("The relaunched wizard", () => {
   });
 
   it("in_a_browser_the_wizard_has_no_folders_step", async () => {
-    await settings(null, { native: null });
+    await settings("Daemon", { native: null });
     await userEvent.click(await screen.findByRole("button", { name: "Relaunch setup wizard" }));
     expect(await screen.findByRole("heading", { name: "Step 1 of 2 · What Fleet Manager needs" })).toBeInTheDocument();
     await userEvent.click(await within(wizard()!).findByRole("button", { name: /^Continue/ }));
@@ -163,16 +163,16 @@ describe("The relaunched wizard", () => {
   });
 
   it("escape_closes_the_wizard", async () => {
-    await settings(null);
+    await settings("Daemon");
     await relaunch();
     await userEvent.keyboard("{Escape}");
     expect(wizard()).toBeNull();
   });
 });
 
-describe("The pending restart in General", () => {
-  it("a_folder_the_wizard_saved_waits_for_the_restart_in_general", async () => {
-    const { native } = await settings(null);
+describe("The pending restart on Daemon", () => {
+  it("a_folder_the_wizard_saved_waits_for_the_restart_on_daemon", async () => {
+    const { native } = await settings("Daemon");
     await relaunch();
     await changeTasksFolder("2");
     await userEvent.click(await within(wizard()!).findByRole("button", { name: "Done" }));
@@ -188,7 +188,7 @@ describe("The pending restart in General", () => {
   });
 
   it("restart_now_with_a_running_agent_asks_first", async () => {
-    const { native } = await settings(null, {
+    const { native } = await settings("Daemon", {
       native: daemonMachine({ readDaemonSettings: vi.fn().mockResolvedValue({ ...DAEMON_SETTINGS, tasksRoot: "~/tasks2" }) }),
       agents: [agent({ id: "w", status: "working" }) as Partial<Agent>],
     });
@@ -200,7 +200,7 @@ describe("The pending restart in General", () => {
   });
 
   it("restart_now_is_disabled_with_the_restart_blocker", async () => {
-    await settings(null, {
+    await settings("Daemon", {
       native: daemonMachine({ readDaemonSettings: vi.fn().mockResolvedValue({ ...DAEMON_SETTINGS, tasksRoot: "~/tasks2" }) }),
       agents: [agent({ id: "q", status: "queued" }) as Partial<Agent>],
     });

@@ -44,12 +44,12 @@ const SECTIONS: Record<SaveFor, { title: string; save: string; note: string }> =
   limits: {
     title: "Limits",
     save: "Save limits",
-    note: "Saving restarts the daemon; running agents keep going. A product can override each limit except Max active products on Management, Products.",
+    note: "Saving restarts the daemon; running agents keep going. A product can override each limit except Max active products on Fleet, Products.",
   },
   pr: {
     title: "Pull requests",
     save: "Save pull requests",
-    note: "Saving restarts the daemon; running agents keep going. A product can override each of these on Management, Products.",
+    note: "Saving restarts the daemon; running agents keep going. A product can override each of these on Fleet, Products.",
   },
   agentDefaults: {
     title: "Agents",
@@ -57,19 +57,20 @@ const SECTIONS: Record<SaveFor, { title: string; save: string; note: string }> =
     note: "Used by every agent whose definition and product name neither. Saving restarts the daemon; running agents keep going.",
   },
 };
-const ORDER: SaveFor[] = ["tasksRoot", "personasDir", "limits", "pr", "agentDefaults"];
 
 interface Props {
   native: Native | null;
   daemon: DaemonSettingsApi;
   restart: RestartApi;
-  /** The PR styles that load; null until the daemon has listed its definitions. */
-  styles: string[] | null;
+  /** The sections to draw, in this order: the folders are Settings, Daemon's; the rest are Fleet's rules. */
+  kinds: SaveFor[];
+  /** The PR styles that load, for the Pull requests section; null until the daemon has listed its definitions. */
+  styles?: string[] | null;
 }
 
-export function DaemonSections({ native, daemon, restart, styles }: Props) {
+export function DaemonSections({ native, daemon, restart, kinds, styles = null }: Props) {
   // In a browser the sections write a config on another machine: each says so, its Save off.
-  if (!native) return ORDER.map((kind) => <Saving key={kind} kind={kind} blocked={ONLY_IN_APP} note={ONLY_IN_APP} />);
+  if (!native) return kinds.map((kind) => <Saving key={kind} kind={kind} blocked={ONLY_IN_APP} note={ONLY_IN_APP} />);
   const { saved, typed, set } = daemon;
   if (!saved || !typed) return null;
   const blockers = saveBlockers(saved, typed, restart.blocker);
@@ -117,11 +118,12 @@ export function DaemonSections({ native, daemon, restart, styles }: Props) {
   const pr = (patch: Partial<Typed["pr"]>) => set({ pr: { ...typed.pr, ...patch } });
   // Without the definitions list, the current style is all there is to show; an unlisted one is shown as it is.
   const shownStyles = !styles ? [typed.pr.style] : styles.includes(typed.pr.style) ? styles : [typed.pr.style, ...styles];
+  const has = (kind: SaveFor) => kinds.includes(kind);
   return (
     <>
-      {folder("tasksRoot")}
-      {folder("personasDir")}
-      {pending !== null && (
+      {has("tasksRoot") && folder("tasksRoot")}
+      {has("personasDir") && folder("personasDir")}
+      {has("tasksRoot") && pending !== null && (
         // egui's `pending_restart`: what the relaunched wizard wrote, waiting for the daemon's restart.
         <div className="settings-pending">
           <p className="settings-line">Saved: {pending} — takes effect when the background service restarts.</p>
@@ -138,86 +140,89 @@ export function DaemonSections({ native, daemon, restart, styles }: Props) {
           </div>
         </div>
       )}
-      {saving(
-        "limits",
-        LIMITS.map(([label, hint], i) => (
-          <label key={label} className="settings-row settings-limit">
-            <span>{label}</span>
-            <input
-              value={typed.limits[i]}
-              title={hint}
-              onChange={(e) => set({ limits: typed.limits.map((t, j) => (j === i ? e.target.value : t)) })}
-            />
-          </label>
-        )),
-      )}
-      {saving(
-        "pr",
-        <>
-          <label className="settings-row">
-            <span>Style</span>
-            <select aria-label="Pull request style" value={typed.pr.style} onChange={(e) => pr({ style: e.target.value })}>
-              {shownStyles.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="settings-row settings-pr">
-            <span>Attribution</span>
-            <input
-              value={typed.pr.attribution}
-              title="A line added to the end of every pull request body. Empty adds nothing."
-              onChange={(e) => pr({ attribution: e.target.value })}
-            />
-          </label>
-          <Check checked={typed.pr.draft} onChange={(draft) => pr({ draft })}>
-            Draft pull requests
-          </Check>
-          <label className="settings-row settings-pr">
-            <span>PR labels</span>
-            <input
-              value={typed.pr.labels}
-              title="Comma-separated labels put on every pull request."
-              onChange={(e) => pr({ labels: e.target.value })}
-            />
-          </label>
-          <label className="settings-row">
-            <span>Gate build</span>
-            <select
-              value={typed.pr.gateBuild}
-              title="shared: the gate builds in the task's folder, reusing what the agents built. clean: it builds in a fresh folder that is removed after."
-              onChange={(e) => pr({ gateBuild: e.target.value as Typed["pr"]["gateBuild"] })}
-            >
-              {GATE_BUILDS.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
-            </select>
-          </label>
-        </>,
-      )}
-      {saving(
-        "agentDefaults",
-        <>
-          <label className="settings-row">
-            <span>Default mode</span>
-            <select value={typed.mode} onChange={(e) => set({ mode: e.target.value as PermissionMode })}>
-              {MODES.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <label className="settings-row">
-            <span>Default effort</span>
-            <select value={typed.effort} onChange={(e) => set({ effort: e.target.value as Effort })}>
-              {EFFORTS.map((m) => (
-                <option key={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-        </>,
-      )}
+      {has("limits") &&
+        saving(
+          "limits",
+          LIMITS.map(([label, hint], i) => (
+            <label key={label} className="settings-row settings-limit">
+              <span>{label}</span>
+              <input
+                value={typed.limits[i]}
+                title={hint}
+                onChange={(e) => set({ limits: typed.limits.map((t, j) => (j === i ? e.target.value : t)) })}
+              />
+            </label>
+          )),
+        )}
+      {has("pr") &&
+        saving(
+          "pr",
+          <>
+            <label className="settings-row">
+              <span>Style</span>
+              <select aria-label="Pull request style" value={typed.pr.style} onChange={(e) => pr({ style: e.target.value })}>
+                {shownStyles.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="settings-row settings-pr">
+              <span>Attribution</span>
+              <input
+                value={typed.pr.attribution}
+                title="A line added to the end of every pull request body. Empty adds nothing."
+                onChange={(e) => pr({ attribution: e.target.value })}
+              />
+            </label>
+            <Check checked={typed.pr.draft} onChange={(draft) => pr({ draft })}>
+              Draft pull requests
+            </Check>
+            <label className="settings-row settings-pr">
+              <span>PR labels</span>
+              <input
+                value={typed.pr.labels}
+                title="Comma-separated labels put on every pull request."
+                onChange={(e) => pr({ labels: e.target.value })}
+              />
+            </label>
+            <label className="settings-row">
+              <span>Gate build</span>
+              <select
+                value={typed.pr.gateBuild}
+                title="shared: the gate builds in the task's folder, reusing what the agents built. clean: it builds in a fresh folder that is removed after."
+                onChange={(e) => pr({ gateBuild: e.target.value as Typed["pr"]["gateBuild"] })}
+              >
+                {GATE_BUILDS.map((g) => (
+                  <option key={g}>{g}</option>
+                ))}
+              </select>
+            </label>
+          </>,
+        )}
+      {has("agentDefaults") &&
+        saving(
+          "agentDefaults",
+          <>
+            <label className="settings-row">
+              <span>Default mode</span>
+              <select value={typed.mode} onChange={(e) => set({ mode: e.target.value as PermissionMode })}>
+                {MODES.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+            <label className="settings-row">
+              <span>Default effort</span>
+              <select value={typed.effort} onChange={(e) => set({ effort: e.target.value as Effort })}>
+                {EFFORTS.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+          </>,
+        )}
     </>
   );
 }

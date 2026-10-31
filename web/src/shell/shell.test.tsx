@@ -130,7 +130,7 @@ describe("Shell", () => {
       within(drawer).getByRole("button", { name: "Active product" }),
       within(drawer).getByRole("button", { name: "New product" }),
       within(drawer).getByRole("button", { name: "New task" }),
-      ...["Kanban", "Tasks", "Releases", "Management", "Settings"].map((v) => within(drawer).getByRole("link", { name: v })),
+      ...["Kanban", "Tasks", "Releases", "Fleet", "Settings"].map((v) => within(drawer).getByRole("link", { name: v })),
       within(drawer).getByText("reconnecting…"),
     ];
     for (let i = 1; i < order.length; i++) {

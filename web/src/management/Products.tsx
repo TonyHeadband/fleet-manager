@@ -144,7 +144,7 @@ function HiddenSpecialists({ defs, tab }: { defs: DefInfo[] | null; tab: Product
           {st.hidden
             .filter((n) => !names.includes(n))
             .map((name) => (
-              <s key={name} className="stale-specialist" title="This specialist no longer loads: see Management">
+              <s key={name} className="stale-specialist" title="This specialist no longer loads: see Fleet, Specialists">
                 {name}
               </s>
             ))}

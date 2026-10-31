@@ -166,6 +166,13 @@
   flex: none;
   padding: var(--space-item) var(--layout-page-x);
 }
+/* The group row over a grouped tab bar (Fleet): its tabs read as mono headings, as the picker labels do. */
+.tab-groups [role="tab"] {
+  font-family: var(--font-mono);
+  font-size: var(--size-meta);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
 .tabbed-body {
   flex: 1;
   min-height: 0;

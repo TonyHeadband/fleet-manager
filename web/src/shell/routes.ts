@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-export type Route = "kanban" | "tasks" | "releases" | "management" | "settings" | "forms";
+export type Route = "kanban" | "tasks" | "releases" | "fleet" | "settings" | "forms";
 
 /** The drawer's views, as Lite lists them: the work, then a separator, then the app's own pages. */
 export const VIEWS: { route: Route; label: string }[][] = [
@@ -10,18 +10,20 @@ export const VIEWS: { route: Route; label: string }[][] = [
     { route: "releases", label: "Releases" },
   ],
   [
-    { route: "management", label: "Management" },
+    { route: "fleet", label: "Fleet" },
     { route: "settings", label: "Settings" },
   ],
 ];
 
 /** The views the web draws so far; the others show greyed in the drawer until their step lands. */
-export const ON_WEB: Route[] = ["kanban", "tasks", "releases", "management", "settings"];
+export const ON_WEB: Route[] = ["kanban", "tasks", "releases", "fleet", "settings"];
 
 /** `#forms` is the debug page, outside the drawer. A view not on the web yet, or anything else, is the board. */
 export function routeFromHash(hash: string): Route {
   const name = hash.replace(/^#/, "").split("?")[0];
   if (name === "forms") return "forms";
+  // Fleet was Management: an address saved before still opens it.
+  if (name === "management") return "fleet";
   return ON_WEB.find((r) => r === name) ?? "kanban";
 }
 
@@ -66,27 +68,38 @@ export function useTasksRoute(): { filter: TaskFilter; task: string | null } {
   return useMemo(() => tasksRouteFromHash(hash), [hash]);
 }
 
-/** Management's tabs, in egui's order, with the id the address carries (`#management?tab=agent-settings`). */
-export const MANAGEMENT_TABS = [
-  { id: "overview", label: "Overview" },
-  { id: "products", label: "Products" },
-  { id: "personas", label: "Personas" },
-  { id: "instructions", label: "Instructions" },
-  { id: "agent-settings", label: "Agent settings" },
-  { id: "orchestrators", label: "Orchestrators" },
-  { id: "specialists", label: "Specialists" },
-  { id: "skills", label: "Skills" },
-  { id: "pr-styles", label: "PR styles" },
-  { id: "workflow", label: "Workflow" },
+/** Fleet's tab groups: what the fleet is, the rules its agents work under, and the definitions they run. */
+export const FLEET_GROUPS = [
+  { id: "fleet", label: "Fleet" },
+  { id: "rules", label: "Rules" },
+  { id: "definitions", label: "Definitions" },
 ] as const;
 
-export type ManagementTab = (typeof MANAGEMENT_TABS)[number]["id"];
+export type FleetGroup = (typeof FLEET_GROUPS)[number]["id"];
 
-/** Settings' tabs, in egui's order (`#settings?tab=log`). */
+/** Fleet's tabs, group by group, with the id the address carries (`#fleet?tab=limits`). */
+export const FLEET_TABS = [
+  { id: "overview", label: "Overview", group: "fleet" },
+  { id: "products", label: "Products", group: "fleet" },
+  { id: "personas", label: "Personas", group: "fleet" },
+  { id: "agents", label: "Agents", group: "rules" },
+  { id: "limits", label: "Limits", group: "rules" },
+  { id: "pull-requests", label: "Pull requests", group: "rules" },
+  { id: "workflow", label: "Workflow", group: "rules" },
+  { id: "instructions", label: "Instructions", group: "definitions" },
+  { id: "orchestrators", label: "Orchestrators", group: "definitions" },
+  { id: "specialists", label: "Specialists", group: "definitions" },
+  { id: "skills", label: "Skills", group: "definitions" },
+  { id: "pr-styles", label: "PR styles", group: "definitions" },
+] as const;
+
+export type FleetTab = (typeof FLEET_TABS)[number]["id"];
+
+/** Settings' tabs: this machine only, the app and its daemon (`#settings?tab=log`). */
 export const SETTINGS_TABS = [
-  { id: "general", label: "General" },
+  { id: "app", label: "App" },
   { id: "daemon", label: "Daemon" },
-  { id: "extras", label: "Extras" },
+  { id: "tools", label: "Tools" },
   { id: "log", label: "Log" },
 ] as const;
 
@@ -103,9 +116,9 @@ function useTab<Id extends string>(tabs: readonly { id: Id }[]): Id {
   return tabs.find((t) => t.id === tab)?.id ?? tabs[0]!.id;
 }
 
-export const managementHref = (tab: ManagementTab = "overview") => tabHref("management", MANAGEMENT_TABS, tab);
-export const useManagementTab = () => useTab(MANAGEMENT_TABS);
-export const settingsHref = (tab: SettingsTab = "general") => tabHref("settings", SETTINGS_TABS, tab);
+export const fleetHref = (tab: FleetTab = "overview") => tabHref("fleet", FLEET_TABS, tab);
+export const useFleetTab = () => useTab(FLEET_TABS);
+export const settingsHref = (tab: SettingsTab = "app") => tabHref("settings", SETTINGS_TABS, tab);
 export const useSettingsTab = () => useTab(SETTINGS_TABS);
 
 /** Goes to `href` and tells the route hooks at once; `replace` corrects the address without a history entry. */

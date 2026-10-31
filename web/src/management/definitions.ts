@@ -4,7 +4,7 @@ import type { DefFile } from "../api/generated/DefFile";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
 import type { Notice } from "../shell/messages";
-import type { ManagementTab } from "../shell/routes";
+import type { FleetTab } from "../shell/routes";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs's DefsState and of the definition calls in
 // app/fleet.rs: every orchestrator, specialist, skill and PR style, each opened file with its own draft and error.
@@ -12,13 +12,13 @@ import type { ManagementTab } from "../shell/routes";
 /** `{kind}/{name}`: one definition. */
 export type DefKey = string;
 
-/** The Management tabs that each list one kind. */
+/** The Fleet tabs that each list one kind. */
 export const DEF_TABS = {
   orchestrators: "orchestrator",
   specialists: "specialist",
   skills: "skill",
   "pr-styles": "pr_style",
-} as const satisfies Partial<Record<ManagementTab, DefKind>>;
+} as const satisfies Partial<Record<FleetTab, DefKind>>;
 
 export const defKey = (kind: DefKind, name: string): DefKey => `${kind}/${name}`;
 

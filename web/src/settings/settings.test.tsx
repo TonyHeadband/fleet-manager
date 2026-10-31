@@ -35,8 +35,8 @@ describe("Settings: the view", () => {
   it("settings_remembers_its_tab_while_the_app_runs", async () => {
     await settings();
     expect(within(screen.getByRole("banner")).getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["General", "Daemon", "Extras", "Log"]);
-    expect(selectedTab()).toBe("General");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["App", "Daemon", "Tools", "Log"]);
+    expect(selectedTab()).toBe("App");
     await click("Log");
     await click("Kanban");
     await click("Settings");
