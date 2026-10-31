@@ -167,8 +167,9 @@ describe("view entry", () => {
 
   it("the_marker_grows_in_steps", () => {
     const css = readFileSync("src/shell/motion.css", "utf8");
-    expect(css).toMatch(
-      /\.marker \{[^}]*transition: height var\(--motion-marker\) steps\(7\), width var\(--motion-marker\) steps\(2\), background-color var\(--motion-marker\) steps\(2\);/,
+    const flat = css.replace(/\s+/g, " ");
+    expect(flat).toMatch(
+      /\.marker \{ transition: height var\(--motion-marker\) steps\(7\), width var\(--motion-marker\) steps\(2\), background-color var\(--motion-marker\) steps\(2\); \}/,
     );
     expect(css).toMatch(/\.drawer-nav a \{[^}]*transition: color var\(--motion-marker\) steps\(2\);/);
   });
