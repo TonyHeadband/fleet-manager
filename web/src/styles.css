@@ -23,10 +23,10 @@ input[type="checkbox"] { accent-color: var(--fill); }
 /* WebKitGTK's overlay scrollbars show only while scrolling or hovered; a drawn one stays, so a page shows it goes on. */
 ::-webkit-scrollbar { width: var(--layout-scrollbar); height: var(--layout-scrollbar); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--layout-scrollbar); }
-::-webkit-scrollbar-thumb:hover { background: var(--text-low); }
+::-webkit-scrollbar-thumb { background: var(--fill); border-radius: var(--layout-scrollbar); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-text); }
 @supports not selector(::-webkit-scrollbar) {
-  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  * { scrollbar-width: thin; scrollbar-color: var(--fill) transparent; }
 }
 button[aria-pressed="true"] { border-color: var(--fill); color: var(--accent-text); }
 a.button[aria-current="page"] { color: var(--accent-text); }

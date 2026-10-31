@@ -11,7 +11,7 @@ import { taskOutcome, type Live } from "../tasks/model";
 import { Button } from "../ui/Button";
 import { FilterMenu } from "../ui/FilterMenu";
 import { Form } from "../ui/Form";
-import { useScrollFade } from "../ui/scrollFade";
+import { ScrollArea } from "../ui/ScrollArea";
 import { formatDay, localDay, orderedReleases, releaseProgress } from "./model";
 import { ReleaseBars } from "./ReleaseBars";
 
@@ -71,7 +71,6 @@ export function ReleasesView({
   onChanged,
   onTaskChanged,
 }: Props) {
-  const cardsFade = useScrollFade<HTMLDivElement>();
   const create = schema && usableForm(schema, "release_create");
   const edit = schema && usableForm(schema, "release_edit");
   if (!create || !edit) return null;
@@ -138,7 +137,7 @@ export function ReleasesView({
         )}
       </div>
       {releases.length === 0 && <p className="low small">No releases</p>}
-      <div className="releases-cards scroll-fade" ref={cardsFade}>
+      <ScrollArea className="releases-cards" grow>
         {orderedReleases(releases).map((r) => {
           const calling = st.calling.includes(r.id);
           return (
@@ -206,7 +205,7 @@ export function ReleasesView({
             </article>
           );
         })}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

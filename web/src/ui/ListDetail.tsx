@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useScrollFade } from "./scrollFade";
+import { ScrollArea } from "./ScrollArea";
 
 interface Props {
   /** Which list width token: the Tasks view's, or Management's tabs'. */
@@ -16,17 +16,15 @@ interface Props {
 
 /** egui's `Panel::left` beside a `CentralPanel`: a fixed-width list and the selected item's detail, each scrolling. */
 export function ListDetail({ width, listLabel, detailLabel, list, footer, detail }: Props) {
-  const listFade = useScrollFade<HTMLElement>();
-  const detailFade = useScrollFade<HTMLElement>();
   return (
     <div className="list-detail" data-width={width}>
-      <section className="list-detail-list scroll-fade" aria-label={listLabel} ref={listFade}>
+      <ScrollArea as="section" className="list-detail-list" label={listLabel}>
         {list}
         {footer && <div className="list-detail-footer">{footer}</div>}
-      </section>
-      <section className="list-detail-detail scroll-fade" aria-label={detailLabel} ref={detailFade}>
+      </ScrollArea>
+      <ScrollArea as="section" className="list-detail-detail" label={detailLabel} grow>
         {detail}
-      </section>
+      </ScrollArea>
     </div>
   );
 }

@@ -178,6 +178,52 @@
   padding: var(--layout-page-y) var(--layout-page-x);
 }
 
+/* ScrollArea's frame: it takes the scroller's place in the layout, and lays the accent tint over an edge with more beyond
+   it. */
+.scroll-frame {
+  --scroll-tint: color-mix(in srgb, var(--fill) 30%, transparent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.scroll-frame[data-grow] {
+  flex: 1;
+}
+.scroll-frame[hidden] {
+  display: none;
+}
+.scroll-frame > .scroll-fade {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.scroll-frame::before,
+.scroll-frame::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: var(--layout-scrollbar);
+  height: var(--layout-scroll-fade);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.scroll-frame::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--scroll-tint), transparent);
+}
+.scroll-frame::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--scroll-tint), transparent);
+}
+.scroll-frame:has(> [data-more~="above"])::before {
+  opacity: 1;
+}
+.scroll-frame:has(> [data-more~="below"])::after {
+  opacity: 1;
+}
+
 /* An edge with more beyond it fades out, so a scroller shows it goes on; the scrollbar's own strip is left whole. */
 .scroll-fade[data-more] {
   --fade-top: 0%;
