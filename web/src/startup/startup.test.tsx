@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolId } from "../api/generated/ToolId";
@@ -79,7 +79,7 @@ describe("Startup, as egui's intro", () => {
     expect(client.token).toBeNull();
   });
 
-  it("all_tools_present_goes_straight_to_the_board_after_the_intro", async () => {
+  it("the_app_assembles_the_mark_before_the_board_shows", async () => {
     // The clock moves only by hand: on a slow machine real time would step the rows on its own.
     vi.useFakeTimers();
     try {
@@ -92,6 +92,46 @@ describe("Startup, as egui's intro", () => {
       await act(() => vi.advanceTimersByTimeAsync(150));
       expect(screen.getByText("Checking GitHub CLI…")).toBeInTheDocument();
       await act(() => vi.advanceTimersByTimeAsync(150));
+      // The tools are checked, but the mark is still assembling.
+      expect(screen.queryByText("the board")).toBeNull();
+      expect(document.querySelector(".boot-mark")).not.toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(3050 - 450));
+      expect(screen.getByText("the board")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a_failure_waits_for_the_assembly_then_retry_has_no_hold", async () => {
+    vi.useFakeTimers();
+    try {
+      const startDaemon = vi
+        .fn()
+        .mockRejectedValueOnce("fleet-daemon was not found")
+        .mockResolvedValueOnce({ weStarted: true, url: "http://127.0.0.1:7878", local: true });
+      boot({ animate: true, native: fakeNative({ startDaemon }) });
+      for (let i = 0; i < 5; i++) await act(() => vi.advanceTimersByTimeAsync(0));
+      await act(() => vi.advanceTimersByTimeAsync(3049));
+      expect(screen.queryByRole("heading", { name: "Fleet Manager could not start its daemon" })).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(screen.getByRole("heading", { name: "Fleet Manager could not start its daemon" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      for (let i = 0; i < 5; i++) await act(() => vi.advanceTimersByTimeAsync(0));
+      await act(() => vi.advanceTimersByTimeAsync(450));
+      expect(screen.getByText("the board")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the_browser_keeps_its_intro_with_no_hold", async () => {
+    vi.useFakeTimers();
+    try {
+      boot({ native: null, animate: true });
+      for (let i = 0; i < 5; i++) await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(document.querySelector(".boot-logo")).not.toBeNull();
+      expect(document.querySelector(".boot-mark")).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(450));
       expect(screen.getByText("the board")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -118,13 +158,13 @@ describe("Startup, as egui's intro", () => {
     expect(native.startDaemon).toHaveBeenCalledTimes(1);
   });
 
-  it("the_intro_logo_is_still_when_animations_are_off", async () => {
+  it("with_animations_off_the_app_shows_the_boot_mark_with_no_hold", async () => {
     boot({
       animate: false,
       native: fakeNative({ startDaemon: vi.fn(() => new Promise<never>(() => {})) }),
     });
     await screen.findByText("Starting the background service…");
-    expect(document.querySelector(".boot-logo")).not.toHaveAttribute("data-spin");
+    expect(document.querySelector(".boot-mark")).not.toBeNull();
   });
 
   it("the_browser_waits_for_the_daemon_on_the_boot_view", async () => {
