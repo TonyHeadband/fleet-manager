@@ -1,7 +1,7 @@
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import { Button } from "../ui/Button";
-import { FilterMenu } from "../ui/FilterMenu";
+import { ChoiceMenu } from "../ui/ChoiceMenu";
 import type { Load } from "./choices";
 import { WATERMARK_DOT_SIZE, WATERMARK_TURN_MS } from "./mark";
 import { RadarMark } from "./RadarMark";
@@ -104,27 +104,9 @@ function Picker(props: {
   placeholder: string;
   onPick: (id: string) => void;
 }) {
-  const { label, name, items, value, placeholder, onPick } = props;
   return (
     <div className="drawer-picker">
-      <FilterMenu label={label} summary={items.find((i) => i.id === value)?.name ?? placeholder} name={name} width="fill">
-        {(close) =>
-          items.map((i) => (
-            <button
-              key={i.id}
-              type="button"
-              className="menu-item"
-              aria-pressed={i.id === value}
-              onClick={() => {
-                close();
-                if (i.id !== value) onPick(i.id);
-              }}
-            >
-              {i.name}
-            </button>
-          ))
-        }
-      </FilterMenu>
+      <ChoiceMenu width="fill" {...props} />
     </div>
   );
 }

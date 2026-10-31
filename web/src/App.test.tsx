@@ -70,8 +70,8 @@ describe("App", () => {
       render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
       await screen.findByRole("region", { name: "Working" });
       const header = document.querySelector<HTMLElement>(".view-header")!;
-      const order = [...header.querySelectorAll("h1, [aria-haspopup], .fleet-switch > .mono-label")].map((e) => e.getAttribute("aria-label") ?? e.textContent?.split(/\s/)[0]);
-      expect(order).toEqual(["Filters", "Repo filter", "Persona filter", "Release filter", "Fleet"]);
+      const order = [...header.querySelectorAll("h1, [aria-haspopup]")].map((e) => e.getAttribute("aria-label") ?? e.textContent?.split(/\s/)[0]);
+      expect(order).toEqual(["Filters", "Repo filter", "Persona filter", "Release filter", "Subtasks display"]);
     });
 
     it("persona_filter_hides_other_cards", async () => {
@@ -460,24 +460,30 @@ describe("App", () => {
     });
   });
 
-  it("the_fleet_switch_marks_the_current_chip", async () => {
+  it("the_fleet_selector_shows_the_current_display", async () => {
     localStorage.removeItem("fleet.display");
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     const header = document.querySelector<HTMLElement>(".view-header")!;
-    expect(within(header).getByText("Fleet")).toHaveClass("mono-label");
-    expect(within(header).getByRole("button", { name: "Compact" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(header).getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "false");
+    const fleet = within(header).getByRole("button", { name: "Subtasks display" });
+    expect(fleet).toHaveTextContent("Subtasks Compact");
+    await userEvent.click(fleet);
+    const menu = document.querySelector<HTMLElement>(".menu")!;
+    expect(within(menu).getAllByRole("button").map((b) => b.textContent)).toEqual(["Show", "Compact", "Hide"]);
+    expect(within(menu).getByRole("button", { name: "Compact" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("display_choice_is_saved", async () => {
     localStorage.removeItem("fleet.display");
+    const fleet = () => screen.getByRole("button", { name: "Subtasks display" });
     const { unmount } = render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
+    await userEvent.click(fleet());
     await userEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(localStorage.getItem("fleet.display")).toBe("show");
-    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "true");
+    expect(fleet()).toHaveTextContent("Subtasks Show");
+    expect(screen.queryByRole("button", { name: "Hide" }), "a pick closes the menu").toBeNull();
     unmount();
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
-    expect(screen.getByRole("button", { name: "Show" })).toHaveAttribute("aria-pressed", "true");
+    expect(fleet()).toHaveTextContent("Subtasks Show");
     localStorage.removeItem("fleet.display");
   });
 

@@ -866,14 +866,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             <RepoFilter repos={repoCounts} selected={filter} onChange={setFilter} />
             <PersonaFilter rows={personaCounts} selected={personaPicks} onChange={setPersonaFilter} />
             <ReleaseFilter releases={releases} value={release} onChange={setReleaseFilter} />
+            <FleetSwitch
+              current={display}
+              onPick={(d) => {
+                setDisplay(d);
+                writeChoice("fleet.display", d, say);
+              }}
+            />
           </div>
-          <FleetSwitch
-            current={display}
-            onPick={(d) => {
-              setDisplay(d);
-              writeChoice("fleet.display", d, say);
-            }}
-          />
         </>
       }
       strip={<Strip tasks={tasks} stoppedTone={stoppedTone} selected={lastTasks.task} />}

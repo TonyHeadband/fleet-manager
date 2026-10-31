@@ -1,24 +1,13 @@
 import type { FleetDisplay } from "../board/groups";
-import { Chip } from "../ui/Chip";
+import { ChoiceMenu } from "../ui/ChoiceMenu";
 
-const DISPLAYS: [FleetDisplay, string][] = [
-  ["show", "Show"],
-  ["compact", "Compact"],
-  ["hide", "Hide"],
+const DISPLAYS: { id: FleetDisplay; name: string }[] = [
+  { id: "show", name: "Show" },
+  { id: "compact", name: "Compact" },
+  { id: "hide", name: "Hide" },
 ];
 
-/** "Fleet" and one chip per display, the current one selected (Lite's `fleet_switch`). */
+/** Lite's `fleet_switch`, as the header's other filters: "Subtasks" (an orchestrator's specialists) and the current display, a menu of the three. */
 export function FleetSwitch({ current, onPick }: { current: FleetDisplay; onPick: (d: FleetDisplay) => void }) {
-  return (
-    <div className="fleet-switch">
-      <span className="mono-label">Fleet</span>
-      <span className="chips">
-        {DISPLAYS.map(([d, label]) => (
-          <Chip key={d} selected={d === current} onClick={() => d !== current && onPick(d)}>
-            {label}
-          </Chip>
-        ))}
-      </span>
-    </div>
-  );
+  return <ChoiceMenu label="Subtasks" name="Subtasks display" width="menu" items={DISPLAYS} value={current} onPick={onPick} />;
 }
