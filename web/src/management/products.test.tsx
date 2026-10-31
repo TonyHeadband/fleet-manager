@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../api/client";
 import type { Product } from "../api/generated/Product";
 import type { ProductOverride } from "../api/generated/ProductOverride";
+import { choose, optionsOf } from "../test/fixtures";
 import { click, managedDef as def, managedProduct as product, managedRepo as repo, management, pending } from "./harness";
 
 // Ports of the Products tests in crates/fleet-gui/tests/management.rs.
@@ -220,11 +221,8 @@ async function renderProducts(list: Product[]) {
 }
 
 const combo = (name: string) => screen.getByRole("combobox", { name });
-const pick = (name: string, choice: string) => userEvent.selectOptions(combo(name), choice);
-const options = (name: string) =>
-  within(combo(name))
-    .getAllByRole("option")
-    .map((o) => o.textContent);
+const pick = choose;
+const options = optionsOf;
 const override = (section: string, key: string, value: string, error: string | null = null): ProductOverride => ({
   section,
   key,
@@ -288,7 +286,7 @@ describe("Products: hidden specialists and overrides", () => {
   it("a_model_override_offers_the_definitions", async () => {
     const client = await overrides([]);
     await click("Add override");
-    expect(options("Override key 1")).toEqual(["key", "bug-fix", "rust"]);
+    expect(await options("Override key 1")).toEqual(["bug-fix", "rust"]);
     await pick("Override key 1", "rust");
     await userEvent.type(field("Override value 1"), "opus");
     await click("Save overrides");
@@ -359,7 +357,7 @@ describe("Products: hidden specialists and overrides", () => {
     expect(screen.getByText("no definition named ghost")).toBeInTheDocument();
     expect(field("Override value 1")).toHaveValue("opus");
     // A key the definitions no longer list is shown as it is.
-    expect(combo("Override key 1")).toHaveValue("ghost");
+    expect(combo("Override key 1")).toHaveTextContent("ghost");
   });
 
   it("an_override_shows_the_value_it_replaces_and_where_that_came_from", async () => {
@@ -383,7 +381,7 @@ describe("Products: hidden specialists and overrides", () => {
     });
     await click("Add override");
     await pick("Override section 1", "limits");
-    expect(options("Override key 1")).not.toContain("max_active_products");
+    expect(await options("Override key 1")).not.toContain("max_active_products");
     await pick("Override key 1", "max_concurrent_tasks");
     expect(await screen.findByText("replaces no cap")).toBeInTheDocument();
   });
@@ -398,7 +396,7 @@ describe("Products: hidden specialists and overrides", () => {
     await click("Add override");
     await pick("Override section 1", "pr");
     await pick("Override key 1", "style");
-    await waitFor(() => expect(options("Override value 1")).toEqual(["value", ...styles]));
+    await waitFor(async () => expect(await options("Override value 1")).toEqual(styles));
     await pick("Override value 1", "conventional");
     await click("Save overrides");
     expect(client.putOverrides).toHaveBeenLastCalledWith("p", [{ section: "pr", key: "style", value: "conventional" }]);
@@ -409,7 +407,7 @@ describe("Products: hidden specialists and overrides", () => {
     await click("Add override");
     await pick("Override section 1", "modes");
     await pick("Override key 1", "rust");
-    expect(options("Override value 1")).toEqual(["value", "auto", "acceptEdits", "manual", "dontAsk"]);
+    expect(await options("Override value 1")).toEqual(["auto", "acceptEdits", "manual", "dontAsk"]);
     await pick("Override value 1", "manual");
     await click("Add override");
     await pick("Override section 2", "efforts");

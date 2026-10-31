@@ -17,7 +17,7 @@ import { Form, FormField } from "./Form";
 import { FleetError } from "../api/client";
 import { Column } from "../components/Column";
 import type { FieldDef } from "../api/generated/FieldDef";
-import { agent, form, schema, workspace } from "../test/fixtures";
+import { agent, form, optionsOf, schema, workspace } from "../test/fixtures";
 
 const css = readFileSync("src/styles.css", "utf8");
 
@@ -253,10 +253,9 @@ describe("Form with several actions", () => {
     expect((await screen.findByText("no such task")).closest("[data-key]")).toBeNull();
   });
 
-  it("offers a choice from its source", () => {
+  it("offers a choice from its source", async () => {
     render(<Form form={form("repo_request")} today="2026-10-29" sources={{ product_repos: ["core", "portal"] }} onSubmit={vi.fn()} />);
-    const select = screen.getByLabelText("Grant access to");
-    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["", "core", "portal"]);
+    expect(await optionsOf("Grant access to")).toEqual(["None", "core", "portal"]);
     expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Refuse" })).toBeEnabled();
   });

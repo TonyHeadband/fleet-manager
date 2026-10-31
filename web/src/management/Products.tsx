@@ -7,6 +7,7 @@ import { ErrorLine } from "../ui/ErrorLine";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { Section } from "../ui/Section";
+import { Select } from "../ui/Select";
 import { usable } from "./definitions";
 import { Internal } from "./Internal";
 import { keyOptions, ready, replaces, SECTIONS, valueHint, valueOptions } from "./overrides";
@@ -227,20 +228,13 @@ function Choice(props: { what: string; row: number; options: string[]; value: st
   const { what, row, options, value, onChange } = props;
   const shown = value && !options.includes(value) ? [value, ...options] : options;
   return (
-    <select
+    <Select
       className={`override-${what}`}
-      aria-label={`Override ${what} ${row + 1}`}
+      label={`Override ${what} ${row + 1}`}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      <option value="" disabled>
-        {what}
-      </option>
-      {shown.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
+      placeholder={what}
+      options={shown.map((o) => ({ value: o, label: o }))}
+      onChange={onChange}
+    />
   );
 }

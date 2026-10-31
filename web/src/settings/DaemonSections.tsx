@@ -5,6 +5,7 @@ import type { Native } from "../native/native";
 import { Button } from "../ui/Button";
 import { Check } from "../ui/Check";
 import { Section } from "../ui/Section";
+import { Select } from "../ui/Select";
 import { changeOf, pendingFolders, saveBlockers, type DaemonSettingsApi, type SaveFor, type Typed } from "./daemonSettings";
 import { ONLY_IN_APP } from "./General";
 import type { RestartApi } from "./restart";
@@ -15,6 +16,8 @@ import type { RestartApi } from "./restart";
 const MODES: PermissionMode[] = ["auto", "acceptEdits", "manual", "dontAsk"];
 const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const GATE_BUILDS = ["shared", "clean"] as const;
+/** A select's options where each value is its own label. */
+const choices = (values: readonly string[]) => values.map((value) => ({ value, label: value }));
 
 /** egui's `LIMITS`: the label, and what the limit does, which is also the field's hover. */
 const LIMITS: [string, string][] = [
@@ -160,13 +163,7 @@ export function DaemonSections({ native, daemon, restart, kinds, styles = null }
           <>
             <label className="settings-row">
               <span>Style</span>
-              <select aria-label="Pull request style" value={typed.pr.style} onChange={(e) => pr({ style: e.target.value })}>
-                {shownStyles.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <Select label="Pull request style" value={typed.pr.style} options={choices(shownStyles)} onChange={(style) => pr({ style })} />
             </label>
             <label className="settings-row settings-pr">
               <span>Attribution</span>
@@ -189,15 +186,13 @@ export function DaemonSections({ native, daemon, restart, kinds, styles = null }
             </label>
             <label className="settings-row">
               <span>Gate build</span>
-              <select
+              <Select
+                label="Gate build"
                 value={typed.pr.gateBuild}
                 title="shared: the gate builds in the task's folder, reusing what the agents built. clean: it builds in a fresh folder that is removed after."
-                onChange={(e) => pr({ gateBuild: e.target.value as Typed["pr"]["gateBuild"] })}
-              >
-                {GATE_BUILDS.map((g) => (
-                  <option key={g}>{g}</option>
-                ))}
-              </select>
+                options={choices(GATE_BUILDS)}
+                onChange={(g) => pr({ gateBuild: g as Typed["pr"]["gateBuild"] })}
+              />
             </label>
           </>,
         )}
@@ -207,19 +202,11 @@ export function DaemonSections({ native, daemon, restart, kinds, styles = null }
           <>
             <label className="settings-row">
               <span>Default mode</span>
-              <select value={typed.mode} onChange={(e) => set({ mode: e.target.value as PermissionMode })}>
-                {MODES.map((m) => (
-                  <option key={m}>{m}</option>
-                ))}
-              </select>
+              <Select label="Default mode" value={typed.mode} options={choices(MODES)} onChange={(m) => set({ mode: m as PermissionMode })} />
             </label>
             <label className="settings-row">
               <span>Default effort</span>
-              <select value={typed.effort} onChange={(e) => set({ effort: e.target.value as Effort })}>
-                {EFFORTS.map((m) => (
-                  <option key={m}>{m}</option>
-                ))}
-              </select>
+              <Select label="Default effort" value={typed.effort} options={choices(EFFORTS)} onChange={(e) => set({ effort: e as Effort })} />
             </label>
           </>,
         )}
