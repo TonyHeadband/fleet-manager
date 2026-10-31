@@ -20,6 +20,8 @@ export interface Entry {
   entering: boolean;
   /** The detail panel was open when the entry started, so it wipes in with the view. */
   panelEnters: boolean;
+  /** A view change, not the first load: the entry waits for the drawer's marker to finish moving. */
+  afterMarker: boolean;
   /** The entry's last animation ended. */
   end: () => void;
 }
@@ -29,17 +31,18 @@ export interface Entry {
  * last animation does, never by a timer, so a panel opened afterwards never inherits it.
  */
 export function useEntry(key: string, ready: boolean, panelOpen: boolean): Entry {
-  const [entry, setEntry] = useState<{ key: string; on: boolean; panel: boolean } | null>(null);
+  const [entry, setEntry] = useState<{ key: string; on: boolean; panel: boolean; after: boolean } | null>(null);
   const due = ready && entry?.key !== key;
   useLayoutEffect(() => {
     // Read once, as the entry starts: a panel opened during it does not join.
-    if (due) setEntry({ key, on: motionOn(), panel: panelOpen });
+    if (due) setEntry((e) => ({ key, on: motionOn(), panel: panelOpen, after: e !== null }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panelOpen counts only at the start
   }, [due, key]);
   const entering = !due && !!entry && entry.key === key && entry.on;
   return {
     entering,
     panelEnters: entering && !!entry?.panel,
+    afterMarker: entering && !!entry?.after,
     end: () => setEntry((e) => e && { ...e, on: false }),
   };
 }

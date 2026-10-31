@@ -4,6 +4,13 @@
 :is(.card, .fleet-row) {
   --i: 0;
 }
+/* A view change enters once the drawer's marker has finished moving; the first load has no marker to wait for. */
+.content {
+  --after: 0ms;
+}
+.content[data-after-marker] {
+  --after: var(--motion-marker);
+}
 @media (prefers-reduced-motion: no-preference) {
   /* Entering a view: each section wipes in from the left behind a 1px accent edge, staggered; the drawer never moves. */
   .content[data-entering] .view-header {
@@ -20,7 +27,7 @@
   }
   .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer) {
     position: relative;
-    animation: fui-wipe var(--motion-wipe) steps(16) var(--at) both;
+    animation: fui-wipe var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
   }
   .content[data-entering] :is(.view-header, .view-body, .detail[data-enters], .footer)::after {
     content: "";
@@ -30,12 +37,22 @@
     width: 1px;
     background: var(--fill);
     pointer-events: none;
-    animation: fui-edge var(--motion-wipe) steps(16) var(--at) both;
+    animation: fui-edge var(--motion-wipe) steps(16) calc(var(--after) + var(--at)) both;
+  }
+  /* Pressing a view in the drawer: its dash grows into the marker bar while the old one shrinks back, in steps. */
+  .marker {
+    transition:
+      height var(--motion-marker) steps(7),
+      width var(--motion-marker) steps(2),
+      background-color var(--motion-marker) steps(2);
+  }
+  .drawer-nav a {
+    transition: color var(--motion-marker) steps(2);
   }
   /* Then the cards and fleet rows step in, in board order. */
   .content[data-entering] :is(.card, .fleet-row) {
     animation: fui-step-in var(--motion-step-in) steps(3)
-      calc(var(--motion-at-board) + var(--motion-at-cards) + var(--i) * var(--motion-stagger)) both;
+      calc(var(--after) + var(--motion-at-board) + var(--motion-at-cards) + var(--i) * var(--motion-stagger)) both;
   }
 }
 @keyframes fui-wipe {

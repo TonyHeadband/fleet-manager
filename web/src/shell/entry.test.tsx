@@ -164,4 +164,26 @@ describe("view entry", () => {
     expect(css).toMatch(/var\(--i\) \* var\(--motion-stagger\)/);
     expect(readFileSync("src/styles.css", "utf8")).toContain('@import "./shell/motion.css";');
   });
+
+  it("the_marker_grows_in_steps", () => {
+    const css = readFileSync("src/shell/motion.css", "utf8");
+    expect(css).toMatch(
+      /\.marker \{[^}]*transition: height var\(--motion-marker\) steps\(7\), width var\(--motion-marker\) steps\(2\), background-color var\(--motion-marker\) steps\(2\);/,
+    );
+    expect(css).toMatch(/\.drawer-nav a \{[^}]*transition: color var\(--motion-marker\) steps\(2\);/);
+  });
+
+  it("a_view_change_enters_after_the_marker", async () => {
+    start();
+    snapshot(agent({ id: "a1", goal: "pie job" }));
+    await screen.findByText("pie job");
+    // The first load has no marker to wait for.
+    expect(content()).not.toHaveAttribute("data-after-marker");
+    finish();
+    go("#tasks");
+    expect(content()).toHaveAttribute("data-after-marker");
+    const css = readFileSync("src/shell/motion.css", "utf8");
+    expect(css).toMatch(/\.content\[data-after-marker\] \{[^}]*--after: var\(--motion-marker\);/);
+    expect(css).toMatch(/calc\(var\(--after\) \+ var\(--at\)\)/);
+  });
 });

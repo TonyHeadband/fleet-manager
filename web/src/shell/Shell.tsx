@@ -54,7 +54,14 @@ export function Shell({ drawer, header, readouts, footer, panel, dialog, covered
   return (
     <div className="shell">
       {drawer}
-      <div className="content" key={entry?.key} ref={content} data-entering={entering || undefined} onAnimationEnd={ended}>
+      <div
+        className="content"
+        key={entry?.key}
+        ref={content}
+        data-entering={entering || undefined}
+        data-after-marker={entry?.afterMarker || undefined}
+        onAnimationEnd={ended}
+      >
         <header className="view-header outlined">
           {header}
           {readouts}
