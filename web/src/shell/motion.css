@@ -113,12 +113,39 @@
 .detail[data-phase="closing"] > * {
   min-width: var(--panel-final);
 }
+/* Going full and back, the same: its left line the accent, its contents at their final width. */
+.detail[data-resize] {
+  border-left-color: var(--fill);
+  overflow: hidden;
+  align-items: flex-end;
+}
+.detail[data-resize] > * {
+  min-width: var(--panel-final);
+}
 @media (prefers-reduced-motion: no-preference) {
   .detail[data-phase="opening"] {
     animation: fui-push var(--push-time) var(--ease-push) both;
   }
   .detail[data-phase="closing"] {
     animation: fui-pull var(--pull-time) var(--ease-pull) both;
+  }
+  /* Full: the panel's left edge slides left over the board; back, it slides right again. */
+  .detail[data-resize="widen"] {
+    animation: fui-widen var(--motion-push) var(--ease-push) both;
+  }
+  .detail[data-resize="narrow"] {
+    animation: fui-narrow var(--motion-pull) var(--ease-pull) both;
+  }
+  /* The quiet column gives way to the panel as it pushes in, and takes its place back as it pulls out. */
+  .column {
+    transition:
+      flex-grow var(--motion-pull) var(--ease-pull),
+      flex-basis var(--motion-pull) var(--ease-pull);
+  }
+  .column[data-rail] {
+    transition:
+      flex-grow var(--motion-push) var(--ease-push),
+      flex-basis var(--motion-push) var(--ease-push);
   }
   /* A selector's menu slides open down from its button; History's popup slides up from the footer. They close at
      once. */
@@ -215,6 +242,16 @@
   }
   to {
     width: 0;
+  }
+}
+@keyframes fui-widen {
+  from {
+    width: var(--side-width);
+  }
+}
+@keyframes fui-narrow {
+  to {
+    width: var(--side-width);
   }
 }
 @keyframes fui-menu {

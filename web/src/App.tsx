@@ -37,7 +37,7 @@ import { Drawer } from "./shell/Drawer";
 import { DetailPanel } from "./shell/DetailPanel";
 import { Footer, useMessages } from "./shell/Footer";
 import { carryNotice, takeCarriedNotice, type Notice } from "./shell/messages";
-import { layoutOf, usePanel, useWidth } from "./shell/panel";
+import { layoutOf, sideWidth, usePanel, useWidth } from "./shell/panel";
 import {
   navigate,
   settingsHref,
@@ -267,6 +267,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const [savedProduct, setSavedProduct] = useState(() => readChoice("fleet.product"));
   const [savedPersona, setSavedPersona] = useState(() => readChoice("fleet.persona"));
   const panel = usePanel();
+  const { setWide } = panel;
+  // The Diff wants the room: showing it takes the panel full, leaving it lets the panel back beside the board.
+  const showTab = useCallback((id: string) => setWide(id === "diff"), [setWide]);
   const [bodyRef, bodyWidth] = useWidth<HTMLDivElement>();
 
   useEffect(() => {
@@ -572,7 +575,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const spawnAs = product === null ? null : spawnPersona(personas, products, product, persona);
   // The panel pushes in as it appears and pulls out before it goes, at the side only; fullscreen opens as it does.
   const [panelPhase, setPanelPhase] = useState<PanelPhase>("open");
-  const pushes = () => motionOn() && layoutOf(panel, bodyWidth).kind === "side";
+  const columns = schema?.columns.length ?? 5;
+  const pushes = () => motionOn() && layoutOf(panel, bodyWidth, columns).kind === "side";
+  // Whether the open panel covers the board: full and done widening over it (DetailPanel says).
+  const [covering, setCovering] = useState(false);
   const panelShown = !!open;
   useLayoutEffect(() => {
     if (panelShown) setPanelPhase(pushes() ? "opening" : "open");
@@ -582,6 +588,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const finishClose = () => {
     setOpenId(null);
     panel.setChosenFull(false);
+    panel.setWide(false);
   };
   const closePanel = () => (open && pushes() ? setPanelPhase("closing") : finishClose());
   // A card pressed while the panel pulls out opens it again, whole.
@@ -912,7 +919,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       footer={footer}
       dialog={appDialogs(setup || stopDialog || dialog)}
       bodyRef={bodyRef}
-      covered={!!open && layoutOf(panel, bodyWidth).kind === "full"}
+      covered={!!open && covering}
+      sideWidth={open && bodyWidth !== null ? sideWidth(bodyWidth, columns) : undefined}
       panel={
         open && (
           <DetailPanel
@@ -935,6 +943,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             }
             panel={panel}
             boardWidth={bodyWidth}
+            columns={columns}
+            onCover={setCovering}
             daemonHost={daemonHost}
             onTerminal={
               native && wizard.local ? () => native.openTerminal(open.id).catch((e: unknown) => say("error", message(e), open.id)) : null
@@ -948,6 +958,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               factory={streams}
               loadDiff={() => client.diff(open.id)}
               extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []}
+              onShown={showTab}
             />
           </DetailPanel>
         )
@@ -959,6 +970,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           agents={shown}
           now={now}
           selected={open?.id ?? null}
+          rail={!!open && panelPhase !== "closing"}
           tags={tags}
           display={display}
           prs={fleet.prs}

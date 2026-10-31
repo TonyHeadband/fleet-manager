@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type AnimationEvent, type ReactNode, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, type AnimationEvent, type CSSProperties, type ReactNode, type Ref } from "react";
 import { motion } from "../generated/layout";
 import { END_SLACK, entryEnd, type Entry } from "./entry";
 
@@ -18,6 +18,8 @@ interface Props {
   dialog?: ReactNode;
   /** The detail panel covers the view: fullscreen. */
   covered?: boolean;
+  /** The side panel's width, while one is open: the board keeps the width it has beside it under a full panel. */
+  sideWidth?: number;
   /** Measures the width the view and the panel share. */
   bodyRef?: Ref<HTMLDivElement>;
   /** The view's entry, keyed by its route: a new key remounts the sections, so an old view's animations end unheard. */
@@ -30,7 +32,7 @@ interface Props {
  * header, the view's body (with the detail panel beside it) and the footer, each an outlined section. Every size is a
  * generated token.
  */
-export function Shell({ drawer, header, readouts, footer, panel, dialog, covered, bodyRef, entry, children }: Props) {
+export function Shell({ drawer, header, readouts, footer, panel, dialog, covered, sideWidth, bodyRef, entry, children }: Props) {
   const content = useRef<HTMLDivElement>(null);
   const entering = !!entry?.entering;
   // Each card's place in the stagger, in board order (column by column, top to bottom); the cards after the cap step
@@ -77,7 +79,7 @@ export function Shell({ drawer, header, readouts, footer, panel, dialog, covered
           {header}
           {readouts}
         </header>
-        <div className="body" ref={bodyRef}>
+        <div className="body" ref={bodyRef} style={sideWidth === undefined ? undefined : ({ "--side-width": `${sideWidth}px` } as CSSProperties)}>
           <main className="view-body outlined" hidden={covered}>
             {children}
           </main>

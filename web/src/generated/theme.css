@@ -62,6 +62,8 @@
   --layout-control-x: 10px;
   --layout-control-y: 5px;
   --layout-changes-dot: 5px;
+  --layout-rail: 36px;
+  --layout-panel-side-min: 160px;
   --layout-panel-cap: 0.75;
   --layout-board-keep: 0.25;
   --space-row-x: 14px;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { motion } from "../generated/layout";
-import { dragWidth, layoutOf, shownWidth, type Panel } from "./panel";
+import { layout, motion } from "../generated/layout";
+import { END_SLACK, motionOn } from "./entry";
+import { layoutOf, sideWidth, type Panel } from "./panel";
 import type { Agent } from "../api/generated/Agent";
 import { title } from "../api/schema";
 import { panelPath, terminalBlocked } from "../panel/header";
@@ -15,6 +16,8 @@ interface Props {
   panel: Panel;
   /** The width the board and the panel share; `null` until measured. */
   boardWidth: number | null;
+  /** The board's columns, whose one share the side panel takes. */
+  columns: number;
   /** The daemon's host, for Open in terminal's reasons. */
   daemonHost: string;
   /** Opens the agent's terminal; null where none can be opened (a browser, a daemon elsewhere). */
@@ -31,19 +34,22 @@ interface Props {
   phase?: PanelPhase;
   /** One of the panel's own animations ended, by name. */
   onPhaseEnd?: (animation: string) => void;
+  /** Whether it covers the board now: full, and done widening over it. */
+  onCover?: (covering: boolean) => void;
 }
 
 export type PanelPhase = "opening" | "open" | "closing";
 
 /**
- * Lite's detail panel: at the board's right, resized by dragging its 1px left line, between its minimum and a cap
- * that keeps a quarter of the board. It covers the board when the person asks, or when the window is too narrow to
- * keep the board, and Esc leaves a fullscreen the person chose.
+ * The detail panel: at the board's right in the quiet column's place, at that column's share (panel.ts). It covers
+ * the board when the person asks, when the open tab wants the room, or when the window is too narrow to keep the
+ * board, widening over it and narrowing back; Esc leaves a fullscreen that was not forced.
  */
 export function DetailPanel({
   agent,
   panel,
   boardWidth,
+  columns,
   daemonHost,
   onTerminal,
   onClose,
@@ -53,26 +59,62 @@ export function DetailPanel({
   enters,
   phase = "open",
   onPhaseEnd,
+  onCover,
 }: Props) {
-  const mode = layoutOf(panel, boardWidth);
+  const mode = layoutOf(panel, boardWidth, columns);
   const path = panelPath(agent);
   const blocked = terminalBlocked(agent, daemonHost, onTerminal !== null);
-  const drag = useRef<{ x: number; width: number } | null>(null);
   const forced = mode.kind === "full" && mode.forced;
-  const { chosenFull, setChosenFull } = panel;
+  const { chosenFull, setChosenFull, wide, setWide } = panel;
+  const back = () => {
+    setChosenFull(false);
+    setWide(false);
+  };
 
   useEffect(() => {
-    if (!chosenFull || forced) return;
+    if (!(chosenFull || wide) || forced) return;
     // As in Lite, Esc is left alone while the person types or a dialog is up: it belongs to them.
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || typing(e.target) || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
-      setChosenFull(false);
+      back();
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [chosenFull, forced, setChosenFull]);
+  });
 
-  const width = boardWidth === null ? panel.width : shownWidth(panel.width, boardWidth);
+  // Going full, it is drawn full at once and widens over the board, which shows until it is covered; going back,
+  // it stays drawn full while it narrows, then sits beside the board again. Without motion, both happen at once.
+  const [drawn, setDrawn] = useState(mode.kind);
+  const [resize, setResize] = useState<"widen" | "narrow" | null>(null);
+  const [lastKind, setLastKind] = useState(mode.kind);
+  if (lastKind !== mode.kind) {
+    setLastKind(mode.kind);
+    const animate = motionOn() && phase === "open";
+    if (mode.kind === "full") {
+      setDrawn("full");
+      setResize(animate ? "widen" : null);
+    } else if (animate) {
+      setResize("narrow");
+    } else {
+      setDrawn("side");
+      setResize(null);
+    }
+  }
+  const settle = () => {
+    if (resize === "narrow") setDrawn("side");
+    setResize(null);
+  };
+  // A lost end (the panel hidden mid-motion) still settles it.
+  useEffect(() => {
+    if (!resize) return;
+    const t = setTimeout(settle, motion.push + END_SLACK);
+    return () => clearTimeout(t);
+  });
+  const covering = drawn === "full" && resize === null;
+  useEffect(() => onCover?.(covering), [covering, onCover]);
+  useEffect(() => () => onCover?.(false), [onCover]);
+
+  const width = boardWidth === null ? layout.panel : sideWidth(boardWidth, columns);
   // Reversed mid-motion (pressed again while pulling out, closed while pushing in), the panel moves on from the width
   // it had reached, for the share of the time left, rather than jumping to the keyframes' far end first.
   const aside = useRef<HTMLElement>(null);
@@ -91,49 +133,29 @@ export function DetailPanel({
           : ({ "--push-from": `${at}px`, "--push-time": `${Math.round(motion.push * (1 - share))}ms` } as CSSProperties),
     );
   }
-  const move = (x: number, buttons: number) => {
-    // A drag whose release was lost (a window switch mid-drag) ends here rather than following the pointer.
-    if (buttons === 0) drag.current = null;
-    if (!drag.current || boardWidth === null) return;
-    // The handle is on the panel's left: dragging left widens it.
-    panel.resize(dragWidth(drag.current.width, drag.current.x - x, boardWidth), boardWidth);
-  };
 
   return (
     <aside
       ref={aside}
       className="detail outlined"
       aria-label="Detail"
-      data-layout={mode.kind}
+      data-layout={drawn}
+      data-resize={resize ?? undefined}
       data-enters={enters || undefined}
       data-phase={phase}
       onAnimationEnd={(e) => {
-        if (e.target === e.currentTarget) onPhaseEnd?.(e.animationName);
+        if (e.target !== e.currentTarget) return;
+        if (e.animationName === "fui-widen" || e.animationName === "fui-narrow") settle();
+        else onPhaseEnd?.(e.animationName);
       }}
-      // --panel-final: the contents keep the panel's width while it pushes and pulls, so nothing reflows inside.
-      style={mode.kind === "side" ? ({ width: `${width}px`, "--panel-final": `${width}px`, ...reverse } as CSSProperties) : undefined}
+      // --panel-final: the contents keep the panel's final width while it moves, so nothing reflows inside; widening,
+      // that is the whole section. --side-width: where a widening starts and a narrowing ends.
+      style={
+        (drawn === "side"
+          ? { width: `${width}px`, "--panel-final": `${width}px`, ...reverse }
+          : { "--side-width": `${width}px`, ...(boardWidth !== null && { "--panel-final": `${boardWidth}px` }) }) as Record<string, string> as CSSProperties
+      }
     >
-      {mode.kind === "side" && (
-        <div
-          className="detail-handle"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the detail panel"
-          onPointerDown={(e) => {
-            // No text selection across the board while dragging.
-            e.preventDefault();
-            drag.current = { x: e.clientX, width };
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-          }}
-          onPointerMove={(e) => move(e.clientX, e.buttons)}
-          onPointerUp={(e) => {
-            move(e.clientX, 1);
-            drag.current = null;
-          }}
-          onPointerCancel={() => (drag.current = null)}
-          onLostPointerCapture={() => (drag.current = null)}
-        />
-      )}
       <div className="detail-top">
         <span className="detail-path" title={path}>
           {path}
@@ -146,7 +168,7 @@ export function DetailPanel({
           large
           onClick={() => onTerminal?.()}
         />
-        {mode.kind === "side" ? (
+        {drawn === "side" ? (
           <SmallIconButton icon="expand" label="Fullscreen" large onClick={() => setChosenFull(true)} />
         ) : (
           <SmallIconButton
@@ -155,7 +177,7 @@ export function DetailPanel({
             title={forced ? "the window is too narrow for the board" : undefined}
             disabled={forced}
             large
-            onClick={() => setChosenFull(false)}
+            onClick={back}
           />
         )}
         <SmallIconButton icon="close" label="Close" large onClick={onClose} />

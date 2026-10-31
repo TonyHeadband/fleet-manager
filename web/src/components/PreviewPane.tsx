@@ -25,6 +25,8 @@ interface Props {
   /** The tab shown, when the caller picks it (an orchestrator waiting on its breakdown opens on Breakdown). */
   tab?: string;
   onTab?: (id: string) => void;
+  /** The tab now shown, as it changes (the panel goes full for the Diff). */
+  onShown?: (id: string) => void;
   onClose?: () => void;
 }
 
@@ -90,7 +92,7 @@ export function PreviewPane(props: Props) {
   return <AgentPane key={props.agentId} {...props} />;
 }
 
-function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, loadDiff, extraTabs = [], tab, onTab, onClose }: Props) {
+function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, loadDiff, extraTabs = [], tab, onTab, onShown, onClose }: Props) {
   // A newly opened agent starts on the tab that waits on the owner if one does (Lite's `opened_fleet_panel`); a tab
   // turning `first` later does not pull the owner away.
   const [ownTab, setOwnTab] = useState(() => extraTabs.find((t) => t.first)?.id ?? "terminal");
@@ -132,6 +134,7 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
   const tabs = [...extraTabs.filter((t) => t.first), ...own, ...extraTabs.filter((t) => !t.first)];
   // The Breakdown tab of an orchestrator left for another panel falls back to the terminal.
   const shownTab = tabs.some((t) => t.id === current) ? current : "terminal";
+  useEffect(() => onShown?.(shownTab), [shownTab, onShown]);
   const pane = (id: string) => {
     const extra = extraTabs.find((t) => t.id === id);
     if (extra) return extra.node;

@@ -1,62 +1,40 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { layout } from "../generated/layout";
 
-// The detail panel's rules, ported from Lite (crates/fleet-gui/src/components/preview.rs `panel_layout` and the
-// preview panel block in app.rs), with the sizes both read from theme.rs.
+// The detail panel's rules. Beside the board it takes the quiet column's place: that column becomes a rail and the
+// panel is the rest of its share, so the other columns keep their width. It covers the board when the person asks,
+// when the open tab wants the room (the Diff), or when that share is too narrow.
 
 export type PanelLayout = { kind: "side" } | { kind: "full"; forced: boolean };
 
-export function panelLayout(boardWidth: number, panelWidth: number, chosenFull: boolean): PanelLayout {
-  if (boardWidth - panelWidth < boardWidth * layout.boardKeep) return { kind: "full", forced: true };
-  return chosenFull ? { kind: "full", forced: false } : { kind: "side" };
+/** The side panel's width in a body this wide shared by `columns` columns: one column's share (inside the board's 1px outline), less the rail and the canvas gap. */
+export function sideWidth(bodyWidth: number, columns: number) {
+  return (bodyWidth - 2) / columns - layout.rail - layout.canvasGap;
 }
 
-/** The widest a drag can make the panel: short of the width that would force fullscreen, so a window that cannot grow never traps the person there. The 1px margin keeps rounding from flipping it. */
-export function panelCap(boardWidth: number) {
-  return boardWidth * layout.panelCap - 1;
-}
-
-const clamp = (width: number, boardWidth: number) => Math.min(Math.max(width, layout.panelMin), panelCap(boardWidth));
-
-/** The width after a drag of `dx` (positive widens) from `start`. */
-export function dragWidth(start: number, dx: number, boardWidth: number) {
-  return clamp(start + dx, boardWidth);
-}
-
-/** The width the panel shows at: the chosen one, held under the cap by a shrinking window. */
-export function shownWidth(width: number, boardWidth: number) {
-  return clamp(width, boardWidth);
-}
-
-/** Only a width under the cap is the person's choice; at the cap it may be the one a shrinking window clamped it to, and only the chosen one lets a shrink force fullscreen. */
-export function recordWidth(shown: number, cap: number, previous: number) {
-  return shown < cap - 0.5 ? shown : previous;
+export function panelLayout(bodyWidth: number, columns: number, full: boolean): PanelLayout {
+  if (sideWidth(bodyWidth, columns) < layout.panelSideMin) return { kind: "full", forced: true };
+  return full ? { kind: "full", forced: false } : { kind: "side" };
 }
 
 export interface Panel {
-  /** The width the person dragged to; kept for the session, as in Lite. */
-  width: number;
-  /** The width the fullscreen rule reads: `width`, unless that was taken at the cap. */
-  recorded: number;
   chosenFull: boolean;
   setChosenFull: (full: boolean) => void;
-  resize: (width: number, boardWidth: number) => void;
+  /** The open tab wants the whole section (the Diff); Back to the board or Esc sets that aside until the tab changes. */
+  wide: boolean;
+  setWide: (wide: boolean) => void;
 }
 
 export function usePanel(): Panel {
-  const [width, setWidth] = useState<number>(layout.panel);
-  const [recorded, setRecorded] = useState<number>(layout.panel);
   const [chosenFull, setChosenFull] = useState(false);
-  const resize = useCallback((w: number, boardWidth: number) => {
-    setWidth(w);
-    setRecorded((prev) => recordWidth(w, panelCap(boardWidth), prev));
-  }, []);
-  return { width, recorded, chosenFull, setChosenFull, resize };
+  const [wide, setWide] = useState(false);
+  return { chosenFull, setChosenFull, wide, setWide };
 }
 
-/** The panel's layout for a board this wide; `null` while the width is not measured yet, which keeps the panel at the side. */
-export function layoutOf(panel: Panel, boardWidth: number | null): PanelLayout {
-  return boardWidth === null ? (panel.chosenFull ? { kind: "full", forced: false } : { kind: "side" }) : panelLayout(boardWidth, panel.recorded, panel.chosenFull);
+/** The panel's layout for a body this wide; `null` while the width is not measured yet, which keeps the panel at the side. */
+export function layoutOf(panel: Panel, bodyWidth: number | null, columns: number): PanelLayout {
+  const full = panel.chosenFull || panel.wide;
+  return bodyWidth === null ? (full ? { kind: "full", forced: false } : { kind: "side" }) : panelLayout(bodyWidth, columns, full);
 }
 
 /** An element's width, kept current; `null` until measured, or where there is no ResizeObserver (tests). */
