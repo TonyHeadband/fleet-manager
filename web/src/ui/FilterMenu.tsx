@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   /** The mono label before the summary, as Lite's combo shows it ("Repo"); none for a plain combo. */
@@ -30,10 +31,12 @@ export function FilterMenu({ label, summary, name, id, listbox, width, disabled,
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
   const [open, setOpen] = useState<{ top: number; left: number; width?: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const outside = (e: PointerEvent) => {
-      if (!(e.target instanceof Node && root.current?.contains(e.target))) setOpen(null);
+      const inside = e.target instanceof Node && (root.current?.contains(e.target) || menu.current?.contains(e.target));
+      if (!inside) setOpen(null);
     };
     // Caught on the way down and stopped there: Escape closes the open menu, not the dialog it sits in.
     const key = (e: KeyboardEvent) => {
@@ -72,11 +75,15 @@ export function FilterMenu({ label, summary, name, id, listbox, width, disabled,
         )}
         {summary}
       </button>
-      {open && (
-        <div className="menu" role={listbox ? "listbox" : actions ? "menu" : undefined} data-width={width} style={open}>
-          {children(() => setOpen(null))}
-        </div>
-      )}
+      {open &&
+        // On the window, not in place: a sliding pane's transform would become the fixed menu's frame and its overflow
+        // would clip it. In a dialog, on its backdrop: above the dialog, outside the card's clip, still in the modal.
+        createPortal(
+          <div ref={menu} className="menu" role={listbox ? "listbox" : actions ? "menu" : undefined} data-width={width} style={open}>
+            {children(() => setOpen(null))}
+          </div>,
+          root.current?.closest(".dialog-backdrop") ?? document.body,
+        )}
     </div>
   );
 }

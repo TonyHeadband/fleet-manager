@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../api/generated/Agent";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DaemonSettings, Native } from "../native/native";
-import { agent, DAEMON_SETTINGS, daemonMachine, fakeNative, RESTARTED } from "../test/fixtures";
+import { agent, choose, DAEMON_SETTINGS, daemonMachine, fakeNative, optionsOf, RESTARTED } from "../test/fixtures";
 import { click, fleetTab, openApp, pending, type AppOptions } from "../management/harness";
 import { prLabels, sameFolder, typedLimits } from "./daemonSettings";
 
@@ -318,20 +318,13 @@ describe("Pull requests and Agents", () => {
       native,
       over: { definitions: vi.fn().mockResolvedValue([style("plain"), style("conventional"), style("broken", "broken.md: no title")]) },
     });
-    const styles = screen.getByRole("combobox", { name: "Pull request style" });
-    await waitFor(() =>
-      expect(
-        within(styles)
-          .getAllByRole("option")
-          .map((o) => o.textContent),
-      ).toEqual(["plain", "conventional"]),
-    );
+    await waitFor(async () => expect(await optionsOf("Pull request style")).toEqual(["plain", "conventional"]));
     expect(button("Save pull requests")).toHaveAttribute("title", "These are the current pull request settings");
-    await userEvent.selectOptions(styles, "conventional");
+    await choose("Pull request style", "conventional");
     await userEvent.type(field("Attribution"), "  Made by Fleet  ");
     await userEvent.click(screen.getByRole("checkbox", { name: "Draft pull requests" }));
     await userEvent.type(field("PR labels"), " fleet, ,bot ");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Gate build" }), "clean");
+    await choose("Gate build", "clean");
     expect(screen.getByRole("combobox", { name: "Gate build" })).toHaveAttribute(
       "title",
       "shared: the gate builds in the task's folder, reusing what the agents built. clean: it builds in a fresh folder that is removed after.",
@@ -349,17 +342,17 @@ describe("Pull requests and Agents", () => {
 
   it("an_unlisted_style_is_still_shown", async () => {
     await rules("Pull requests", { over: { definitions: vi.fn().mockResolvedValue([style("conventional")]) } });
-    expect(screen.getByRole("combobox", { name: "Pull request style" })).toHaveValue("plain");
+    expect(screen.getByRole("combobox", { name: "Pull request style" })).toHaveTextContent("plain");
   });
 
   it("settings_saves_the_default_effort", async () => {
     const native = fakeNative();
     await rules("Agents", { native });
     expect(button("Save agent defaults")).toHaveAttribute("title", "These are the current defaults");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Default effort" }), "high");
+    await choose("Default effort", "high");
     await userEvent.click(button("Save agent defaults"));
     expect(native.saveAndRestart).toHaveBeenCalledWith({ kind: "agentDefaults", mode: "auto", effort: "high" });
-    expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveValue("auto");
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveTextContent("auto");
   });
 });
 

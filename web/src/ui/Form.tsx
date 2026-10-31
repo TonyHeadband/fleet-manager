@@ -5,6 +5,7 @@ import type { FormDef } from "../api/generated/FormDef";
 import type { InputDef } from "../api/generated/InputDef";
 import type { SubmitDef } from "../api/generated/SubmitDef";
 import { Button } from "./Button";
+import { Select } from "./Select";
 
 /** What a choice input offers, by its source: data the page already has for the record the form is about. */
 export interface Sources {
@@ -145,14 +146,13 @@ export function FormField({ def, value, onChange, busy = false, sources = {}, er
       case "choice": {
         const options = def.source?.type === "product_repos" ? (sources.product_repos ?? []) : [];
         return (
-          <select value={value} disabled={busy} onChange={(e) => onChange(e.target.value)}>
-            <option value="" />
-            {options.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
+          <Select
+            label={def.label}
+            value={value}
+            disabled={busy}
+            options={[{ value: "", label: "None" }, ...options.map((o) => ({ value: o, label: o }))]}
+            onChange={onChange}
+          />
         );
       }
       default:
