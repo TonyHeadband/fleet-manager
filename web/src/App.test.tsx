@@ -71,7 +71,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Working" });
       const header = document.querySelector<HTMLElement>(".view-header")!;
       const order = [...header.querySelectorAll("h1, [aria-haspopup], .fleet-switch > .mono-label")].map((e) => e.getAttribute("aria-label") ?? e.textContent?.split(/\s/)[0]);
-      expect(order).toEqual(["Kanban", "Repo filter", "Persona filter", "Release filter", "Fleet"]);
+      expect(order).toEqual(["Filters", "Repo filter", "Persona filter", "Release filter", "Fleet"]);
     });
 
     it("persona_filter_hides_other_cards", async () => {

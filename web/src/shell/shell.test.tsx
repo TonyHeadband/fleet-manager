@@ -108,6 +108,12 @@ describe("Shell", () => {
     expect(ring!.querySelector("circle + circle")).toHaveAttribute("r", "0.7");
   });
 
+  it("the_board_top_bar_is_titled_filters", async () => {
+    // The drawer already names the view; the board's top bar holds its filters.
+    start();
+    expect(await within(screen.getByRole("banner")).findByRole("heading", { name: "Filters" })).toBeInTheDocument();
+  });
+
   it("the_drawer_views_are_ghost_buttons", async () => {
     start();
     const drawer = await screen.findByRole("navigation", { name: "Drawer" });
@@ -179,7 +185,7 @@ describe("Shell", () => {
   it("the_hash_picks_the_view_and_forms_stays_reachable", async () => {
     window.location.hash = "#nowhere";
     start();
-    expect(await within(screen.getByRole("banner")).findByText("Kanban")).toBeInTheDocument();
+    expect(await within(screen.getByRole("banner")).findByText("Filters")).toBeInTheDocument();
     window.location.hash = "#forms";
     act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(screen.queryByRole("region", { name: "Tasks strip" })).not.toBeInTheDocument();

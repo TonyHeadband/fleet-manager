@@ -861,7 +861,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       drawer={drawer} tools={themeSwitch}
       header={
         <>
-          <h1 className="view-title">Kanban</h1>
+          <h1 className="view-title">Filters</h1>
           <div className="filters">
             <RepoFilter repos={repoCounts} selected={filter} onChange={setFilter} />
             <PersonaFilter rows={personaCounts} selected={personaPicks} onChange={setPersonaFilter} />

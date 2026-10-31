@@ -92,7 +92,7 @@ describe("Passport", () => {
     await tasks("r1");
     onBoard();
     await userEvent.click(button("Open on board"));
-    expect(await within(screen.getByRole("banner")).findByRole("heading", { name: "Kanban" })).toBeInTheDocument();
+    expect(await within(screen.getByRole("banner")).findByRole("heading", { name: "Filters" })).toBeInTheDocument();
     expect(within(screen.getByRole("complementary", { name: "Detail" })).getByText("alpha goal")).toBeInTheDocument();
   });
 
