@@ -38,8 +38,8 @@
 .steps tbody tr:nth-child(odd) { background: var(--raised); }
 .steps a { color: var(--accent-text); }
 .step-state, .gate-head, .gate-pr { display: inline-flex; align-items: center; gap: var(--panel-gap-s); }
-.step-state .dot { width: var(--panel-state-dot); height: var(--panel-state-dot); }
-.gate-head .dot { width: var(--size-dot); height: var(--size-dot); }
+.step-state .dot { height: var(--panel-state-dot); }
+.gate-head .dot { height: var(--size-dot); }
 .history { margin-top: var(--panel-gap-m); }
 .history .breakdown-version { margin-bottom: var(--panel-gap-m); }
 .decide { display: grid; justify-items: start; gap: var(--panel-gap-s); margin-top: var(--panel-decide-gap); }

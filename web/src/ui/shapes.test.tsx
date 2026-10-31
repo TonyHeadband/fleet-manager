@@ -132,9 +132,20 @@ describe("shared shapes", () => {
     expect(screen.getAllByRole("textbox")).toHaveLength(2);
   });
 
-  it("checkboxes_take_the_theme_accent", () => {
-    // Not the browser's blue: the accent follows the theme (orange on dark, blue on light).
-    expect(readFileSync("src/styles.css", "utf8")).toMatch(/input\[type="checkbox"\] \{ accent-color: var\(--fill\); \}/);
+  it("checkboxes_are_an_accent_outline", () => {
+    // FUI: no fill, the accent border even when empty; a tick is an inner accent square.
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(
+      /input\[type="checkbox"\] \{[^}]*appearance: none;[^}]*border: 1px solid var\(--fill\);[^}]*background: transparent;/,
+    );
+    expect(css).toMatch(/input\[type="checkbox"\]:checked \{[^}]*linear-gradient\(var\(--fill\), var\(--fill\)\)/);
+  });
+
+  it("status_marks_are_rectangles", () => {
+    // No round dots: each is a bar twice as wide as it is tall.
+    const files = (readdirSync("src", { recursive: true }) as string[]).filter((f) => f.endsWith(".css"));
+    for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%/);
+    expect(readFileSync("src/shell/shell.css", "utf8")).toMatch(/\.dot \{[^}]*aspect-ratio: 2;/);
   });
 
   it("a_picker_names_itself_in_the_theme_accent", () => {

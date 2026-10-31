@@ -19,7 +19,10 @@ button:disabled, a.button[aria-disabled="true"] { opacity: 0.5; cursor: not-allo
 /* A link drawn as a button (the drawer's views). */
 a.button { display: block; text-decoration: none; color: inherit; }
 /* Checkboxes take the theme's accent, as the rest of the controls, not the browser's blue. */
-input[type="checkbox"] { accent-color: var(--fill); }
+/* FUI: an accent outline even when empty, no fill; a tick is an inner accent square. */
+input[type="checkbox"] { appearance: none; flex: none; width: 1em; height: 1em; margin: 0; padding: 0; border: 1px solid var(--fill); background: transparent; cursor: pointer; }
+input[type="checkbox"]:checked { background: linear-gradient(var(--fill), var(--fill)) center / 50% 50% no-repeat; }
+input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
 /* WebKitGTK's overlay scrollbars show only while scrolling or hovered; a drawn one stays, so a page shows it goes on. */
 ::-webkit-scrollbar { width: var(--layout-scrollbar); height: var(--layout-scrollbar); }
 ::-webkit-scrollbar-corner { background: transparent; }
