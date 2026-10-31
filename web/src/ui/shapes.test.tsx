@@ -132,13 +132,33 @@ describe("shared shapes", () => {
     expect(screen.getAllByRole("textbox")).toHaveLength(2);
   });
 
-  it("checkboxes_take_the_theme_accent", () => {
-    // Not the browser's blue: the accent follows the theme (orange on dark, blue on light).
-    expect(readFileSync("src/styles.css", "utf8")).toMatch(/input\[type="checkbox"\] \{ accent-color: var\(--fill\); \}/);
+  it("checkboxes_are_an_accent_outline", () => {
+    // FUI: no fill, the accent border even when empty; a tick is an inner accent square.
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(
+      /input\[type="checkbox"\] \{[^}]*appearance: none;[^}]*border: 1px solid var\(--fill\);[^}]*background: transparent;/,
+    );
+    expect(css).toMatch(/input\[type="checkbox"\]:checked \{[^}]*linear-gradient\(var\(--fill\), var\(--fill\)\)/);
+  });
+
+  it("status_marks_are_rectangles", () => {
+    // No round dots: each is a thin upright line, twice its dot's size tall and a quarter of that wide.
+    const files = (readdirSync("src", { recursive: true }) as string[]).filter((f) => f.endsWith(".css"));
+    for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%|aspect-ratio: 2;/);
+    expect(readFileSync("src/shell/shell.css", "utf8")).toMatch(
+      /\.dot,[^{]*\{[^}]*height: calc\(2 \* var\(--dot\)\);[^}]*aspect-ratio: 1 \/ 4;/,
+    );
   });
 
   it("a_picker_names_itself_in_the_theme_accent", () => {
     expect(readFileSync("src/board/board.css", "utf8")).toMatch(/\.filter-button \.mono-label \{ color: var\(--accent-text\); \}/);
+  });
+
+  it("corners_are_square", () => {
+    // FUI keeps rigid angles: every control, card and dialog radius is 0, and no glyph rounds its rectangles.
+    const theme = readFileSync("src/generated/theme.css", "utf8");
+    for (const r of ["control", "card", "dialog"]) expect(theme).toContain(`--radius-${r}: 0px;`);
+    expect(readFileSync("src/ui/icons.tsx", "utf8")).not.toMatch(/<rect[^>]*\brx=/);
   });
 
   it("every_css_variable_is_defined", () => {

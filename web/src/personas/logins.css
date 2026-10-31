@@ -29,9 +29,7 @@
   font-size: var(--size-small);
 }
 .login-status .dot {
-  width: var(--size-live-dot);
-  height: var(--size-live-dot);
-  border-radius: 50%;
+  --dot: var(--size-live-dot);
   background: var(--tone-muted);
 }
 .login-status .dot[data-tone="done"] {

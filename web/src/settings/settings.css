@@ -129,10 +129,7 @@
 }
 .log-dot,
 .log-dot-space {
-  flex: none;
-  width: var(--settings-log-dot);
-  height: var(--settings-log-dot);
-  border-radius: 50%;
+  --dot: var(--settings-log-dot);
 }
 .log-dot[data-level="error"] {
   background: var(--danger);

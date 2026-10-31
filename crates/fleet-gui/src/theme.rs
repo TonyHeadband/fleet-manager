@@ -609,6 +609,8 @@ pub mod radius {
     pub const CONTROL: u8 = 3;
     pub const CARD: u8 = 4;
     pub const DIALOG: u8 = 6;
+    /// The web draws every corner square (FUI keeps rigid angles); egui keeps the radii above until it retires.
+    pub const WEB: u8 = 0;
 }
 
 fn medium_family() -> FontFamily {

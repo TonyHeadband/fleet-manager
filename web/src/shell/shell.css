@@ -3,12 +3,12 @@
    the page itself: each region scrolls on its own, as Lite's panels do. */
 .shell { display: grid; grid-template-columns: var(--layout-drawer) minmax(0, 1fr); height: 100vh; overflow: hidden; }
 .content { display: grid; grid-template-rows: var(--layout-header) auto minmax(0, 1fr) var(--layout-footer); grid-template-areas: "header" "strip" "body" "footer"; min-width: 0; min-height: 0; }
-.view-header { grid-area: header; display: flex; align-items: center; gap: var(--space-item); padding: 0 var(--space-row-x); background: var(--surface); border-bottom: 1px solid var(--border); min-width: 0; overflow: hidden; }
+.view-header { grid-area: header; display: flex; align-items: center; gap: var(--space-item); padding: 0 var(--layout-page-x); background: var(--sunken); border-bottom: 1px solid var(--border); min-width: 0; overflow: hidden; }
 .theme-switch { flex: none; display: flex; gap: var(--space-chip-gap); margin-left: auto; }
 .theme-switch .icon-button[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); color: var(--accent-text); }
 /* One row: the header is a fixed height, so a long filter scrolls in place rather than wrapping out of sight. */
 .view-title { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); margin: 0; white-space: nowrap; }
-.strip { grid-area: strip; height: var(--layout-strip); display: flex; justify-content: flex-start; align-items: center; padding: 0 var(--space-row-x); background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--size-small); min-width: 0; overflow: hidden; }
+.strip { grid-area: strip; height: var(--layout-strip); display: flex; justify-content: flex-start; align-items: center; padding: 0 var(--layout-page-x); background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--size-small); min-width: 0; overflow: hidden; }
 .task-counts { display: flex; align-items: center; gap: var(--space-button-gap); white-space: nowrap; }
 .count-item { display: inline-flex; align-items: center; gap: var(--space-button-gap); }
 .task-counts a { color: inherit; text-decoration: none; cursor: pointer; }
@@ -33,7 +33,7 @@
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
 .drawer-header { border-bottom: 1px solid var(--border); }
 .drawer-footer { gap: var(--space-item); border-top: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: nowrap; }
-.drawer-footer .dot { width: var(--size-live-dot); height: var(--size-live-dot); }
+.drawer-footer .dot { --dot: var(--size-live-dot); }
 .app-name { font-size: var(--size-heading); font-weight: 500; color: var(--text-high); }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
@@ -59,12 +59,16 @@
 .dot[data-tone="muted"] { background: var(--tone-muted); }
 .dot[data-tone="caution"] { background: var(--tone-caution); }
 .dot[data-tone="danger"] { background: var(--tone-danger); }
-.footer { height: var(--layout-footer); display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); background: var(--surface); border-top: 1px solid var(--border); font-size: var(--size-small); min-width: 0; position: relative; }
+.footer { height: var(--layout-footer); display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); background: var(--sunken); border-top: 1px solid var(--border); font-size: var(--size-small); min-width: 0; position: relative; }
 .footer-line { flex: 1; display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; }
 .footer-text { color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; border: none; background: none; padding: 0; font-size: inherit; text-align: left; }
 .footer-text[data-dimmed="true"] { color: var(--text-low); }
 .footer-position { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
-.dot { flex: none; width: var(--size-dot); height: var(--size-dot); border-radius: 50%; background: var(--text-low); }
+/* A status mark: a thin upright line, never round (FUI). `--dot` is the round dot's size it stands for; an override
+   sets that alone. */
+:root { --dot: var(--size-dot); }
+.dot, .changes-dot, .log-dot, .log-dot-space { flex: none; height: calc(2 * var(--dot)); aspect-ratio: 1 / 4; }
+.dot { background: var(--text-low); }
 .dot[data-notice="error"] { background: var(--danger); }
 .dot[data-notice="warning"] { background: var(--tone-attention); }
 .dot[data-notice="success"] { background: var(--tone-done); }

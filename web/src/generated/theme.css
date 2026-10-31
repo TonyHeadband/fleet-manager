@@ -180,9 +180,9 @@
   --settings-log-dot: 7px;
   --settings-log-row: 18px;
   --startup-turn: 4s;
-  --radius-control: 3px;
-  --radius-card: 4px;
-  --radius-dialog: 6px;
+  --radius-control: 0px;
+  --radius-card: 0px;
+  --radius-dialog: 0px;
   --bg: #edf2f8;
   --surface: #f9fbfe;
   --raised: #eaf0f7;
