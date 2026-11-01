@@ -988,7 +988,7 @@ async fn a_message_to_a_working_supervisor_waits_for_review() {
     let a = direct(&fx, &sup).await;
     let session = agent(&fx, &sup).await.session;
     wait_screen_in(&fx.sessions, &session, |s| s.contains("ready")).await;
-    set_status(&fx, &sup, Status::Working).await;
+    reach(&fx, &sup, Status::Working).await;
 
     posted_id(
         &tool(
@@ -1003,7 +1003,7 @@ async fn a_message_to_a_working_supervisor_waits_for_review() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!fx.sessions.screen_text(&session).unwrap().contains(NOTICE));
 
-    set_status(&fx, &sup, Status::Review).await;
+    reach(&fx, &sup, Status::Review).await;
     wait_screen_in(&fx.sessions, &session, |s| s.contains(&line)).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     // A message is pasted, then echoed as one entry.
@@ -1020,6 +1020,8 @@ async fn an_ask_to_the_supervisor_reaches_the_owner_as_a_chat_row() {
     let fx = fixture().await;
     let sup = conversation(&fx).await;
     let a = direct(&fx, &sup).await;
+    // Its first prompt's turn is over.
+    reach(&fx, &sup, Status::Review).await;
     let held = ask_in_background(&fx.svc, &a, "supervisor", "can I change the schema?");
     wait_ask(&fx, &op_room(&sup)).await;
 
@@ -1232,7 +1234,7 @@ async fn a_supervisor_notice_never_lands_in_a_running_turn() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!fx.sessions.screen_text(&session).unwrap().contains(NOTICE));
 
-    set_status(&fx, &sup, Status::Review).await;
+    reach(&fx, &sup, Status::Review).await;
     assert!(Supervisor::new(fx.svc.clone())
         .message_if_idle(&sup, "Fleet Manager: new message")
         .await
@@ -1241,4 +1243,90 @@ async fn a_supervisor_notice_never_lands_in_a_running_turn() {
         s.contains("entry<<Fleet Manager: new message>>")
     })
     .await;
+}
+
+/// Moves the agent to `status` a second later, as Claude's hook does: `status_since` is the new now.
+async fn reach(fx: &Fx, id: &AgentId, status: Status) {
+    fx.clock.advance(1);
+    let now = fx.clock.now_for_test();
+    fx.store
+        .update_agent(id, |a| {
+            a.status = status;
+            a.status_since = now;
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_supervisor_notice_behind_the_owners_message_waits_for_the_next_review() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let session = agent(&fx, &sup).await.session;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains("ready")).await;
+    reach(&fx, &sup, Status::Review).await;
+    // The owner's message is typed; Claude's hook has not reported its turn, so it still reads Review.
+    Supervisor::new(fx.svc.clone())
+        .message(&sup, "and the docs?")
+        .await
+        .unwrap();
+
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "step 2 is done", "to": "supervisor" }),
+        )
+        .await,
+    );
+    let line = notice(&fx, "message", &a, &op_room(&sup)).await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert!(
+        !fx.sessions.screen_text(&session).unwrap().contains(&line),
+        "typed into the owner's turn"
+    );
+
+    reach(&fx, &sup, Status::Working).await;
+    reach(&fx, &sup, Status::Review).await;
+    wait_screen_in(&fx.sessions, &session, |s| {
+        s.contains(&format!("entry<<{line}>>"))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pane = fx.sessions.screen_text(&session).unwrap();
+    assert_eq!(
+        pane.matches(&format!("entry<<{line}>>")).count(),
+        1,
+        "{pane}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mark_left_by_missed_events_does_not_hold_notices_back() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    reach(&fx, &a, Status::Review).await;
+    let op = op_room(&sup);
+    let product = format!("product:{PRODUCT}");
+    let say = |room: &str| {
+        let (svc, sup, a) = (fx.svc.clone(), sup.clone(), a.clone());
+        let args = json!({ "kind": "message", "text": "look", "to": a.0, "room": room });
+        async move { posted_id(&tool(&svc, &sup, "room_post", args).await) }
+    };
+    say(&op).await;
+    let first = format!("{NOTICE} new message from supervisor in {op}; call room_read.");
+    assert!(pane_contains(&fx, &a, &first).await);
+    // No watcher saw the turn: it went Working and back to Review unobserved.
+    reach(&fx, &a, Status::Working).await;
+    reach(&fx, &a, Status::Review).await;
+    say(&product).await;
+    let second = format!(
+        "{NOTICE} new message from {} in {product}; call room_read.",
+        sup.0
+    );
+    assert!(pane_contains(&fx, &a, &second).await);
 }

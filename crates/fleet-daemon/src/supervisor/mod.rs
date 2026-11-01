@@ -282,7 +282,7 @@ impl Supervisor {
         self.send(id, text, false).await.map(|_| ())
     }
 
-    /// `message`, unless the conversation is working or needs you once its turn lock is held: then nothing is typed
+    /// `message`, unless a turn runs or is pending once its turn lock is held (`turn_pending`): then nothing is typed
     /// and it returns false. For the daemon's notices, which must never land in a running turn.
     pub async fn message_if_idle(&self, id: &AgentId, text: &str) -> Result<bool, SupervisorError> {
         self.send(id, text, true).await
@@ -298,7 +298,7 @@ impl Supervisor {
         let _turn = turn.lock().await;
         // Read again under the lock: the message before this one may have resumed it, or the reaper ended it.
         let a = self.conversation(id).await?;
-        if if_idle && matches!(a.status, Status::Working | Status::NeedsYou) {
+        if if_idle && self.turn_pending(&a).await? {
             return Ok(false);
         }
         if a.status == Status::Stopped {
@@ -315,6 +315,27 @@ impl Supervisor {
             .await?;
         info!(agent_id = %id.0, persona = %a.persona, resumed = a.status == Status::Stopped, "supervisor message sent");
         Ok(true)
+    }
+
+    /// Whether a turn runs or is about to: working, a prompt up, or a message submitted no earlier than its last
+    /// status change, whose turn Claude's hook has yet to report (the clock has whole seconds, so a tie counts as
+    /// pending). An exited conversation runs no turn; `send` resumes it.
+    async fn turn_pending(&self, a: &Agent) -> Result<bool, SupervisorError> {
+        if matches!(a.status, Status::Working | Status::NeedsYou) {
+            return Ok(true);
+        }
+        if a.status == Status::Stopped {
+            return Ok(false);
+        }
+        let touched = self
+            .svc
+            .store
+            .conversations(&a.persona)
+            .await?
+            .into_iter()
+            .find(|r| r.id == a.id)
+            .map(|r| r.last_used_at);
+        Ok(touched.is_some_and(|at| at >= a.status_since))
     }
 
     async fn conversation(&self, id: &AgentId) -> Result<Agent, SupervisorError> {
