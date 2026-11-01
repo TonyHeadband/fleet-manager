@@ -741,6 +741,14 @@ describe("App", () => {
       expect(screen.getByRole("button", { name: /other/ })).toBeInTheDocument();
     });
 
+    it("no_toast_for_the_latest_conversation_when_the_address_names_none", async () => {
+      window.location.hash = "#supervisor";
+      await open();
+      await waitFor(() => expect(window.location.hash).toBe("#supervisor?c=s1"));
+      emitEvent(taskEvent());
+      expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
+    });
+
     it("toasts_only_for_the_drawer_persona", async () => {
       await open();
       emitEvent(taskEvent({ persona: "someone-else" }));

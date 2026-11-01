@@ -55,6 +55,12 @@ function Page({ baseUrl, client, persona, agents, factory }: Props) {
     if (list !== null && named !== null && known === null) navigate(supervisorHref(), true);
   }, [list, named, known]);
 
+  // The latest conversation, shown for an address without one, is named in it so the rest of the app can tell what is
+  // on screen.
+  useEffect(() => {
+    if (!blank && named === null && current !== null) navigate(supervisorHref(current), true);
+  }, [blank, named, current]);
+
   const pick = (id: string) => {
     setBlank(false);
     navigate(supervisorHref(id));
