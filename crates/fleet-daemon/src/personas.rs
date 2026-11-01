@@ -802,7 +802,54 @@ impl Personas {
         let row = self.row(id).await?;
         self.whoami(&row, token.to_string()).await?;
         write_token(&token_path(&self.personas_dir, &row.id), token)?;
+        self.gh_login(&row, token).await;
         self.check(id).await
+    }
+
+    /// Logs `token` into the persona's gh folder as well: solo agents still find their GitHub login there. Best
+    /// effort, as the daemon itself no longer needs gh: a failure is logged, without the token.
+    async fn gh_login(&self, row: &PersonaRow, token: &str) {
+        let gh_dir = self.personas_dir.join(&row.id).join("gh");
+        // `--insecure-storage`: into the persona's private gh folder, not the user's one keyring.
+        let args = [
+            "auth",
+            "login",
+            "--hostname",
+            &row.host,
+            "--with-token",
+            "--insecure-storage",
+        ];
+        let Some(mut cmd) = check_command(
+            &self.gh,
+            &args,
+            "GH_CONFIG_DIR",
+            &gh_dir,
+            &self.tools.path(),
+        ) else {
+            return;
+        };
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        let run = async {
+            let mut child = cmd.spawn()?;
+            if let Some(mut stdin) = child.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                // A gh that exits early closes the pipe; its exit status says why, so a broken pipe is not the error.
+                let _ = stdin.write_all(format!("{token}\n").as_bytes()).await;
+            }
+            child.wait_with_output().await
+        };
+        let failure = match tokio::time::timeout(CHECK_TIMEOUT, run).await {
+            Ok(Ok(o)) if o.status.success() => return,
+            Ok(Ok(o)) => {
+                let stderr = String::from_utf8_lossy(&o.stderr).replace(token, "***");
+                last_line(&stderr).unwrap_or_else(|| o.status.to_string())
+            }
+            Ok(Err(e)) => format!("cannot run {}: {e}", self.gh),
+            Err(_) => "timed out".into(),
+        };
+        tracing::warn!(persona = %row.id, detail = %failure, "the token is set, but gh did not take it: solo agents have no GitHub login");
     }
 
     /// Whether the forge accepts the persona's token.

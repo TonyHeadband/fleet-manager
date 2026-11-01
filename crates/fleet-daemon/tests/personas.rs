@@ -971,6 +971,46 @@ async fn a_pat_persona_is_not_overwritten_by_gh() {
     assert!(!log.lines().any(|l| l.starts_with("auth token")), "{log}");
 }
 
+/// Solo agents still find their GitHub login in the persona's gh folder, so a token set through the daemon is logged
+/// in there too, on stdin.
+#[tokio::test]
+async fn a_set_token_is_logged_into_gh_for_solo_agents() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let mut req = new_persona("Home");
+    req.github_auth = GithubAuth::Pat;
+    let p = ps.create(req).await.unwrap();
+    ps.set_token(&p.id, "ghp_pat").await.unwrap();
+    let gh = Path::new(&p.gh_dir);
+    let log = std::fs::read_to_string(gh.join("argv.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|l| l == "auth login --hostname github.com --with-token --insecure-storage"),
+        "{log}"
+    );
+    assert!(!log.contains("ghp_pat"), "{log}");
+    assert_eq!(
+        std::fs::read_to_string(gh.join("token")).unwrap(),
+        "ghp_pat"
+    );
+}
+
+/// The gh login is a courtesy to solo agents: gh refusing it, or missing, never fails setting the token.
+#[tokio::test]
+async fn a_failed_gh_login_still_stores_the_token() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    std::fs::write(Path::new(&p.gh_dir).join("login-fail"), "").unwrap();
+    ps.set_token(&p.id, "ghp_x").await.unwrap();
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_x");
+
+    let without = personas_with(&fx, fake_claude(), "fleet-no-such-gh".into());
+    let q = without.create(new_persona("Work")).await.unwrap();
+    without.set_token(&q.id, "ghp_y").await.unwrap();
+    assert_eq!(without.token(&q.id).await.unwrap(), "ghp_y");
+}
+
 #[test]
 fn a_migrated_token_never_replaces_one_that_is_there() {
     use fleet_daemon::forge::token::{read_token, write_token, write_token_if_absent};

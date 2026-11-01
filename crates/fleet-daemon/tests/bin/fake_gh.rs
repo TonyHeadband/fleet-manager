@@ -38,93 +38,43 @@ fn main() {
             .unwrap();
         let _ = writeln!(log, "{}", args.join(" "));
     }
-    let has = |name: &str| dir.as_ref().is_some_and(|d| d.join(name).exists());
-    // FAKE_GH_SLEEP=<s> makes a call hang, for timeout tests.
-    if let Ok(s) = std::env::var("FAKE_GH_SLEEP") {
-        if !s.is_empty() {
-            std::thread::sleep(std::time::Duration::from_secs_f64(s.parse().unwrap_or(0.0)));
-            exit(0);
-        }
-    }
-    let token = std::env::var("GH_TOKEN").unwrap_or_default();
+    // The login lives in the config dir's `token` file, which keeps a test off the shared process environment.
+    let stored = dir
+        .as_ref()
+        .and_then(|d| std::fs::read_to_string(d.join("token")).ok());
+    let login = std::env::var("GH_TOKEN")
+        .ok()
+        .or(stored)
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
     match (a(0), a(1)) {
         ("auth", "status") => {
-            if has("hosts.yml") || !token.is_empty() {
+            if login.is_some() {
                 println!("Logged in to {} account tester", a(3));
                 exit(0);
             }
             eprintln!("You are not logged into any GitHub hosts. To log in, run: gh auth login");
             exit(1);
         }
-        // The token gh holds for the host: FAKE_GH_TOKEN, else the `token` file of the config dir (which keeps a test
-        // off the shared process environment), else a failure with no output like gh with no login.
-        ("auth", "token") => {
-            let from_file = dir
-                .as_ref()
-                .and_then(|d| std::fs::read_to_string(d.join("token")).ok());
-            let token = std::env::var("FAKE_GH_TOKEN").ok().or(from_file);
-            match token
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-            {
-                Some(t) => {
-                    println!("{t}");
-                    exit(0);
-                }
-                None => exit(1),
+        // The token gh holds for the host, else a failure with no output like gh with no login.
+        ("auth", "token") => match login {
+            Some(t) => {
+                println!("{t}");
+                exit(0);
             }
-        }
-        ("auth", "git-credential") => exit(1),
+            None => exit(1),
+        },
+        // `--with-token` reads the token from stdin and stores it, as gh does; a `login-fail` file refuses it.
         ("auth", "login") => {
             let mut stdin = String::new();
             let _ = std::io::stdin().read_to_string(&mut stdin);
-            let token = stdin.trim_end_matches('\n');
-            if !token.is_empty() {
-                let d = dir.expect("GH_CONFIG_DIR");
-                std::fs::create_dir_all(&d).unwrap();
-                std::fs::write(d.join("hosts.yml"), format!("hosts: {}\n", a(4))).unwrap();
-                exit(0);
-            }
-            eprintln!("no token on stdin");
-            exit(1);
-        }
-        // The merge watcher's query: replies with `pr-list.json` from the config dir (no PR when it is missing), and
-        // fails like a GitHub outage when a `pr-fail` file is there. `pr-list-<repo>.json` and `pr-fail-<repo>`,
-        // keyed by the last part of `-R`, do the same for that repo only and win over the shared ones. A `pr-hang`
-        // file makes it never answer (30 s); with `pr-hold` it writes `asked` and waits for a `go` file first.
-        ("pr", "list") => {
-            if has("pr-hang") {
-                std::thread::sleep(std::time::Duration::from_secs(30));
-            }
-            if let Some(d) = dir.as_ref().filter(|_| has("pr-hold")) {
-                std::fs::write(d.join("asked"), "").unwrap();
-                for _ in 0..400 {
-                    if has("go") {
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-            }
-            let repo = args
-                .windows(2)
-                .filter(|w| w[0] == "-R")
-                .last()
-                .map(|w| w[1].rsplit('/').next().unwrap_or("").to_string())
-                .unwrap_or_default();
-            if has("pr-fail") || (!repo.is_empty() && has(&format!("pr-fail-{repo}"))) {
-                eprintln!("HTTP 502: Bad Gateway (https://api.github.com/graphql)");
+            let token = stdin.trim();
+            let d = dir.expect("GH_CONFIG_DIR");
+            if d.join("login-fail").exists() || token.is_empty() {
+                eprintln!("error validating token: HTTP 401: Bad credentials");
                 exit(1);
             }
-            let d = dir.unwrap_or_default();
-            let own = d.join(format!("pr-list-{repo}.json"));
-            let shared = d.join("pr-list.json");
-            if !repo.is_empty() && own.exists() {
-                print!("{}", std::fs::read_to_string(own).unwrap());
-            } else if shared.exists() {
-                print!("{}", std::fs::read_to_string(shared).unwrap());
-            } else {
-                println!("[]");
-            }
+            std::fs::write(d.join("token"), token).unwrap();
             exit(0);
         }
         _ => {
