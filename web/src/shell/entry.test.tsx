@@ -78,7 +78,7 @@ describe("view entry", () => {
     snapshot(agent({ id: "a1", goal: "pie job" }));
     await screen.findByText("pie job");
     finish();
-    for (const hash of ["#tasks", "#releases", "#forms", "#kanban"]) {
+    for (const hash of ["#tasks", "#releases", "#kanban"]) {
       go(hash);
       expect(entering(), hash).toBe(true);
       finish();

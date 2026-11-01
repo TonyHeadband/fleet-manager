@@ -614,19 +614,12 @@ describe("App", () => {
     });
   });
 
-  it("App_switches_between_the_board_and_the_forms_page", async () => {
-    const products = vi.fn().mockResolvedValue({ products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] });
-    const agentConfig = vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } });
-    render(<App client={fakeClient({ products, agentConfig })} eventSource={factory} nowSeconds={() => 1300} />);
-    await screen.findByRole("region", { name: "Working" });
-    // The debug page is reached by its address; the drawer lists only Lite's views.
+  it("App_opens_the_board_at_the_old_forms_address", async () => {
+    // The #forms debug page is gone; its forms live in Releases and Settings.
     window.location.hash = "#forms";
-    act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
-    expect(await screen.findByRole("heading", { name: "New release" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Working" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("link", { name: "Kanban" }));
-    act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     expect(await screen.findByRole("region", { name: "Working" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "New release" })).not.toBeInTheDocument();
   });
 
   it("App_has_no_spawn_bar", async () => {

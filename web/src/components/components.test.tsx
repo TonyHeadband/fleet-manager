@@ -12,7 +12,6 @@ import { readFileSync } from "node:fs";
 import { RepoFilter } from "./RepoFilter";
 import { PersonaFilter } from "./PersonaFilter";
 import { ReleaseFilter } from "./ReleaseFilter";
-import { FormsPage } from "./FormsPage";
 import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, agentIn, fakeClient, fileDiff, persona, schema, workspace } from "../test/fixtures";
@@ -850,55 +849,5 @@ describe("PreviewPane", () => {
     render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
     act(() => FakeEventSource.for("/chat").emit("ended", 0));
     expect(screen.getByText(/^Session ended/)).toBeInTheDocument();
-  });
-});
-
-describe("FormsPage", () => {
-  it("creates a release for the picked product from the described form", async () => {
-    const products = { products: [{ id: "pie", name: "Pie", default_persona: null, repos: [], releases: [], tasks: 0, overrides: [] }] };
-    const f = vi.fn(async (url: string, _init?: RequestInit) =>
-      url.endsWith("/api/products") ? new Response(JSON.stringify(products)) : new Response(JSON.stringify({ id: 1, version: "1.0" })),
-    );
-    const client = new FleetClient("", f as unknown as typeof fetch);
-    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
-    await userEvent.type(await screen.findByLabelText("Version"), "1.0");
-    await userEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect(await screen.findByText("Created 1.0")).toBeInTheDocument();
-    const [url, init] = f.mock.calls.find(([u]) => u.endsWith("/releases"))!;
-    expect(url).toBe("/api/products/pie/releases");
-    expect(JSON.parse(init?.body as string)).toEqual({ version: "1.0", start: "2026-10-29", target: "" });
-  });
-
-  it("says so when the products cannot be loaded", async () => {
-    const f = vi.fn(async () => new Response(JSON.stringify({ error: "store is busy" }), { status: 500 }));
-    const client = new FleetClient("", f as unknown as typeof fetch);
-    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("store is busy");
-  });
-
-  it("says there are no products instead of offering a release with nowhere to go", async () => {
-    const config = { instructions: "", settings: { allow: [], deny: [], env: {} } };
-    const f = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/api/products") ? { products: [] } : config)));
-    const client = new FleetClient("", f as unknown as typeof fetch);
-    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
-    expect(await screen.findByText("There are no products to add a release to.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
-  });
-
-  it("edits the instructions every agent gets", async () => {
-    const products = { products: [] };
-    const config = { instructions: "Be brief.", settings: { allow: [], deny: [], env: {} } };
-    const f = vi.fn(async (url: string, _init?: RequestInit) =>
-      url.endsWith("/api/products") ? new Response(JSON.stringify(products)) : new Response(JSON.stringify(config)),
-    );
-    const client = new FleetClient("", f as unknown as typeof fetch);
-    render(<FormsPage client={client} schema={schema} today="2026-10-29" />);
-    const box = await screen.findByLabelText("Instructions for every agent");
-    expect(box).toHaveValue("Be brief.");
-    await userEvent.type(box, " Always.");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Saved")).toBeInTheDocument();
-    const [, init] = f.mock.calls.find(([, i]) => i?.method === "PUT")!;
-    expect(JSON.parse(init?.body as string)).toEqual({ instructions: "Be brief. Always." });
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-export type Route = "kanban" | "tasks" | "releases" | "fleet" | "settings" | "forms";
+export type Route = "kanban" | "tasks" | "releases" | "fleet" | "settings";
 
 /** The drawer's views, as Lite lists them: the work, then a separator, then the app's own pages. */
 export const VIEWS: { route: Route; label: string }[][] = [
@@ -18,10 +18,9 @@ export const VIEWS: { route: Route; label: string }[][] = [
 /** The views the web draws so far; the others show greyed in the drawer until their step lands. */
 export const ON_WEB: Route[] = ["kanban", "tasks", "releases", "fleet", "settings"];
 
-/** `#forms` is the debug page, outside the drawer. A view not on the web yet, or anything else, is the board. */
+/** A view not on the web yet, or anything else, is the board. */
 export function routeFromHash(hash: string): Route {
   const name = hash.replace(/^#/, "").split("?")[0];
-  if (name === "forms") return "forms";
   // Fleet was Management: an address saved before still opens it.
   if (name === "management") return "fleet";
   return ON_WEB.find((r) => r === name) ?? "kanban";

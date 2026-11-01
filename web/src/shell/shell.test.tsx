@@ -256,14 +256,13 @@ describe("Shell", () => {
     for (const link of within(drawer).getAllByRole("link")) expect(link).not.toHaveAttribute("aria-disabled");
   });
 
-  it("the_hash_picks_the_view_and_forms_stays_reachable", async () => {
+  it("the_hash_picks_the_view", async () => {
     window.location.hash = "#nowhere";
     start();
     expect(await within(screen.getByRole("banner")).findByText("Filters")).toBeInTheDocument();
-    window.location.hash = "#forms";
+    window.location.hash = "#releases";
     act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
     expect(screen.queryByRole("group", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Drawer" })).queryByRole("link", { name: "Forms" })).not.toBeInTheDocument();
   });
 
   it("the_active_product_scopes_the_board_and_is_remembered", async () => {
@@ -300,7 +299,7 @@ describe("Shell", () => {
   it("every_view_sits_on_the_canvas", async () => {
     start();
     // Fleet and Settings sit in the same Shell; their own tests cover what they load.
-    for (const hash of ["#kanban", "#tasks", "#releases", "#forms"]) {
+    for (const hash of ["#kanban", "#tasks", "#releases"]) {
       window.location.hash = hash;
       act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
       expect(await screen.findByRole("banner")).toHaveClass("outlined");

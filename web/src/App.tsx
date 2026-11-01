@@ -18,7 +18,6 @@ import { useBreakdownDecisions } from "./panel/decisions";
 import { REPO_REQUEST, RepoRequestBox, type RequestDraft } from "./panel/RepoRequestBox";
 import { usableForm } from "./api/forms";
 import { FleetSwitch } from "./components/FleetSwitch";
-import { FormsPage } from "./components/FormsPage";
 import { PreviewPane } from "./components/PreviewPane";
 import { RepoFilter } from "./components/RepoFilter";
 import { PersonaFilter } from "./components/PersonaFilter";
@@ -113,12 +112,6 @@ const NO_WIZARD: Wizard = { steps: { folders: false, requirements: false }, stil
 const wallClock = () => Math.floor(Date.now() / 1000);
 
 const TOKEN_RETAKE_MS = 5_000;
-
-/** `YYYY-MM-DD` of a Unix time on the local clock. */
-function localDate(seconds: number) {
-  const d = new Date(seconds * 1000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -883,14 +876,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             );
           }}
         />
-      </Shell>
-    );
-  }
-
-  if (route === "forms") {
-    return (
-      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Forms</h1>} footer={footer} dialog={appDialogs(dialog)}>
-        {schema ? <FormsPage client={client} schema={schema} today={localDate(now)} /> : <p className="loading">Loading…</p>}
       </Shell>
     );
   }
