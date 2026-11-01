@@ -4,10 +4,11 @@
 //! An orchestrator is in its rooms as its task (the id stays across orchestrator restarts), so whatever reaches it
 //! goes to the task's live agent, `task.lead.unwrap_or(task.id)`. A supervisor conversation is in its operation
 //! room as itself.
+use super::deliver::{deliver, notify};
 use crate::agents::{one_line, AgentService, ServiceError};
 use crate::fleet::ops::detached;
 use crate::store::RoomRow;
-use fleet_api::{task_id, Agent, AgentId, AgentKind, MemberRef, Post, PostKind, RoomKind, Status};
+use fleet_api::{task_id, Agent, AgentId, AgentKind, MemberRef, Post, PostKind, RoomKind};
 use std::sync::Arc;
 
 /// What a held `room_ask` came back with.
@@ -41,7 +42,7 @@ fn label(room: &RoomRow, m: &MemberRef) -> String {
     }
 }
 
-fn kind_word(k: PostKind) -> &'static str {
+pub(crate) fn kind_word(k: PostKind) -> &'static str {
     match k {
         PostKind::Announcement => "announcement",
         PostKind::Message => "message",
@@ -146,7 +147,11 @@ impl AgentService {
     }
 
     /// The sender as people read it.
-    async fn name_of(&self, room: &RoomRow, m: &MemberRef) -> Result<String, ServiceError> {
+    pub(crate) async fn name_of(
+        &self,
+        room: &RoomRow,
+        m: &MemberRef,
+    ) -> Result<String, ServiceError> {
         Ok(match m {
             MemberRef::Owner => "owner".into(),
             MemberRef::Daemon => "Fleet Manager".into(),
@@ -158,14 +163,18 @@ impl AgentService {
         })
     }
 
-    /// Names, stores, broadcasts and logs the post; returns it with its id.
-    async fn publish(&self, room: &RoomRow, mut p: Post) -> Result<Post, ServiceError> {
+    /// Names, stores, broadcasts and logs the post, and wakes whoever it is for; returns it with its id. A wake that
+    /// fails does not undo the post: it is in the room for `room_read`.
+    async fn publish(self: &Arc<Self>, room: &RoomRow, mut p: Post) -> Result<Post, ServiceError> {
         p.sender_name = self.name_of(room, &p.sender).await?;
         let ev = self.store.add_post(&p).await?;
         if let fleet_api::EventKind::RoomPost { post } = ev.kind {
             p = post;
         }
         log_post(&p);
+        if let Err(e) = deliver(self, &p).await {
+            tracing::warn!(post = p.id, error = %one_line(&e.to_string()), "cannot wake the post's recipients");
+        }
         Ok(p)
     }
 
@@ -196,7 +205,7 @@ impl AgentService {
 
     /// `room_post`: an announcement or a message, to `to` (everyone by default). Returns the post's id.
     pub async fn room_post(
-        &self,
+        self: &Arc<Self>,
         caller: &AgentId,
         kind: PostKind,
         text: &str,
@@ -282,7 +291,7 @@ impl AgentService {
 
     /// `room_answer` from an agent.
     pub async fn room_answer_from(
-        &self,
+        self: &Arc<Self>,
         caller: &AgentId,
         ask: i64,
         text: &str,
@@ -292,9 +301,9 @@ impl AgentService {
     }
 
     /// Answers the ask as `by`: the owner, or a member of its room other than the asker. False when it was answered
-    /// already. The answer goes to the held call, or else is typed into the asker's live agent as a fleet notice.
+    /// already. The answer goes to the held call, or else to the asker as a fleet notice.
     pub async fn room_answer(
-        &self,
+        self: &Arc<Self>,
         by: &MemberRef,
         ask: i64,
         text: &str,
@@ -342,36 +351,21 @@ impl AgentService {
         Ok(true)
     }
 
-    /// Types the answer into the asker's live agent. One that cannot take a line now finds it with `room_read`.
-    async fn notice_answer(&self, q: &Post, answer: &Post) {
+    /// Tells the asker the answer as a fleet notice: typed now if it is at its input box, else when it next is, and
+    /// in its task's inbox for `wait_for_fleet`.
+    async fn notice_answer(self: &Arc<Self>, q: &Post, answer: &Post) {
         let MemberRef::Agent(asker) = &q.sender else {
             return;
         };
-        let live = match self.store.task(asker).await {
-            Ok(Some(t)) => t.lead.unwrap_or(t.id),
-            _ => asker.clone(),
-        };
-        let line = format!(
-            "Fleet Manager: {} answered your ask {}: {}",
+        let text = format!(
+            "{} answered your ask {}: {}",
             answer.sender_name,
             q.id,
             one_line(&answer.text)
         );
-        // Never into a running turn: a Working agent gets it from Task 4's queue instead.
-        let typed = match self.find(&live).await {
-            Ok(a) if a.status != Status::Working => self.type_line(&a, &line).await,
-            _ => false,
-        };
-        if !typed {
-            self.undelivered_notice(&live, q.id, &line);
+        if let Err(e) = notify(self, asker, &text).await {
+            tracing::warn!(ask = q.id, error = %one_line(&e.to_string()), "cannot tell the asker the answer; it is in the room");
         }
-    }
-
-    /// A notice the asker could not take now. It is not lost: the answer is in the room for its `room_read`.
-    // Task 4 queues this: route it into the agent's pending queue (typed when it next reaches Review) and the
-    // task's `inbox` for `wait_for_fleet`.
-    fn undelivered_notice(&self, agent: &AgentId, ask: i64, line: &str) {
-        tracing::info!(agent_id = %agent.0, ask, %line, "answer not typed; it waits in the room");
     }
 }
 

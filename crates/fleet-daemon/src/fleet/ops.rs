@@ -1698,7 +1698,7 @@ impl AgentService {
                     FleetEventKind::IdleWithoutFinish => {
                         format!("step {}: ended its turn without finish_step", e.step)
                     }
-                    FleetEventKind::BreakdownDecided => e.detail.clone(),
+                    FleetEventKind::BreakdownDecided | FleetEventKind::RoomPost => e.detail.clone(),
                 }
             })
             .collect();

@@ -45,6 +45,8 @@ export const EVENT_TONE: Record<EventKind, "accent" | "danger" | "done"> = {
   checks_passed: "done",
   pr_opened: "done",
   pr_merged: "done",
+  room_message: "done",
+  room_ask: "accent",
 };
 
 /**

@@ -150,6 +150,9 @@ pub enum FleetEventKind {
     /// The owner decided a breakdown version no held `propose_breakdown` call was left to hear. Not a step's:
     /// `step` is 0 and `agent` is the task.
     BreakdownDecided,
+    /// A room message or ask to the orchestrator, or an answer to its ask; `detail` is the line it reads. `step` is
+    /// 0 and `agent` is the task.
+    RoomPost,
 }
 
 /// Something a fleet agent did that the orchestrator should hear about.

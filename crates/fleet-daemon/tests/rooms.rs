@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use fleet_api::{
     AgentId, AgentKind, EventKind, MemberRef, Post, PostKind, PrState, Room, RoomKind, Status,
-    TaskPr, TaskState,
+    TaskEvent, TaskEventKind, TaskPr, TaskState,
 };
 use fleet_daemon::agents::AgentService;
 use fleet_daemon::rooms::posts::NO_ANSWER_YET;
@@ -832,4 +832,345 @@ async fn rooms_of_another_persona_or_task_are_refused() {
     // An orchestrator stays in its own rooms.
     let (text, failed) = tool(&fx.svc, &a, "room_read", json!({ "room": foreign })).await;
     assert!(failed && text.contains("not in room"), "{text}");
+}
+
+// Waking the recipient, and surfacing posts to the owner.
+
+/// The notice a recipient of a `kind` post from the task `from` in `room` is typed.
+async fn notice(fx: &Fx, kind: &str, from: &AgentId, room: &str) -> String {
+    let t = fx.store.task(from).await.unwrap().unwrap();
+    let name = t.title.filter(|t| !t.is_empty()).unwrap_or(t.name);
+    format!("{NOTICE} new {kind} from {name} in {room}; call room_read.")
+}
+
+async fn events_of(fx: &Fx, conversation: &AgentId, kind: TaskEventKind) -> Vec<TaskEvent> {
+    fx.store
+        .task_events(conversation, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_reaches_a_waiting_orchestrator_through_wait_for_fleet() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let waiting = {
+        let (svc, a) = (fx.svc.clone(), a.clone());
+        tokio::spawn(async move { tool(&svc, &a, "wait_for_fleet", json!({})).await })
+    };
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!waiting.is_finished());
+
+    let room = op_room(&sup);
+    posted_id(
+        &tool(
+            &fx.svc,
+            &sup,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase when free", "to": a.0, "room": room }),
+        )
+        .await,
+    );
+    let (text, failed) = tokio::time::timeout(Duration::from_secs(10), waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!failed, "{text}");
+    assert_eq!(
+        text,
+        format!("new message from supervisor in {room}; call room_read.")
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(NOTICE),
+        "nothing typed into a running turn"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_a_working_orchestrator_waits_for_review() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let say = |text: &str| {
+        let (svc, sup, room, a) = (fx.svc.clone(), sup.clone(), room.clone(), a.clone());
+        let args = json!({ "kind": "message", "text": text, "to": a.0, "room": room });
+        async move { posted_id(&tool(&svc, &sup, "room_post", args).await) }
+    };
+    say("rebase when free").await;
+    say("and run the migrations").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(NOTICE),
+        "typed into a running turn"
+    );
+
+    set_status(&fx, &a, Status::Review).await;
+    let line = format!("{NOTICE} new message from supervisor in {room}; call room_read.");
+    assert!(pane_contains(&fx, &a, &line).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pane = screen(&fx.sessions, &a);
+    assert_eq!(pane.matches(&line).count(), 1, "one notice: {pane}");
+    assert_eq!(pane.matches(NOTICE).count(), 1, "one notice: {pane}");
+
+    // Delivered: the next idle turn brings nothing again.
+    set_status(&fx, &a, Status::Working).await;
+    set_status(&fx, &a, Status::Review).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(screen(&fx.sessions, &a).matches(NOTICE).count(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_an_idle_orchestrator_is_typed_at_once() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    set_status(&fx, &a, Status::Review).await;
+    let room = op_room(&sup);
+    posted_id(
+        &tool(
+            &fx.svc,
+            &sup,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase when free", "to": a.0, "room": room }),
+        )
+        .await,
+    );
+    let line = format!("{NOTICE} new message from supervisor in {room}; call room_read.");
+    assert!(pane_contains(&fx, &a, &line).await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_an_exited_supervisor_resumes_it() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let session = agent(&fx, &sup).await.session;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains("ready")).await;
+    fx.svc.stop(&sup).await.unwrap();
+    assert!(wait_until(|| async { !fx.sessions.alive(&session) }).await);
+
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "step 2 is done", "to": "supervisor" }),
+        )
+        .await,
+    );
+    let line = notice(&fx, "message", &a, &op_room(&sup)).await;
+    let pane = wait_screen_in(&fx.sessions, &session, |s| s.contains(&line)).await;
+    assert!(pane.contains("arg=--resume"), "{pane}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // A message is pasted, then echoed as one entry.
+    let pane = fx.sessions.screen_text(&session).unwrap();
+    assert_eq!(
+        pane.matches(&format!("entry<<{line}>>")).count(),
+        1,
+        "{pane}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_a_working_supervisor_waits_for_review() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let session = agent(&fx, &sup).await.session;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains("ready")).await;
+    set_status(&fx, &sup, Status::Working).await;
+
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "step 2 is done", "to": "supervisor" }),
+        )
+        .await,
+    );
+    let line = notice(&fx, "message", &a, &op_room(&sup)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!fx.sessions.screen_text(&session).unwrap().contains(NOTICE));
+
+    set_status(&fx, &sup, Status::Review).await;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains(&line)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // A message is pasted, then echoed as one entry.
+    let pane = fx.sessions.screen_text(&session).unwrap();
+    assert_eq!(
+        pane.matches(&format!("entry<<{line}>>")).count(),
+        1,
+        "{pane}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ask_to_the_supervisor_reaches_the_owner_as_a_chat_row() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let held = ask_in_background(&fx.svc, &a, "supervisor", "can I change the schema?");
+    wait_ask(&fx, &op_room(&sup)).await;
+
+    let name = {
+        let t = fx.store.task(&a).await.unwrap().unwrap();
+        t.title.filter(|t| !t.is_empty()).unwrap_or(t.name)
+    };
+    assert!(
+        wait_until(|| async {
+            !events_of(&fx, &sup, TaskEventKind::RoomAsk)
+                .await
+                .is_empty()
+        })
+        .await
+    );
+    let rows = events_of(&fx, &sup, TaskEventKind::RoomAsk).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].task, a);
+    assert_eq!(
+        rows[0].text,
+        format!("{name} in Untitled: can I change the schema?")
+    );
+    // The supervisor it went to hears of it too.
+    let line = notice(&fx, "ask", &a, &op_room(&sup)).await;
+    assert!(pane_contains(&fx, &sup, &line).await);
+    held.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_the_owner_is_a_chat_row() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "PR is up", "to": "owner" }),
+        )
+        .await,
+    );
+    assert!(
+        wait_until(|| async {
+            !events_of(&fx, &sup, TaskEventKind::RoomMessage)
+                .await
+                .is_empty()
+        })
+        .await
+    );
+    let rows = events_of(&fx, &sup, TaskEventKind::RoomMessage).await;
+    assert!(rows[0].text.ends_with(" in Untitled: PR is up"), "{rows:?}");
+    // An announcement reaches nobody, the owner included.
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "announcement", "text": "fyi" }),
+        )
+        .await,
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fx.store.task_events(&sup, 0).await.unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_ask_is_reposted_once_after_thirty_minutes() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let svc = with_hold(&fx, Duration::from_millis(200));
+    let reply = tool(
+        &svc,
+        &a,
+        "room_ask",
+        json!({ "to": "owner", "text": "which port?" }),
+    )
+    .await;
+    assert_eq!(reply.0, NO_ANSWER_YET);
+    // An ask already answered is never reposted.
+    let answered = tool(
+        &svc,
+        &a,
+        "room_ask",
+        json!({ "to": "owner", "text": "which db?" }),
+    )
+    .await;
+    assert_eq!(answered.0, NO_ANSWER_YET);
+    let room = op_room(&sup);
+    let second = asks(&fx, &room).await[1].id;
+    assert!(fx
+        .svc
+        .room_answer(&MemberRef::Owner, second, "sqlite")
+        .await
+        .unwrap());
+
+    let reaper =
+        fleet_daemon::supervisor::start_idle_reaper(fx.svc.clone(), Duration::from_millis(50));
+    fx.clock.advance(29 * 60);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(events_of(&fx, &sup, TaskEventKind::RoomMessage)
+        .await
+        .is_empty());
+
+    fx.clock.advance(60);
+    assert!(
+        wait_until(|| async {
+            !events_of(&fx, &sup, TaskEventKind::RoomMessage)
+                .await
+                .is_empty()
+        })
+        .await
+    );
+    fx.clock.advance(3600);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    reaper.abort();
+    let rows = events_of(&fx, &sup, TaskEventKind::RoomMessage).await;
+    assert_eq!(rows.len(), 1, "once: {rows:?}");
+    assert!(rows[0].text.contains("which port?"), "{rows:?}");
+    assert_eq!(rows[0].task, a);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_given_while_the_asker_works_is_typed_once_after_review() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let svc = with_hold(&fx, Duration::from_millis(300));
+    rooms::start_delivery_watcher(svc.clone());
+    let reply = tool(
+        &svc,
+        &a,
+        "room_ask",
+        json!({ "to": "owner", "text": "which port?" }),
+    )
+    .await;
+    assert_eq!(reply.0, NO_ANSWER_YET);
+    let ask = wait_ask(&fx, &op_room(&sup)).await;
+    assert!(svc
+        .room_answer(&MemberRef::Owner, ask, "port 7070")
+        .await
+        .unwrap());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!screen(&fx.sessions, &a).contains(NOTICE));
+
+    set_status(&fx, &a, Status::Review).await;
+    let line = format!("{NOTICE} owner answered your ask {ask}: port 7070");
+    assert!(pane_contains(&fx, &a, &line).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pane = screen(&fx.sessions, &a);
+    assert_eq!(pane.matches(&line).count(), 1, "{pane}");
+    // `wait_for_fleet` has it too.
+    let (text, _) = tool(&svc, &a, "wait_for_fleet", json!({})).await;
+    assert_eq!(text, format!("owner answered your ask {ask}: port 7070"));
 }

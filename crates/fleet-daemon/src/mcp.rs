@@ -139,7 +139,7 @@ pub fn tools(kind: AgentKind) -> Value {
             ),
             tool(
                 "wait_for_fleet",
-                "Wait until a specialist finishes, fails or needs the owner, and say what happened. Returns `no change` after a while; call it again.",
+                "Wait until a specialist finishes, fails or needs the owner, or a room post comes for you, and say what happened. Returns `no change` after a while; call it again.",
                 json!({}),
                 &[],
             ),

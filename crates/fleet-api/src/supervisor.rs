@@ -53,6 +53,10 @@ pub enum TaskEventKind {
     ChecksFailed,
     PrOpened,
     PrMerged,
+    /// A room message to the owner, or an ask left unanswered for half an hour.
+    RoomMessage,
+    /// A room ask to the owner or the supervisor.
+    RoomAsk,
 }
 
 /// Something that happened to a task, kept for the conversation that started it.

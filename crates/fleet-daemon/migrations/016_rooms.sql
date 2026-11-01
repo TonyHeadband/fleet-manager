@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS room_members (
     PRIMARY KEY (room, member)
 );
 CREATE INDEX IF NOT EXISTS room_members_member ON room_members (member);
--- `sender` and `recipient` use the member forms; a NULL recipient is everyone.
+-- `sender` and `recipient` use the member forms; a NULL recipient is everyone. `reposted_at` is when an ask left
+-- unanswered for 30 minutes was put to the owner again.
 CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     room TEXT NOT NULL,
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS posts (
     text TEXT NOT NULL,
     at INTEGER NOT NULL,
     answered_at INTEGER,
-    breakdown_version INTEGER
+    breakdown_version INTEGER,
+    reposted_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS posts_room ON posts (room, id);

@@ -7,6 +7,7 @@ import { FleetError } from "../api/client";
 import type { ChatAsk } from "../api/generated/ChatAsk";
 import type { ChatBody } from "../api/generated/ChatBody";
 import type { ChatItem } from "../api/generated/ChatItem";
+import type { TaskEventKind } from "../api/generated/TaskEventKind";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, factory, fakeClient, persona, product, schema } from "../test/fixtures";
 import { ChatPane, type ChatClient } from "./ChatPane";
@@ -96,7 +97,7 @@ describe("ChatPane", () => {
 
   it("event_rows_render_as_system_lines_with_their_tone", () => {
     start();
-    const event = (kind: "needs_you" | "checks_passed" | "checks_failed" | "pr_opened" | "pr_merged", text: string) =>
+    const event = (kind: TaskEventKind, text: string) =>
       item({ type: "event", task: "t1", task_title: "Build X", kind, text });
     page([
       prompt("Resume the task", "system"),
@@ -105,12 +106,14 @@ describe("ChatPane", () => {
       event("checks_passed", "checks passed"),
       event("pr_opened", "PR opened"),
       event("pr_merged", "PR merged"),
+      event("room_message", "Build X in Untitled: PR is up"),
+      event("room_ask", "Build X in Untitled: can I change the schema?"),
     ]);
     const rows = [...feed().querySelectorAll(".chat-line[data-event]")];
-    expect(rows.map((r) => r.getAttribute("data-from"))).toEqual(Array(5).fill("system"));
+    expect(rows.map((r) => r.getAttribute("data-from"))).toEqual(Array(7).fill("system"));
     expect(rows[0]!.querySelector(".chat-event-title")).toHaveTextContent("Build X");
     expect(rows[0]).toHaveTextContent("Build X needs you · approve the plan");
-    expect(rows.map((r) => r.querySelector(".chat-mark")!.getAttribute("data-tone"))).toEqual(["accent", "danger", "done", "done", "done"]);
+    expect(rows.map((r) => r.querySelector(".chat-mark")!.getAttribute("data-tone"))).toEqual(["accent", "danger", "done", "done", "done", "done", "accent"]);
     const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/\.chat-event-title \{[^}]*color: var\(--text-high\);/);
     expect(css).toMatch(/\.chat-mark\[data-tone="accent"\] \{[^}]*background: var\(--fill\);/);

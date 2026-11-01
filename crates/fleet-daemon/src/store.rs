@@ -1778,6 +1778,31 @@ impl Store {
         row.as_ref().map(post_row).transpose()
     }
 
+    /// The open asks made at or before `before` that were never reposted, oldest first.
+    pub async fn stale_asks(&self, before: i64) -> Result<Vec<Post>> {
+        let rows = sqlx::query(
+            "SELECT * FROM posts WHERE kind = 'ask' AND answered_at IS NULL AND reposted_at IS NULL AND at <= ? \
+             ORDER BY id",
+        )
+        .bind(before)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(post_row).collect()
+    }
+
+    /// Records that the ask was reposted; false when it already was, so only one caller reposts it.
+    pub async fn mark_reposted(&self, ask: i64, at: i64) -> Result<bool> {
+        let _w = self.write_lock.lock().await;
+        let n =
+            sqlx::query("UPDATE posts SET reposted_at = ? WHERE id = ? AND reposted_at IS NULL")
+                .bind(at)
+                .bind(ask)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        Ok(n == 1)
+    }
+
     /// The room's posts with an id above `upto` that `member` did not send, oldest first.
     pub async fn posts_after(&self, room: &str, member: &str, upto: i64) -> Result<Vec<Post>> {
         let rows = sqlx::query(

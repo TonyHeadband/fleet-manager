@@ -224,6 +224,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     svc.start_merge_watcher(fleet_daemon::merges::MERGE_CHECK_EVERY);
     fleet_daemon::supervisor::start_event_watcher(svc.clone());
     fleet_daemon::rooms::start_room_watcher(svc.clone());
+    fleet_daemon::rooms::start_delivery_watcher(svc.clone());
     fleet_daemon::supervisor::start_idle_reaper(svc.clone(), fleet_daemon::supervisor::REAP_EVERY);
 
     let ticker = svc.clone();

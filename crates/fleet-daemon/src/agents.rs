@@ -1024,6 +1024,8 @@ pub struct AgentService {
     pub(crate) breakdown_waiters: Mutex<HashMap<String, oneshot::Sender<BreakdownAnswer>>>,
     /// The held `room_ask` calls, by post id.
     pub(crate) asks: crate::rooms::asks::Asks,
+    /// Room notices waiting for their agent to stop working, by live agent id.
+    pub(crate) notices: crate::rooms::deliver::Notices,
     /// Tasks whose `open_pr` is past its breakdown check, by task id. A proposal or spawn for one is refused
     /// rather than held: the gate can run for half an hour, and `breakdown_lock` is every task's.
     pub(crate) gating: Mutex<HashSet<String>>,
@@ -1110,6 +1112,7 @@ impl AgentService {
             breakdown_lock: tokio::sync::Mutex::new(()),
             breakdown_waiters: Mutex::new(HashMap::new()),
             asks: Default::default(),
+            notices: Default::default(),
             gating: Mutex::new(HashSet::new()),
             measure_tx: OnceLock::new(),
             measure_queued: Arc::new(Mutex::new(HashSet::new())),

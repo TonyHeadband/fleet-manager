@@ -1,0 +1,268 @@
+//! Waking a post's recipients, and putting what is for the owner in front of them.
+//!
+//! A notice is never typed into a running turn. An orchestrator hears of a post from `wait_for_fleet` (its task's
+//! inbox) and from one line typed when it is at its input box; a supervisor conversation from a message, which
+//! resumes it if it has exited. An agent that cannot take the line now keeps it in its pending queue until it next
+//! reaches Review, when everything queued is typed as one line.
+//!
+//! The queue is in memory. A daemon restart ends every session, so a queued line has nobody to be typed into; what it
+//! said is not lost: the post stays in the room for `room_read`, an orchestrator's inbox is stored with its task, and
+//! an answer given after the restart is delivered afresh.
+use super::posts::kind_word;
+use crate::agents::{one_line, AgentService, ServiceError};
+use crate::store::{RoomRow, StoreError};
+use crate::supervisor::{route_with, Supervisor};
+use fleet_api::{
+    AgentId, AgentKind, EventKind, FleetEvent, FleetEventKind, MemberRef, Post, PostKind, Status,
+    TaskEventKind,
+};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
+use tracing::warn;
+
+/// How a notice starts, so the agent knows the line is the daemon's and not the owner's.
+const FROM: &str = "Fleet Manager:";
+/// How long an ask stays open before it is put to the owner again.
+pub const REPOST_AFTER: i64 = 30 * 60;
+
+#[derive(Default)]
+pub struct Notices {
+    /// Held from reading an agent's status to typing its queue, by `flush` alone: a line queued just as its agent
+    /// goes idle is typed by the queueing side or by the watcher, never by both and never by neither.
+    lock: tokio::sync::Mutex<()>,
+    queue: Mutex<HashMap<AgentId, Vec<String>>>,
+}
+
+impl Notices {
+    fn push(&self, agent: &AgentId, line: String) {
+        let mut q = self.queue.lock().expect("notices poisoned");
+        let lines = q.entry(agent.clone()).or_default();
+        // Two posts of one kind from one sender in one room read the same: once is enough.
+        if !lines.contains(&line) {
+            lines.push(line);
+        }
+    }
+
+    fn take(&self, agent: &AgentId) -> Vec<String> {
+        self.queue
+            .lock()
+            .expect("notices poisoned")
+            .remove(agent)
+            .unwrap_or_default()
+    }
+
+    /// Puts back lines that could not be typed, ahead of any queued since.
+    fn restore(&self, agent: &AgentId, mut lines: Vec<String>) {
+        let mut q = self.queue.lock().expect("notices poisoned");
+        for l in q.remove(agent).unwrap_or_default() {
+            if !lines.contains(&l) {
+                lines.push(l);
+            }
+        }
+        q.insert(agent.clone(), lines);
+    }
+
+    fn waiting(&self) -> Vec<AgentId> {
+        self.queue
+            .lock()
+            .expect("notices poisoned")
+            .keys()
+            .cloned()
+            .collect()
+    }
+}
+
+/// Wakes the recipients of a message or an ask, and surfaces it to the owner when it is theirs: one addressed to
+/// the owner, or an ask to the supervisor. Announcements and answers wake nobody here.
+pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), ServiceError> {
+    if !matches!(post.kind, PostKind::Message | PostKind::Ask) {
+        return Ok(());
+    }
+    let Some(room) = svc.store.room(&post.room).await? else {
+        return Ok(());
+    };
+    let text = format!(
+        "new {} from {} in {}; call room_read.",
+        kind_word(post.kind),
+        post.sender_name,
+        post.room
+    );
+    let recipients = match &post.to {
+        Some(MemberRef::Agent(id)) => vec![id.clone()],
+        Some(_) => vec![],
+        None => svc
+            .store
+            .room_members(&room.id)
+            .await?
+            .into_iter()
+            .filter(|m| m.left_at.is_none() && m.member != post.sender.key())
+            .filter_map(|m| match MemberRef::from_key(&m.member) {
+                MemberRef::Agent(a) => Some(a),
+                _ => None,
+            })
+            .collect(),
+    };
+    for id in &recipients {
+        if let Err(e) = notify(svc, id, &text).await {
+            warn!(agent_id = %id.0, post = post.id, error = %one_line(&e.to_string()), "cannot wake a post's recipient; it is in the room");
+        }
+    }
+    let to_supervisor =
+        matches!((&post.to, &room.conversation), (Some(MemberRef::Agent(a)), Some(c)) if a == c);
+    let kind = match post.kind {
+        PostKind::Message if post.to == Some(MemberRef::Owner) => Some(TaskEventKind::RoomMessage),
+        // A breakdown's ask reaches the owner as the breakdown's own Needs you.
+        PostKind::Ask
+            if (post.to == Some(MemberRef::Owner) || to_supervisor)
+                && post.breakdown_version.is_none() =>
+        {
+            Some(TaskEventKind::RoomAsk)
+        }
+        _ => None,
+    };
+    if let Some(kind) = kind {
+        surface(svc, &room, post, kind, &post.text).await?;
+    }
+    Ok(())
+}
+
+/// Tells the member `text` (a line without the `Fleet Manager:` lead): an orchestrator task through its inbox and
+/// its live agent, a supervisor conversation through a message. Anything else is not woken.
+pub(crate) async fn notify(
+    svc: &Arc<AgentService>,
+    member: &AgentId,
+    text: &str,
+) -> Result<(), ServiceError> {
+    let line = format!("{FROM} {text}");
+    let live = match svc.store.task(member).await? {
+        Some(t) if t.kind == AgentKind::Orchestrator => {
+            let ev = FleetEvent {
+                at: svc.options().clock.now(),
+                step: 0,
+                agent: t.id.clone(),
+                kind: FleetEventKind::RoomPost,
+                detail: text.to_string(),
+            };
+            svc.store.update_task(&t.id, |p| p.inbox.push(ev)).await?;
+            t.lead.unwrap_or(t.id)
+        }
+        Some(_) => return Ok(()),
+        None => match svc.find(member).await {
+            Ok(a) if a.kind == AgentKind::Supervisor => a.id,
+            _ => return Ok(()),
+        },
+    };
+    svc.notices.push(&live, line);
+    flush(svc, &live).await;
+    Ok(())
+}
+
+/// Types the agent's queued notices, as one line, if it can take them now; else leaves them queued.
+async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
+    let _l = svc.notices.lock.lock().await;
+    let a = match svc.find(id).await {
+        Ok(a) => a,
+        // Gone for good: nobody is left to read them.
+        Err(ServiceError::NotFound) => {
+            svc.notices.take(id);
+            return;
+        }
+        Err(e) => {
+            warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot read the agent its notices are for");
+            return;
+        }
+    };
+    if a.kind == AgentKind::Supervisor {
+        // `message` resumes an exited conversation and waits for its input box; a prompt may be up at Needs you.
+        if matches!(a.status, Status::Working | Status::NeedsYou) {
+            return;
+        }
+        let lines = svc.notices.take(id);
+        if lines.is_empty() {
+            return;
+        }
+        // Off the caller: a resume can take seconds, and the poster carries on.
+        let (svc, id) = (svc.clone(), id.clone());
+        tokio::spawn(async move {
+            if let Err(e) = Supervisor::new(svc).message(&id, &lines.join(" ")).await {
+                warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot tell the supervisor of a room post; it is in the room");
+            }
+        });
+        return;
+    }
+    if a.status == Status::Working {
+        return;
+    }
+    let lines = svc.notices.take(id);
+    if lines.is_empty() {
+        return;
+    }
+    if !svc.type_line(&a, &lines.join(" ")).await {
+        svc.notices.restore(id, lines);
+    }
+}
+
+/// Puts the post in the owner's view: a `TaskEvent` routed to the sender's task's conversation, so it is a chat row
+/// there and a toast. A post whose sender is no task (a supervisor's own message) is already in the owner's chat
+/// with that supervisor, and `route_with` drops it.
+async fn surface(
+    svc: &AgentService,
+    room: &RoomRow,
+    post: &Post,
+    kind: TaskEventKind,
+    text: &str,
+) -> Result<(), StoreError> {
+    let MemberRef::Agent(sender) = &post.sender else {
+        return Ok(());
+    };
+    let title = super::title(&svc.store, room).await?;
+    let text = format!("{} in {title}: {text}", post.sender_name);
+    route_with(&svc.store, svc.options().clock.now(), sender, kind, text).await
+}
+
+/// Puts each ask open for `REPOST_AFTER` to the owner once more, as a message; the post records it.
+pub async fn repost_stale_asks(svc: &AgentService) -> Result<(), ServiceError> {
+    let now = svc.options().clock.now();
+    for mut ask in svc.store.stale_asks(now - REPOST_AFTER).await? {
+        if !svc.store.mark_reposted(ask.id, now).await? {
+            continue;
+        }
+        let Some(room) = svc.store.room(&ask.room).await? else {
+            continue;
+        };
+        ask.sender_name = svc.name_of(&room, &ask.sender).await?;
+        let text = format!("unanswered for 30 minutes: {}", ask.text);
+        surface(svc, &room, &ask, TaskEventKind::RoomMessage, &text).await?;
+    }
+    Ok(())
+}
+
+/// Types an agent's queued notices when it reaches Review. A lagged receiver may have missed a transition, so it
+/// tries every agent with notices waiting.
+pub fn start_delivery_watcher(svc: Arc<AgentService>) -> JoinHandle<()> {
+    let mut events = svc.store.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(ev) => {
+                    if let EventKind::StatusChanged {
+                        id,
+                        status: Status::Review,
+                        ..
+                    } = ev.kind
+                    {
+                        flush(&svc, &id).await;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    for id in svc.notices.waiting() {
+                        flush(&svc, &id).await;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    })
+}

@@ -358,7 +358,8 @@ fn remove_dirs(dirs: &[&Path]) {
 
 /// Every `every`, ends the process of each conversation that has sat in Review for `IDLE_EXIT`; a message resumes
 /// it. A conversation that is working, needs you, or is starting is never ended, nor one that got a message within
-/// `IDLE_EXIT`: it is still in Review until Claude's hook reports the message.
+/// `IDLE_EXIT`: it is still in Review until Claude's hook reports the message. Each round also puts each room ask
+/// left open for 30 minutes to the owner once more.
 pub fn start_idle_reaper(svc: Arc<AgentService>, every: Duration) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(every);
@@ -367,6 +368,9 @@ pub fn start_idle_reaper(svc: Arc<AgentService>, every: Duration) -> JoinHandle<
             tick.tick().await;
             if let Err(e) = reap(&svc).await {
                 warn!(error = %one_line(&e.to_string()), "the supervisor idle reaper could not read the agents");
+            }
+            if let Err(e) = crate::rooms::repost_stale_asks(&svc).await {
+                warn!(error = %one_line(&e.to_string()), "cannot repost the stale room asks");
             }
         }
     })

@@ -9,13 +9,15 @@
 //! has set the origin. Ends change no event of their own (the merge checker, a stop and an archive store the
 //! record silently), so the watcher re-reads every task on the events that come with an end.
 pub mod asks;
+pub mod deliver;
 pub mod posts;
 mod watch;
 
 use crate::store::{RoomRow, Store, StoreError};
-use fleet_api::{AgentId, AgentKind, MemberRef, PrState, Room, RoomKind, Task, TaskState};
+use fleet_api::{Agent, AgentId, AgentKind, MemberRef, PrState, Room, RoomKind, Task, TaskState};
 use std::collections::HashSet;
 
+pub use deliver::{repost_stale_asks, start_delivery_watcher};
 pub use watch::start_room_watcher;
 
 const UNTITLED: &str = "Untitled";
@@ -102,19 +104,7 @@ pub async fn list(store: &Store) -> Result<Vec<Room>, StoreError> {
     let agents = store.snapshot().await?.agents;
     let mut out = Vec::new();
     for r in store.rooms().await? {
-        let title = match (&r.kind, &r.product, &r.conversation) {
-            (RoomKind::Product, Some(p), _) => match store.product(p).await? {
-                Some(row) => row.name,
-                None => p.clone(),
-            },
-            (_, _, Some(c)) => agents
-                .iter()
-                .find(|a| &a.id == c)
-                .and_then(|a| a.title.clone())
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| UNTITLED.to_string()),
-            _ => UNTITLED.to_string(),
-        };
+        let title = title_with(store, &r, &agents).await?;
         out.push(Room {
             unread: store.unread_posts(&r.id, MemberRef::Owner.key()).await?,
             id: r.id,
@@ -127,6 +117,27 @@ pub async fn list(store: &Store) -> Result<Vec<Room>, StoreError> {
         });
     }
     Ok(out)
+}
+
+/// The room as people read it: its product's name, or its conversation's title.
+pub async fn title(store: &Store, r: &RoomRow) -> Result<String, StoreError> {
+    title_with(store, r, &store.snapshot().await?.agents).await
+}
+
+async fn title_with(store: &Store, r: &RoomRow, agents: &[Agent]) -> Result<String, StoreError> {
+    Ok(match (&r.kind, &r.product, &r.conversation) {
+        (RoomKind::Product, Some(p), _) => match store.product(p).await? {
+            Some(row) => row.name,
+            None => p.clone(),
+        },
+        (_, _, Some(c)) => agents
+            .iter()
+            .find(|a| &a.id == c)
+            .and_then(|a| a.title.clone())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| UNTITLED.to_string()),
+        _ => UNTITLED.to_string(),
+    })
 }
 
 /// Whether the task is over: archived, done, or every one of its PRs merged or closed. A task at Review with an
