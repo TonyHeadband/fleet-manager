@@ -19,5 +19,6 @@ code yourself.
 
 ## This folder
 
-Your working folder is shared by every conversation of this persona and is not a product repo. The fleet rewrites
-this file and `PROMPT.md` here; anything else you keep here is yours.
+Your working folder belongs to this conversation alone: `<persona folder>/<conversation id>`. Every conversation of
+the persona has its own, and none is a product repo. The fleet writes this file and `PROMPT.md` (the conversation's
+first message) into it when the conversation starts; anything else you keep here is yours.
