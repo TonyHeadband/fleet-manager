@@ -686,6 +686,104 @@ async fn two_answers_resolve_once() {
     assert!(!screen(&fx.sessions, &a).contains(NOTICE));
 }
 
+/// An ask to the owner is the owner's, or the room's supervisor's to relay; one to the supervisor, the supervisor's
+/// or the owner's; one to an agent, that agent's or the owner's. Another member is told who may answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_addressee_or_its_stand_in_answers_an_ask() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let other = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let svc = with_hold(&fx, Duration::from_millis(200));
+    let ask_of = |to: &'static str| {
+        let (svc, a, room) = (svc.clone(), a.clone(), room.clone());
+        let fx = &fx;
+        async move {
+            let reply = tool(
+                &svc,
+                &a,
+                "room_ask",
+                json!({ "to": to, "text": "ship it?" }),
+            )
+            .await;
+            assert_eq!(reply.0, NO_ANSWER_YET);
+            asks(fx, &room).await.pop().unwrap().id
+        }
+    };
+    let answer = |by: &AgentId, ask: i64| {
+        let (svc, by) = (fx.svc.clone(), by.clone());
+        async move {
+            tool(
+                &svc,
+                &by,
+                "room_answer",
+                json!({ "ask": ask, "text": "yes" }),
+            )
+            .await
+        }
+    };
+
+    let to_owner = ask_of("owner").await;
+    assert_eq!(
+        answer(&other, to_owner).await,
+        (
+            format!("ask {to_owner} is for the owner: only the owner or the room's supervisor may answer it"),
+            true
+        )
+    );
+    assert_eq!(answer(&sup, to_owner).await, ("answered".into(), false));
+
+    let to_supervisor = ask_of("supervisor").await;
+    assert_eq!(
+        answer(&other, to_supervisor).await,
+        (
+            format!("ask {to_supervisor} is for the supervisor: only the supervisor or the owner may answer it"),
+            true
+        )
+    );
+    assert!(fx
+        .svc
+        .room_answer(&MemberRef::Owner, to_supervisor, "yes")
+        .await
+        .unwrap());
+
+    // No tool asks one agent, but a stored one is held to the same rule.
+    let ev = fx
+        .store
+        .add_post(&Post {
+            id: 0,
+            room: room.clone(),
+            sender: MemberRef::Agent(a.clone()),
+            sender_name: String::new(),
+            to: Some(MemberRef::Agent(other.clone())),
+            kind: PostKind::Ask,
+            reply_to: None,
+            text: "your branch or mine?".into(),
+            at: 0,
+            answered_at: None,
+            breakdown_version: None,
+        })
+        .await
+        .unwrap();
+    let fleet_api::EventKind::RoomPost { post } = ev.kind else {
+        panic!("{ev:?}")
+    };
+    let t = fx.store.task(&other).await.unwrap().unwrap();
+    let name = t.title.filter(|t| !t.is_empty()).unwrap_or(t.name);
+    assert_eq!(
+        answer(&sup, post.id).await,
+        (
+            format!(
+                "ask {} is for {name}: only they or the owner may answer it",
+                post.id
+            ),
+            true
+        )
+    );
+    assert_eq!(answer(&other, post.id).await, ("answered".into(), false));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_supervisor_cannot_ask() {
     let fx = fixture().await;

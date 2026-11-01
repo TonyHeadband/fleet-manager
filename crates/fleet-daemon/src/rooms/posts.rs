@@ -441,7 +441,7 @@ impl AgentService {
         self.room_answer(&me, ask, text).await
     }
 
-    /// Answers the ask as `by`: the owner, or a member of its room other than the asker. False when it was answered
+    /// Answers the ask as `by`: the owner, or whoever `may_answer` lets, never the asker. False when it was answered
     /// already. The answer goes to the held call, or else to the asker as a fleet notice.
     pub async fn room_answer(
         self: &Arc<Self>,
@@ -462,15 +462,7 @@ impl AgentService {
             if by == &q.sender {
                 return Err(refuse("you cannot answer your own ask"));
             }
-            let present = self
-                .store
-                .room_members(&room.id)
-                .await?
-                .iter()
-                .any(|m| m.member == by.key() && m.left_at.is_none());
-            if !present {
-                return Err(refuse(format!("you are not in room {}", room.id)));
-            }
+            self.may_answer(&room, &q, by).await?;
         }
         let mut answer = self.new_post(&room, by.clone(), PostKind::Answer, text)?;
         answer.to = Some(q.sender.clone());
@@ -488,6 +480,48 @@ impl AgentService {
             self.notice_answer(&q, &answer).await;
         }
         Ok(true)
+    }
+
+    /// Refuses `by` (not the owner) unless the ask is theirs to answer: one to the owner, the room's supervisor
+    /// relaying it; one to the supervisor, the supervisor; one to an agent, that agent; one to all, any member. The
+    /// refusal names who may.
+    async fn may_answer(
+        &self,
+        room: &RoomRow,
+        q: &Post,
+        by: &MemberRef,
+    ) -> Result<(), ServiceError> {
+        let MemberRef::Agent(me) = by else {
+            return Err(refuse(format!("{} cannot answer asks", by.key())));
+        };
+        let agents = self.store.snapshot().await?.agents;
+        let supervisors = super::supervisors_of(&self.store, room, &agents).await?;
+        let refusal = match &q.to {
+            None => {
+                if !super::present_agents(&self.store, &room.id)
+                    .await?
+                    .contains(me)
+                {
+                    return Err(refuse(format!("you are not in room {}", room.id)));
+                }
+                None
+            }
+            Some(MemberRef::Owner) => (!supervisors.contains(me))
+                .then(|| "the owner: only the owner or the room's supervisor".to_string()),
+            Some(MemberRef::Agent(to)) if super::is_supervisor(&agents, to) => (me != to
+                && !supervisors.contains(me))
+            .then(|| "the supervisor: only the supervisor or the owner".to_string()),
+            Some(to @ MemberRef::Agent(id)) if me != id => Some(format!(
+                "{}: only they or the owner",
+                self.name_of(room, to).await?
+            )),
+            Some(MemberRef::Agent(_)) => None,
+            Some(MemberRef::Daemon) => Some("the daemon: only the owner".to_string()),
+        };
+        match refusal {
+            Some(who) => Err(refuse(format!("ask {} is for {who} may answer it", q.id))),
+            None => Ok(()),
+        }
     }
 
     /// The owner's approval of the breakdown version the ask puts to them: the one answer that approves, since text
