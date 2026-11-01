@@ -196,6 +196,22 @@ impl PersonaEnv {
     }
 }
 
+/// The empty folder beside a persona's `gh` one that fleet agents' `GH_CONFIG_DIR` points at, given the persona's own.
+pub fn gh_agent_dir(gh_dir: &str) -> String {
+    Path::new(gh_dir)
+        .with_file_name("gh-agent")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Makes sure the persona's `gh-agent` folder exists: personas made before it was added have none.
+fn ensure_gh_agent(env: &PersonaEnv) -> Result<(), PersonaError> {
+    if let Some((_, gh)) = env.vars.iter().find(|(k, _)| k == "GH_CONFIG_DIR") {
+        std::fs::create_dir_all(gh_agent_dir(gh))?;
+    }
+    Ok(())
+}
+
 /// The environment a persona's agent (and its git and gh) runs under. No token goes in: `gh` finds its login in
 /// `GH_CONFIG_DIR`, and git asks the daemon binary, which reads the token file, for credentials.
 pub fn persona_env(row: &PersonaRow, personas_dir: &Path, daemon_exe: &Path) -> PersonaEnv {
@@ -563,10 +579,11 @@ impl Personas {
                 use std::os::unix::fs::DirBuilderExt;
                 b.mode(0o700);
             }
-            // Both folders or neither: a half-made persona folder would be skipped as "taken" forever.
+            // All folders or neither: a half-made persona folder would be skipped as "taken" forever.
             if let Err(e) = b
                 .create(dir.join("claude"))
                 .and_then(|()| b.create(dir.join("gh")))
+                .and_then(|()| b.create(dir.join("gh-agent")))
             {
                 let _ = std::fs::remove_dir_all(&dir);
                 return Err(e.into());
@@ -825,7 +842,9 @@ impl Personas {
                 return Err(login.refusal(&row.name, which));
             }
         }
-        Ok(persona_env(&row, &self.personas_dir, &self.daemon_exe))
+        let env = persona_env(&row, &self.personas_dir, &self.daemon_exe);
+        ensure_gh_agent(&env)?;
+        Ok(env)
     }
 
     /// The persona's environment as stored, without asking either CLI: enough to find what its sessions left on disk,
@@ -849,6 +868,8 @@ impl Personas {
         if !github.state.ok {
             return Err(github.refusal(&row.name, "GitHub"));
         }
-        Ok(persona_env(&row, &self.personas_dir, &self.daemon_exe))
+        let env = persona_env(&row, &self.personas_dir, &self.daemon_exe);
+        ensure_gh_agent(&env)?;
+        Ok(env)
     }
 }

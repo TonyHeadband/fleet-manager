@@ -19,7 +19,7 @@ use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::internal::{Internal, MergeOutcome, MergeReport, PushOutcome};
 use crate::overrides;
-use crate::personas::PersonaEnv;
+use crate::personas::{gh_agent_dir, PersonaEnv};
 use crate::repos::Resolved;
 use crate::store::StoreError;
 use fleet_api::{
@@ -440,6 +440,8 @@ fn pr_section(rules: &PrRules) -> String {
 /// added by path may have a local origin). Scoped by URL, not by remote name, so the remotes a repo's own tests make
 /// (local paths, often named `origin`) push as they do on CI. Not a boundary: unsetting the env gets past it, and git
 /// ignores `pushInsteadOf` for a remote with its own `pushurl`. `open_pr` pushes with the persona's env alone.
+/// A fleet agent also gets no credentials: the daemon holds the token and does the forge calls, so its `gh` reads an
+/// empty config dir and the persona's credential helper is blanked. Solo keeps the persona's env as it is.
 pub fn agent_vars(
     persona: &PersonaEnv,
     kind: AgentKind,
@@ -448,6 +450,15 @@ pub fn agent_vars(
     let mut vars = persona.vars.clone();
     if kind == AgentKind::Solo {
         return vars;
+    }
+    // An unset GH_CONFIG_DIR would fall back to the owner's own gh login. The helper's slot stays (emptied), so the
+    // count and the push block's indices do not move.
+    for (k, v) in vars.iter_mut() {
+        match k.as_str() {
+            "GH_CONFIG_DIR" => *v = gh_agent_dir(v),
+            "GIT_CONFIG_VALUE_1" => v.clear(),
+            _ => {}
+        }
     }
     let host = &persona.host;
     let mut blocked = vec![
@@ -482,8 +493,9 @@ pub fn agent_vars(
 /// script that pushes fails like an agent would), less what is the agents' alone. The persona's commit identity and
 /// its protocol limit would meet the repo's own tests (a test asserting an author, one fetching over ssh) where CI
 /// has neither; the gate's verdict has to be CI's. `gate::run` removes inherited copies of the same variables
-/// (`gate::left_out`), so a daemon started from a shell that exports them does not leak them either. `GH_CONFIG_DIR` and the cleared credential helpers stay, so the
-/// tests never reach the user's own logins.
+/// (`gate::left_out`), so a daemon started from a shell that exports them does not leak them either. The agents' empty
+/// `GH_CONFIG_DIR` and cleared credential helper stay, so the tests never reach the user's own logins or the persona's
+/// token, as on CI.
 pub fn gate_vars(persona: &PersonaEnv, origins: &[String]) -> Vec<(String, String)> {
     let mut vars = agent_vars(persona, AgentKind::Orchestrator, origins);
     vars.retain(|(k, _)| !gate::left_out(k));

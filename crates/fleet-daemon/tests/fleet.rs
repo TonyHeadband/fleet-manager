@@ -608,6 +608,58 @@ async fn a_fleet_agents_env_blocks_its_task_repos_origin_off_the_host() {
     assert_eq!(git(&bare, &["branch", "--list", "fleet/x"]), "");
 }
 
+fn var<'a>(vars: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
+fn token_of(persona: &fleet_daemon::personas::PersonaEnv) -> PathBuf {
+    let gh = Path::new(var(&persona.vars, "GH_CONFIG_DIR").unwrap());
+    fleet_daemon::forge::token::token_path(gh.parent().unwrap().parent().unwrap(), &persona.id)
+}
+
+fn assert_no_credentials(vars: &[(String, String)], token: &Path, what: &str) {
+    let gh = var(vars, "GH_CONFIG_DIR").unwrap_or_default();
+    assert!(gh.ends_with("gh-agent"), "{what}: GH_CONFIG_DIR {gh}");
+    assert_eq!(var(vars, "GIT_CONFIG_VALUE_1"), Some(""), "{what}");
+    let token = token.to_string_lossy();
+    assert!(
+        vars.iter().all(|(_, v)| !v.contains(token.as_ref())),
+        "{what}: a var names the token file"
+    );
+}
+
+#[tokio::test]
+async fn an_orchestrator_and_a_specialist_get_no_credentials() {
+    let fx = fixture().await;
+    let persona = fixture_env(&fx).await;
+    let token = token_of(&persona);
+    assert!(var(&persona.vars, "GIT_CONFIG_VALUE_1")
+        .unwrap()
+        .contains(token.to_str().unwrap()));
+    for kind in [AgentKind::Orchestrator, AgentKind::Specialist] {
+        let vars = fleet_daemon::fleet::ops::agent_vars(&persona, kind, &[]);
+        assert_no_credentials(&vars, &token, &format!("{kind:?}"));
+        assert!(Path::new(var(&vars, "GH_CONFIG_DIR").unwrap()).is_dir());
+    }
+}
+
+#[tokio::test]
+async fn a_solo_agent_keeps_the_personas_env() {
+    let fx = fixture().await;
+    let persona = fixture_env(&fx).await;
+    let vars = fleet_daemon::fleet::ops::agent_vars(&persona, AgentKind::Solo, &[]);
+    assert_eq!(vars, persona.vars);
+}
+
+#[tokio::test]
+async fn the_gate_runs_without_credentials() {
+    let fx = fixture().await;
+    let persona = fixture_env(&fx).await;
+    let token = token_of(&persona);
+    let vars = fleet_daemon::fleet::ops::gate_vars(&persona, &[]);
+    assert_no_credentials(&vars, &token, "gate");
+}
+
 fn step(title: &str, specialist: &str, depends_on: &[u32]) -> StepDraft {
     StepDraft {
         n: None,
