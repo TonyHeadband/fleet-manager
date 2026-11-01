@@ -65,7 +65,9 @@ export function NewTaskDialog({ draft, onDraft, personas, product, repos, reposE
     const buttons = [...(radios.current?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
     const from = buttons.indexOf(document.activeElement as HTMLElement);
     const to = ((from < 0 ? tabStop : from) + by + repos.length) % repos.length;
-    onDraft({ ...draft, chosen: [repos[to].name] });
+    const repo = repos[to];
+    if (!repo) return;
+    onDraft({ ...draft, chosen: [repo.name] });
     buttons[to]?.focus();
   };
 
