@@ -156,22 +156,9 @@
   .history-popup {
     animation: fui-menu-up var(--motion-menu) var(--ease-push) both;
   }
-  /* A dialog draws a 1px accent line out from its centre, then opens up and down from it as the line goes; the
-     window dims meanwhile. It closes at once. */
+  /* A dialog is drawn left to right in one wipe, as every HUD panel is; the window dims meanwhile. */
   .dialog {
-    position: relative;
-    animation: fui-dialog var(--motion-dialog) var(--ease-push) both;
-  }
-  .dialog::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 1px;
-    background: var(--fill);
-    pointer-events: none;
-    animation: fui-dialog-line var(--motion-dialog) var(--ease-push) both;
+    animation: fui-wipe var(--motion-dialog) var(--ease-push) both;
   }
   .dialog-backdrop {
     animation: fui-dim var(--motion-dialog) var(--ease-push) both;
@@ -182,9 +169,6 @@
   }
   .dialog-backdrop[data-closing] .dialog {
     animation: fui-dialog-close var(--motion-dialog-close) var(--ease-pull) both;
-  }
-  .dialog-backdrop[data-closing] .dialog::after {
-    animation: fui-dialog-line-close var(--motion-dialog-close) var(--ease-pull) both;
   }
   /* A working agent's status edge runs a light band down and back up it, casting a glow beside it in dark; a
      needs-you edge breathes a glow beside it. Hard-edged strips (2, 4 and 6px), as Lite paints them; nothing crosses
@@ -231,9 +215,9 @@
   .chat-calls {
     animation: fui-menu var(--motion-menu) var(--ease-push) both;
   }
-  /* A tooltip (the goal's, a chart's) opens as a dialog does, from its top: a line drawn out from its side, then down. */
+  /* A tooltip (the goal's, a chart's) is drawn left to right in one wipe, as every HUD panel is. */
   .fui-tooltip {
-    animation: fui-tip var(--motion-menu) var(--ease-push) both;
+    animation: fui-wipe var(--motion-menu) var(--ease-push) both;
   }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
@@ -270,17 +254,6 @@
     width: var(--side-width);
   }
 }
-@keyframes fui-tip {
-  from {
-    clip-path: inset(0 0 calc(100% - 1px) 100%);
-  }
-  40% {
-    clip-path: inset(0 0 calc(100% - 1px) 0);
-  }
-  to {
-    clip-path: inset(0);
-  }
-}
 @keyframes fui-menu {
   from {
     clip-path: inset(0 0 100% 0);
@@ -297,51 +270,18 @@
     clip-path: inset(0);
   }
 }
-@keyframes fui-dialog {
-  from {
-    clip-path: inset(calc(50% - 1px) 50%);
-  }
-  40% {
-    clip-path: inset(calc(50% - 1px) 0);
-  }
-  to {
-    clip-path: inset(0);
-  }
-}
-/* The line goes as the card starts opening, so it never lies over the dialog's text. */
-@keyframes fui-dialog-line {
-  40% {
-    opacity: 1;
-  }
-  42%,
-  to {
-    opacity: 0;
-  }
-}
 @keyframes fui-dim {
   from {
     opacity: 0;
   }
 }
+/* The opening wipe backwards: the card retracts to its left edge. */
 @keyframes fui-dialog-close {
   from {
     clip-path: inset(0);
   }
-  60% {
-    clip-path: inset(calc(50% - 1px) 0);
-  }
   to {
-    clip-path: inset(calc(50% - 1px) 50%);
-  }
-}
-/* The line shows only once the card has closed onto it. */
-@keyframes fui-dialog-line-close {
-  from,
-  58% {
-    opacity: 0;
-  }
-  60% {
-    opacity: 1;
+    clip-path: inset(0 100% 0 0);
   }
 }
 @keyframes fui-undim {

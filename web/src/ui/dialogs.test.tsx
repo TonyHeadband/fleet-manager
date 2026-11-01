@@ -30,18 +30,12 @@ describe("dialogs", () => {
     expect(shell).toMatch(/\.dialog > \.form-actions \{[^}]*border-top: 1px solid var\(--border\);/);
   });
 
-  it("a_dialog_opens_from_an_accent_line", () => {
-    expect(reduced).toMatch(/\.dialog \{ position: relative; animation: fui-dialog var\(--motion-dialog\) var\(--ease-push\) both; \}/);
-    expect(reduced).toMatch(
-      /\.dialog::after \{[^}]*top: 50%;[^}]*height: 1px;[^}]*background: var\(--fill\);[^}]*animation: fui-dialog-line var\(--motion-dialog\) var\(--ease-push\) both;/,
-    );
+  it("a_dialog_is_drawn_left_to_right_in_one_wipe", () => {
+    // The HUD draws a panel from left to right, as a view's sections enter (fui-wipe).
+    expect(reduced).toMatch(/\.dialog \{ animation: fui-wipe var\(--motion-dialog\) var\(--ease-push\) both; \}/);
+    expect(motion).not.toMatch(/\.dialog::after|fui-dialog-line|@keyframes fui-dialog \{/);
     expect(reduced).toMatch(/\.dialog-backdrop \{ animation: fui-dim var\(--motion-dialog\) var\(--ease-push\) both; \}/);
-    // First a 1px band grows out from the centre, then the card opens up and down from it.
-    expect(motion).toMatch(
-      /@keyframes fui-dialog \{ from \{ clip-path: inset\(calc\(50% - 1px\) 50%\); \} 40% \{ clip-path: inset\(calc\(50% - 1px\) 0\); \} to \{ clip-path: inset\(0\); \} \}/,
-    );
-    // The line is gone as soon as the card starts opening: it never lies over the dialog's text.
-    expect(motion).toMatch(/@keyframes fui-dialog-line \{[^@]*40% \{ opacity: 1; \} 42%, to \{ opacity: 0; \} \}/);
+    expect(motion).toMatch(/@keyframes fui-wipe \{ from \{ clip-path: inset\(0 100% 0 0\); \} to \{ clip-path: inset\(0\); \} \}/);
     expect(readFileSync("src/generated/theme.css", "utf8")).toContain("--motion-dialog: 380ms;");
   });
 
@@ -124,14 +118,8 @@ describe("dialogs", () => {
       expect(reduced).toMatch(
         /\.dialog-backdrop\[data-closing\] \.dialog \{ animation: fui-dialog-close var\(--motion-dialog-close\) var\(--ease-pull\) both; \}/,
       );
-      expect(reduced).toMatch(
-        /\.dialog-backdrop\[data-closing\] \.dialog::after \{ animation: fui-dialog-line-close var\(--motion-dialog-close\) var\(--ease-pull\) both; \}/,
-      );
-      expect(motion).toMatch(
-        /@keyframes fui-dialog-close \{ from \{ clip-path: inset\(0\); \} 60% \{ clip-path: inset\(calc\(50% - 1px\) 0\); \} to \{ clip-path: inset\(calc\(50% - 1px\) 50%\); \} \}/,
-      );
-      // The line shows only once the card has closed onto it, never over text.
-      expect(motion).toMatch(/@keyframes fui-dialog-line-close \{ from, 58% \{ opacity: 0; \} 60% \{ opacity: 1; \} \}/);
+      // The wipe backwards: the card retracts to its left edge.
+      expect(motion).toMatch(/@keyframes fui-dialog-close \{ from \{ clip-path: inset\(0\); \} to \{ clip-path: inset\(0 100% 0 0\); \} \}/);
       expect(timing.dialogClose).toBeLessThan(timing.dialog);
     });
   });

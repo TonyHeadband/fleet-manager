@@ -119,7 +119,9 @@ describe("chart shared pieces", () => {
     expect(shell).toMatch(/\.fui-tooltip \{[^}]*border-top-color: var\(--fill\)/);
     expect(shell).not.toMatch(/\.goal-tooltip \{[^}]*background/);
     const motion = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ");
-    expect(motion).toMatch(/\.fui-tooltip \{ animation: fui-tip /);
+    // Drawn left to right in one wipe, as every HUD panel is.
+    expect(motion).toMatch(/\.fui-tooltip \{ animation: fui-wipe var\(--motion-menu\) /);
+    expect(motion).not.toMatch(/fui-tip/);
   });
 
   it("the_tooltip_clamps_inside_the_block_at_both_edges", () => {
