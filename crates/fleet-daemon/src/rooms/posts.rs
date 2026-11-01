@@ -9,8 +9,8 @@ use crate::agents::{one_line, AgentService, ServiceError};
 use crate::fleet::ops::detached;
 use crate::store::RoomRow;
 use fleet_api::{
-    task_id, Agent, AgentId, AgentKind, BreakdownVersion, DecideBreakdown, MemberRef, Post,
-    PostKind, RoomKind,
+    task_id, Agent, AgentId, AgentKind, Approval, BreakdownVersion, DecideBreakdown, MemberRef,
+    Post, PostKind, RoomKind, Task,
 };
 use std::sync::Arc;
 
@@ -571,10 +571,15 @@ impl AgentService {
         v: &BreakdownVersion,
     ) -> Result<(), ServiceError> {
         let me = MemberRef::Agent(task.clone());
+        // A close that fails leaves the old ask open; the new version is still put to the room.
         for q in self.store.open_breakdown_asks(me.key()).await? {
             let superseded = format!("superseded by v{}", v.version);
-            self.close_breakdown_ask(&q, &MemberRef::Daemon, &superseded)
-                .await?;
+            if let Err(e) = self
+                .close_breakdown_ask(&q, &MemberRef::Daemon, &superseded)
+                .await
+            {
+                tracing::warn!(ask = q.id, error = %one_line(&e.to_string()), "cannot close a superseded breakdown ask");
+            }
         }
         let mine = self.store.rooms_of(me.key()).await?;
         let Some(id) = default_room(&mine) else {
@@ -606,6 +611,31 @@ impl AgentService {
             if q.breakdown_version == Some(version) {
                 self.close_breakdown_ask(&q, by, text).await?;
             }
+        }
+        Ok(())
+    }
+
+    /// Closes each of the task's open breakdown asks whose version is decided, answered by the owner with the
+    /// recorded outcome: the repair of a decision whose close failed.
+    pub(crate) async fn close_decided_breakdown_asks(&self, t: &Task) -> Result<(), ServiceError> {
+        for q in self.store.open_breakdown_asks(&t.id.0).await? {
+            let Some(v) = t
+                .breakdowns
+                .iter()
+                .find(|v| Some(v.version) == q.breakdown_version)
+            else {
+                continue;
+            };
+            let outcome = match v.approval {
+                Approval::Proposed => continue,
+                Approval::Approved => "approved".to_string(),
+                Approval::ChangesRequested => v
+                    .comment
+                    .clone()
+                    .unwrap_or_else(|| "no comment given".into()),
+            };
+            self.close_breakdown_ask(&q, &MemberRef::Owner, &outcome)
+                .await?;
         }
         Ok(())
     }

@@ -2158,6 +2158,69 @@ async fn a_new_version_supersedes_an_ask_left_open() {
     held.abort();
 }
 
+/// A decision whose ask close failed left the ask open: answering it finds the version decided and closes it with
+/// what was decided.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ask_left_open_for_a_decided_version_is_closed_with_its_outcome() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, ask) = propose(&fx, &a, &room).await;
+    held.abort();
+    fx.store
+        .update_task(&a, |p| {
+            p.breakdowns[0].approval = Approval::ChangesRequested;
+            p.breakdowns[0].comment = Some("smaller steps".into());
+        })
+        .await
+        .unwrap();
+
+    assert!(!fx.svc.room_approve(ask.id).await.unwrap());
+    let answer = answer_to(&fx, ask.id, &room).await;
+    assert_eq!(answer.sender, MemberRef::Owner);
+    assert_eq!(answer.text, "smaller steps");
+    assert!(fx
+        .store
+        .post(ask.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .answered_at
+        .is_some());
+}
+
+/// The panel and the room deciding at once: one wins, and the ask gets one answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panel_decision_racing_a_room_approval_decides_once() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, ask) = propose(&fx, &a, &room).await;
+
+    let (panel, in_room) = tokio::join!(
+        fx.svc.decide_breakdown(&a, decision(true, None)),
+        fx.svc.room_approve(ask.id),
+    );
+    let wins = [panel.is_ok(), matches!(in_room, Ok(true))];
+    assert_eq!(
+        wins.iter().filter(|w| **w).count(),
+        1,
+        "{panel:?} {in_room:?}"
+    );
+    if let Err(e) = &panel {
+        assert!(matches!(e, ServiceError::NoPendingBreakdown), "{e:?}");
+    }
+    let answers = all_posts(&fx, &room)
+        .await
+        .into_iter()
+        .filter(|p| p.reply_to == Some(ask.id))
+        .count();
+    assert_eq!(answers, 1);
+    assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_breakdown_ask_is_not_reposted() {
     let fx = fixture().await;
@@ -2215,6 +2278,13 @@ async fn asks_of_ended_tasks_or_archived_rooms_are_not_reposted() {
     rooms::repost_stale_asks(&fx.svc).await.unwrap();
     assert!(events_of(&fx, &sup, TaskEventKind::RoomMessage)
         .await
+        .is_empty());
+    // Neither is read again on the next tick.
+    assert!(fx
+        .store
+        .stale_asks(fx.clock.now_for_test())
+        .await
+        .unwrap()
         .is_empty());
 }
 

@@ -293,9 +293,11 @@ async fn surface(
 pub async fn repost_stale_asks(svc: &AgentService) -> Result<(), ServiceError> {
     let now = svc.options().clock.now();
     for mut ask in svc.store.stale_asks(now - REPOST_AFTER).await? {
-        // The task left its rooms when it ended; nobody is waiting on the answer any more.
+        // The task left its rooms when it ended; nobody is waiting on the answer any more. Marked, so the next tick
+        // does not read it again.
         if let MemberRef::Agent(t) = &ask.sender {
             if svc.store.task(t).await?.is_some_and(|t| super::ended(&t)) {
+                svc.store.mark_reposted(ask.id, now).await?;
                 continue;
             }
         }

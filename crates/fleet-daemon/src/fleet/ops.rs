@@ -1012,6 +1012,10 @@ impl AgentService {
             .filter(|v| v.approval == Approval::Proposed)
             .map(|v| v.version)
         else {
+            // Decided already. A room ask the decision failed to close is closed now, with what was decided.
+            if let Err(e) = self.close_decided_breakdown_asks(&p).await {
+                warn!(task = %task.0, error = %e, "cannot close a decided breakdown's room ask");
+            }
             return Err(ServiceError::NoPendingBreakdown);
         };
         if let Some(seen) = d.version.filter(|seen| *seen != n) {
