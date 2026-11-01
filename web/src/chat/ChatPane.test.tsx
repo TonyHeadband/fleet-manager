@@ -449,3 +449,35 @@ describe("the Chat in the app", () => {
     expect(rule(".chat-feed")).toMatch(/overflow-x: hidden/);
   });
 });
+
+describe("long messages fold", () => {
+  const heights = (tall: string) =>
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.textContent?.includes(tall) ? 900 : 20;
+    });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("folds_a_tall_message_behind_read_more_and_folds_it_back", async () => {
+    heights("TALL");
+    start();
+    page([reply("TALL report"), reply("short one")]);
+    const more = screen.getByRole("button", { name: "Read more" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getAllByRole("button", { name: /Read more|Show less/ })).toHaveLength(1);
+    expect(screen.getByText("TALL report").closest("[data-folded]")).toHaveAttribute("data-folded", "");
+    await userEvent.click(more);
+    const less = screen.getByRole("button", { name: "Show less" });
+    expect(less).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("TALL report").closest("[data-folded]")).toBeNull();
+    await userEvent.click(less);
+    expect(screen.getByRole("button", { name: "Read more" })).toBeInTheDocument();
+  });
+
+  it("a_short_message_has_no_control", () => {
+    heights("TALL");
+    start();
+    page([reply("short one"), prompt("also short")]);
+    expect(screen.queryByRole("button", { name: /Read more|Show less/ })).toBeNull();
+  });
+});
+

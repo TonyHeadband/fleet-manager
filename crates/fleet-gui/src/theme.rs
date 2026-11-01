@@ -482,6 +482,8 @@ pub mod panel {
     pub const OUTPUT_MAX: f32 = 240.0;
     /// An icon button in a header row (Close, Fullscreen, Open in terminal).
     pub const ICON_BUTTON: f32 = 26.0;
+    /// A chat message's height past which it folds behind "Read more": eight lines of the chat's text.
+    pub const FOLD_MAX: f32 = 192.0;
 }
 
 /// The New task dialog's sizes (new_task.rs), shared with the web UI like `layout`.
