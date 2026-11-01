@@ -2,8 +2,9 @@ import { useEffect, useReducer, useRef } from "react";
 import type { ActionDef } from "../api/generated/ActionDef";
 import type { Agent } from "../api/generated/Agent";
 import type { FieldDef } from "../api/generated/FieldDef";
+import type { UiSchema } from "../api/generated/UiSchema";
 import type { Tone } from "../api/generated/Tone";
-import { evalCondition, fieldValue } from "../api/schema";
+import { columnFor, evalCondition, fieldValue } from "../api/schema";
 import { card } from "../generated/layout";
 import type { IconName } from "../ui/icons";
 
@@ -70,6 +71,27 @@ export function stateBadge(fields: FieldDef[], agent: Agent): { field: FieldDef;
     .sort((a, b) => stateRank(a.key) - stateRank(b.key))[0];
   const first = field && badgeItems(field, agent)[0];
   return field && first ? { field, ...first } : null;
+}
+
+/** What a needs-you activity is about: the tool asked for ("wants to run Bash") or the repo ("wants repo core"). */
+const SUBJECT = /^wants (?:to run|repo) (.+)$/;
+
+/**
+ * The card's one state line: the state badge, unless the column already says it (a plain "Stopped" in Stopped), and
+ * the part of the activity nothing else on the card says. Needs you names what it waits on beside its reason; a
+ * finished review and a stopped agent's last words add nothing to their column.
+ */
+export function stateLine(schema: UiSchema, agent: Agent): { badge: ReturnType<typeof stateBadge>; text: string | null } {
+  const found = stateBadge(schema.card_fields, agent);
+  const badge = found && found.text !== columnFor(schema, agent)?.title ? found : null;
+  const activity = agent.activity || null;
+  const text =
+    agent.status === "needs_you"
+      ? (activity?.match(SUBJECT)?.[1] ?? null)
+      : agent.status === "stopped" || (agent.status === "review" && activity === "finished")
+        ? null
+        : activity;
+  return { badge, text };
 }
 
 /** The first repo and "+N" for the others; both name every repo on hover. */

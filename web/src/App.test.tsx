@@ -82,7 +82,7 @@ describe("App", () => {
       await pick("Persona filter", "Work");
       expect(screen.queryByText("mine")).toBeNull();
       expect(screen.getByText("for work")).toBeInTheDocument();
-      expect(drawerPicker("Active persona"), "the active persona is another thing").toHaveTextContent("Persona Me");
+      expect(drawerPicker("Active persona"), "the active persona is another thing").toHaveTextContent("Me");
       await pick("Persona filter", "All personas");
       expect(screen.getByText("mine")).toBeInTheDocument();
     });
@@ -465,7 +465,7 @@ describe("App", () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     const header = document.querySelector<HTMLElement>(".view-header")!;
     const fleet = within(header).getByRole("button", { name: "Subtasks display" });
-    expect(fleet).toHaveTextContent("Subtasks Compact");
+    expect(fleet).toHaveTextContent("Compact");
     await userEvent.click(fleet);
     const menu = document.querySelector<HTMLElement>(".menu")!;
     expect(within(menu).getAllByRole("button").map((b) => b.textContent)).toEqual(["Show", "Compact", "Hide"]);
@@ -479,11 +479,11 @@ describe("App", () => {
     await userEvent.click(fleet());
     await userEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(localStorage.getItem("fleet.display")).toBe("show");
-    expect(fleet()).toHaveTextContent("Subtasks Show");
+    expect(fleet()).toHaveTextContent("Show");
     expect(screen.queryByRole("button", { name: "Hide" }), "a pick closes the menu").toBeNull();
     unmount();
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
-    expect(fleet()).toHaveTextContent("Subtasks Show");
+    expect(fleet()).toHaveTextContent("Show");
     localStorage.removeItem("fleet.display");
   });
 

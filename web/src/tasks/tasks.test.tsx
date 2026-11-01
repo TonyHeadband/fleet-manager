@@ -337,13 +337,16 @@ describe("The board's ways into Tasks", () => {
     expect(within(s).getByRole("link", { name: /Run/ })).toHaveAttribute("href", tasksHref("running"));
   });
 
-  it("details_on_a_stopped_card_selects_it_in_tasks", async () => {
+  it("a_stopped_agents_panel_opens_it_in_tasks", async () => {
     start(strip);
     snapshot(agent({ id: "s1", goal: "fix login", status: "stopped", stop_cause: "stopped" }), agent({ id: "r1", goal: "running one" }));
-    // Only the stopped card offers it.
-    const details = await screen.findAllByRole("button", { name: "Details" });
-    expect(details).toHaveLength(1);
-    await userEvent.click(details[0]!);
+    // Only a stopped agent's panel offers it.
+    await userEvent.click(await screen.findByText("running one"));
+    expect(screen.queryByRole("button", { name: "Open in Tasks" })).toBeNull();
+    // Pressing the open card closes its panel; Stopped is whole again.
+    await userEvent.click(within(screen.getByRole("region", { name: "Working" })).getByText("running one"));
+    await userEvent.click(await screen.findByText("fix login"));
+    await userEvent.click(screen.getByRole("button", { name: "Open in Tasks" }));
     expect(await screen.findByRole("list", { name: "Tasks" })).toBeInTheDocument();
     expect(row("proj-s1")).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByText("Showing stopped"), "Details shows every task").toBeNull();

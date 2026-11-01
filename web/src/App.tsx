@@ -934,7 +934,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                       {`↳ ${openFleet.task}`}
                     </button>
                   )}
-                  <Details schema={schema} agent={open} now={now} />
+                  <Details schema={schema} agent={open} now={now} persona={personaList.find((p) => p.id === open.persona)?.name ?? (open.persona || undefined)} />
                   <ReposRow agent={open} />
                 </>
               )
@@ -968,6 +968,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           now={now}
           selected={open?.id ?? null}
           rail={!!open && panelPhase !== "closing"}
+          // One product of one repo names the same repo on every card: then the card leaves it to the panel.
+          repos={productInfo === undefined || productInfo.repos.length > 1}
           tags={tags}
           display={display}
           prs={fleet.prs}

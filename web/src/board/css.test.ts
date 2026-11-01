@@ -7,12 +7,16 @@ const rule = (selector: string) => css.match(new RegExp(`(^|\\n)${selector.repla
 
 describe("board.css", () => {
   it("every_card_has_the_same_height", () => {
-    expect(rule(".card-in")).toMatch(
-      /grid-template-rows: var\(--card-row-title\) var\(--card-row-state\) var\(--card-row-activity\) var\(--card-row-actions\)/,
-    );
+    expect(rule(".card-in")).toMatch(/grid-template-rows: var\(--card-row-title\) var\(--card-row-actions\) var\(--card-row-state\)/);
+    // The avatar's portrait slot, 3:4, beside the title and activity rows; the state row runs the full width under it.
+    expect(rule(".card")).toMatch(/--avatar-w: calc\(var\(--avatar-h\) \* 3 \/ 4\)/);
+    expect(rule(".card-in > .avatar")).toMatch(/grid-row: 1 \/ span 2;[^}]*width: var\(--avatar-w\); height: var\(--avatar-h\)/);
+    expect(rule(".card")).toMatch(/--avatar-h: calc\(var\(--card-row-title\) \+ var\(--card-row-actions\) \+ var\(--card-row-gap\)\)/);
     const row = rule(".card-row");
     expect(row).toContain("overflow: hidden");
     expect(row).toContain("white-space: nowrap");
+    // The web's badge is a pixel taller than the row: the state row lets its frame show whole, top line included.
+    expect(rule('.card-row[data-row="state"]')).toContain("overflow: visible");
   });
   it("a_card_is_a_frame_round_its_ground", () => {
     expect(rule(".card")).toMatch(/padding: 1px;[^]*background: var\(--border\);/);

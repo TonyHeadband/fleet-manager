@@ -35,19 +35,29 @@
 }
 .empty { color: var(--text-low); font-size: var(--size-small); margin: 0; }
 .column-body { flex: 1; display: grid; align-content: start; gap: var(--column-card-gap); padding: var(--column-body); min-width: 0; }
-/* Lite's card: four rows of fixed height, so every card is the same size whatever its column or content. */
+/* A card read at a glance: three rows of fixed height (title, activity and actions beside the avatar's portrait slot;
+   the state line under them, full width), so every card is the same size whatever its column or content. */
 /* Two layers, so the frame and the ground are separate: the outer is the 1px frame, the inner the surface. */
 .card {
   --card-tone: var(--tone-neutral);
+  /* The avatar is the app's portrait shape, 3:4, beside the title and activity rows; the state row runs under it. */
+  --avatar-h: calc(var(--card-row-title) + var(--card-row-actions) + var(--card-row-gap));
+  --avatar-w: calc(var(--avatar-h) * 3 / 4);
   position: relative; min-width: 0; cursor: pointer;
   padding: 1px; background: var(--border); border-radius: var(--radius-card);
 }
 .card-in {
   display: grid; min-width: 0;
-  grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions);
-  row-gap: var(--card-row-gap); padding: var(--card-margin-y) var(--card-margin-x);
+  grid-template-columns: var(--avatar-w) minmax(0, 1fr);
+  grid-template-rows: var(--card-row-title) var(--card-row-actions) var(--card-row-state);
+  column-gap: var(--card-item-gap); row-gap: var(--card-row-gap); padding: var(--card-margin-y) var(--card-margin-x);
   background: var(--surface);
 }
+.card-in > .card-row { grid-column: 2; }
+.card-in > .card-row:is([data-row="state"], [data-row="tally"]) { grid-column: 1 / -1; }
+/* The web's badge is a pixel taller than Lite's row: its frame shows whole, its text still clipped by .card-left. */
+.card-row[data-row="state"] { overflow: visible; }
+.card-in > .avatar { grid-column: 1; grid-row: 1 / span 2; align-self: start; width: var(--avatar-w); height: var(--avatar-h); }
 .card[data-tone="active"], .fleet-row[data-tone="active"] { --card-tone: var(--tone-active); }
 .card[data-tone="attention"], .fleet-row[data-tone="attention"] { --card-tone: var(--tone-attention); }
 .card[data-tone="done"], .fleet-row[data-tone="done"] { --card-tone: var(--tone-done); }
@@ -70,23 +80,23 @@
 .card-title { font-size: var(--size-title); font-weight: 500; color: var(--text-high); }
 .card-activity { font-size: var(--size-small); color: var(--text-low); }
 .card-row .duration, .card-row .mono, .card-row .badge { flex: none; }
+.card-left > .card-activity { flex: 0 1 auto; min-width: 0; }
 .changes-dot { background: var(--text); }
 .repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
 .repo { min-width: var(--card-min-name); overflow: hidden; text-overflow: ellipsis; }
 .repo-more { flex: none; }
-.card-tag { flex: 1 1 50%; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-low); }
-.card-actions { flex: 1 1 50%; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); }
+/* The actions show where the person is: on hover, keyboard focus, selection, or a Stop waiting for its second press. */
+.card-actions { flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--card-action-gap); visibility: hidden; }
+.card:is(:hover, :focus-within, [data-selected], :has([data-confirming])) .card-actions { visibility: visible; }
 .card-action { display: contents; }
 /* Lite's reply box, pinned at the panel's bottom. */
 .reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--panel-margin); }
 .reply textarea { width: 100%; resize: vertical; background: var(--sunken); }
 .reply-row { display: flex; align-items: center; justify-content: space-between; }
 .reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); }
-/* A task's lead adds the fleet's tally row; a fleet agent drawn in full adds its "↳ task" line (Lite's card.rs). */
-.card[data-kind="lead"] .card-in { grid-template-rows: var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-tally) var(--card-row-actions); }
-.card[data-kind="fleet"] .card-in { grid-template-rows: var(--card-row-parent) var(--card-row-title) var(--card-row-state) var(--card-row-activity) var(--card-row-actions); }
+/* A task's lead adds the fleet's tally row (Lite's card.rs). */
+.card[data-kind="lead"] .card-in { grid-template-rows: var(--card-row-title) var(--card-row-actions) var(--card-row-state) var(--card-row-tally); }
 .card-left > .card-title { flex: 0 1 auto; min-width: 0; }
-.card-parent { display: block; overflow: hidden; text-overflow: ellipsis; font-size: var(--size-small); color: var(--text-low); }
 .mark { flex: none; display: inline-grid; place-items: center; width: var(--fleet-mark); height: var(--fleet-mark); color: var(--text-low); }
 .badge[data-tone="attention"] { border-color: var(--tone-attention); color: var(--tone-attention); background: var(--tint-attention); }
 .tally { gap: calc(var(--card-item-gap) + var(--fleet-tally-after)); }

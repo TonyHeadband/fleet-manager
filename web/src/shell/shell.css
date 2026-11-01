@@ -41,6 +41,9 @@
 .drawer-picker { margin-bottom: var(--space-picker-gap); }
 .drawer-picker .filter-menu, .drawer-picker .filter-button { width: 100%; }
 .drawer-picker .filter-button { text-align: left; overflow: hidden; text-overflow: ellipsis; }
+/* The persona's: its avatar beside the name. */
+.drawer-picker { --drawer-avatar-h: calc(2 * var(--size-meta) * 1.5); }
+.drawer-picker .avatar { width: calc(var(--drawer-avatar-h) * 3 / 4); height: var(--drawer-avatar-h); }
 .drawer-buttons { display: grid; gap: var(--space-button-gap); margin-bottom: var(--space-nav-gap); }
 .drawer-nav { list-style: none; margin: 0; padding: 0; display: grid; }
 /* A marker rail: each view a mono-caps label with a dash at its left; the current view's dash is the accent bar. */

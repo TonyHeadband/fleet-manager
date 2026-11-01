@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -173,6 +174,42 @@ describe("Shell", () => {
     }
     // egui's New product is always there to press.
     expect(within(drawer).getByRole("button", { name: "New product" })).toBeEnabled();
+  });
+
+  it("the_pickers_are_captioned_above_and_the_persona_shows_its_avatar", async () => {
+    start();
+    const picker = await screen.findByRole("button", { name: "Active persona" });
+    // The label sits above the selector, outside it; the selector holds the avatar and the name only.
+    expect(picker).toHaveTextContent(/^me$/);
+    expect(picker.querySelector(".avatar")).not.toBeNull();
+    const caption = picker.closest(".filter-menu")!.querySelector(".filter-caption");
+    expect(caption).toHaveTextContent("Persona");
+    expect(caption!.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const product = screen.getByRole("button", { name: "Active product" });
+    expect(product.closest(".filter-menu")!.querySelector(".filter-caption")).toHaveTextContent("Product");
+    expect(product.querySelector(".avatar")).toBeNull();
+    const css = readFileSync("src/shell/shell.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.drawer-picker \.avatar \{[^}]*height: var\(--drawer-avatar-h\);/);
+  });
+
+  it("filters_are_captioned_beside_and_pickers_above", async () => {
+    start();
+    const header = await screen.findByRole("banner");
+    for (const [name, caption] of [["Repo filter", "Repo"], ["Persona filter", "Persona"], ["Release filter", "Release"], ["Subtasks display", "Subtasks"]] as const) {
+      const button = await within(header).findByRole("button", { name });
+      const menu = button.closest(".filter-menu")!;
+      expect(menu.querySelector(".filter-caption"), name).toHaveTextContent(caption);
+      expect(button, name).not.toHaveTextContent(caption);
+      // A filter's caption sits beside it; the drawer's pickers have theirs above.
+      expect(menu, name).toHaveAttribute("data-caption", "side");
+    }
+    const drawer = screen.getByRole("navigation", { name: "Drawer" });
+    for (const name of ["Active persona", "Active product"]) {
+      expect(within(drawer).getByRole("button", { name }).closest(".filter-menu"), name).toHaveAttribute("data-caption", "above");
+    }
+    const css = readFileSync("src/ui/ui.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.filter-menu\[data-caption="side"\] \{[^}]*display: inline-flex;[^}]*align-items: center;/);
+    expect(css).toMatch(/\.filter-menu\[data-caption="above"\] \{[^}]*display: inline-grid;/);
   });
 
   it("the_first_ready_persona_becomes_the_active_one", async () => {

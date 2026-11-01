@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 interface Props {
-  /** The mono label before the summary, as Lite's combo shows it ("Repo"); none for a plain combo. */
+  /** The mono caption outside the control ("Repo"); none for a plain combo. */
   label?: string;
+  /** Where the caption sits: beside the control (a filter in a bar) or above it (a picker in a column). */
+  captionAt?: "side" | "above";
   /** What is picked, in words ("All repos"). */
   summary: string;
   /** The control's accessible name ("Repo filter"); none where a `<label>` names it by `id`. */
@@ -19,15 +21,17 @@ interface Props {
   title?: string;
   /** The rows are a single choice of actions (`menuitem`s), not toggles. */
   actions?: boolean;
+  /** Drawn before the summary, such as the persona's avatar. */
+  lead?: ReactNode;
   /** The menu's rows; `close` closes it, for a single-choice menu that closes on a pick. */
   children: (close: () => void) => ReactNode;
 }
 
 /**
- * Lite's filter combo: the label and summary on a button, and a menu under it that closes on a click outside or
- * Escape. A pick inside leaves it open unless the rows close it, so several repos are picked in one go.
+ * The filter combo: its caption beside or above it, the summary on a button, and a menu under it that closes on a click outside
+ * or Escape. A pick inside leaves it open unless the rows close it, so several repos are picked in one go.
  */
-export function FilterMenu({ label, summary, name, id, listbox, width, disabled, title, actions, children }: Props) {
+export function FilterMenu({ label, captionAt = "side", summary, name, id, listbox, width, disabled, title, actions, lead, children }: Props) {
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
   const [open, setOpen] = useState<{ top: number; left: number; width?: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -52,7 +56,12 @@ export function FilterMenu({ label, summary, name, id, listbox, width, disabled,
     };
   }, [open]);
   return (
-    <div className="filter-menu" ref={root}>
+    <div className="filter-menu" ref={root} data-caption={label ? captionAt : undefined}>
+      {label && (
+        <span className="mono-label filter-caption" aria-hidden="true">
+          {label}
+        </span>
+      )}
       <button
         type="button"
         id={id}
@@ -68,12 +77,8 @@ export function FilterMenu({ label, summary, name, id, listbox, width, disabled,
           setOpen((o) => (o ? null : { top: r.bottom, left: r.left, width: width === "fill" ? r.width : undefined }));
         }}
       >
-        {label && (
-          <>
-            <span className="mono-label">{label}</span>{" "}
-          </>
-        )}
-        {summary}
+        {lead}
+        {lead ? <span className="filter-summary">{summary}</span> : summary}
       </button>
       {open &&
         // On the window, not in place: a sliding pane's transform would become the fixed menu's frame and its overflow
