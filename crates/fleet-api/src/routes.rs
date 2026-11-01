@@ -125,7 +125,7 @@ pub fn put_product_overrides() {}
 
 /// Every setting an override can change, with the value that applies and the layer it came from. Without
 /// `product`, only the global and definition layers.
-#[utoipa::path(get, path = "/api/settings/effective", params(("product" = Option<String>, Query, description = "Apply this product's overrides")), responses((status = 200, body = EffectiveSettings), (status = 404)))]
+#[utoipa::path(get, path = "/api/settings/effective", params(("product" = Option<String>, Query, description = "Apply this product's overrides"), ("persona" = Option<String>, Query, description = "Read this persona's definitions; defaults to the product's default persona")), responses((status = 200, body = EffectiveSettings), (status = 404)))]
 pub fn effective_settings() {}
 
 #[utoipa::path(get, path = "/api/agents/{id}/diff", params(("id" = String, Path)), responses((status = 200, body = DiffReport)))]

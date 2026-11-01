@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
-/// One row per `kind` name known to any persona or built in. The built-in's row comes first, then the first persona
-/// (in `persona_ids` order) that has the name on its own.
+/// One row per `kind` name known to any persona or built in. A persona's row comes first (the first persona, in
+/// `persona_ids` order, that has the name), so an override shows over the built-in; names only built in follow.
 pub fn known_defs(
     personas_dir: &Path,
     persona_ids: &[String],
@@ -16,14 +16,15 @@ pub fn known_defs(
 ) -> Vec<DefInfo> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
-    let roots = std::iter::once(Defs::shared(fleet_root.to_path_buf())).chain(
-        persona_ids.iter().map(|id| {
+    let roots = persona_ids
+        .iter()
+        .map(|id| {
             Defs::for_persona(
                 persona_defs_root(personas_dir, id),
                 fleet_root.to_path_buf(),
             )
-        }),
-    );
+        })
+        .chain(std::iter::once(Defs::shared(fleet_root.to_path_buf())));
     for defs in roots {
         for d in defs.list().into_iter().filter(|d| d.kind == kind) {
             if seen.insert(d.name.clone()) {
@@ -61,6 +62,12 @@ pub fn migrate_fleet_defs(
     if persona_ids.is_empty() {
         return Ok(0);
     }
+    // A copy that died part-way: its fleet original is still there, so it is copied afresh.
+    for id in persona_ids {
+        for folder in MOVED {
+            clear_staging(&persona_defs_root(personas_dir, id).join(folder))?;
+        }
+    }
     let mut moved = Vec::new();
     for folder in MOVED {
         let dir = fleet_root.join(folder);
@@ -76,7 +83,13 @@ pub fn migrate_fleet_defs(
                     .join(folder)
                     .join(entry.file_name());
                 if !to.exists() {
-                    copy_tree(&entry.path(), &to)?;
+                    // Renamed into place only when complete, so a `to` that exists is always whole.
+                    let staging = to.with_file_name(format!(
+                        ".{}{STAGING_SUFFIX}",
+                        entry.file_name().to_string_lossy()
+                    ));
+                    copy_tree(&entry.path(), &staging)?;
+                    std::fs::rename(&staging, &to)?;
                 }
             }
             moved.push(entry.path());
@@ -94,6 +107,26 @@ pub fn migrate_fleet_defs(
         let _ = std::fs::remove_dir(fleet_root.join(folder));
     }
     Ok(moved.len())
+}
+
+const STAGING_SUFFIX: &str = ".migrating";
+
+fn clear_staging(dir: &Path) -> io::Result<()> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') && name.ends_with(STAGING_SUFFIX) {
+            let path = entry.path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(path)?;
+            } else {
+                std::fs::remove_file(path)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {

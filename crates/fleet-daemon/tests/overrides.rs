@@ -558,3 +558,38 @@ fn product_cannot_override_active_products() {
     let err = validate(&[entry("limits", "max_active_products", "1")], &defs).unwrap_err();
     assert!(err.contains("unknown limit"), "{err}");
 }
+
+fn persona_rust(fx: &Fx, id: &str, model: &str) {
+    let path = fleet_daemon::fleet::defs::persona_defs_root(&fx._tmp.path().join("personas"), id)
+        .join("specialists/rust.md");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        path,
+        format!("---\nname: rust\nsummary: Mine.\nmodel: {model}\n---\nBody\n"),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn effective_shows_a_personas_override_of_a_builtin() {
+    let (addr, fx) = start().await;
+    persona_rust(&fx, PERSONA, "opus");
+    let e = effective_of(addr, "").await;
+    assert_eq!(row(&e, "models", "rust").value.as_deref(), Some("opus"));
+    let e = effective_of(addr, &format!("?persona={PERSONA}")).await;
+    assert_eq!(row(&e, "models", "rust").value.as_deref(), Some("opus"));
+}
+
+#[tokio::test]
+async fn effective_is_per_persona() {
+    let (addr, fx) = start().await;
+    let other = ready_persona(&fx.svc, "Other", "github.com").await;
+    persona_rust(&fx, PERSONA, "opus");
+    persona_rust(&fx, &other, "haiku");
+    for (id, model) in [(PERSONA, "opus"), (other.as_str(), "haiku")] {
+        let e = effective_of(addr, &format!("?persona={id}")).await;
+        assert_eq!(row(&e, "models", "rust").value.as_deref(), Some(model));
+    }
+    let (s, _) = json_of(addr, "GET", "/api/settings/effective?persona=nobody", None).await;
+    assert_eq!(s, 404);
+}

@@ -1066,3 +1066,27 @@ fn a_product_accepts_a_name_from_any_persona() {
     let orchestrators = known_names(&personas, &ids(&["a", "b"]), &fleet, DefKind::Orchestrator);
     assert!(orchestrators.contains("direct") && !orchestrators.contains("scribe"));
 }
+
+#[test]
+fn migrate_never_trusts_a_partial_copy() {
+    let t = tempfile::tempdir().unwrap();
+    let (fleet, personas) = (t.path().join("fleet"), t.path().join("personas"));
+    put(&fleet, "specialists/mine.md", "whole");
+    put(&fleet, "skills/tidy/SKILL.md", "tidy");
+    let own = persona_defs_root(&personas, "a");
+    // What a copy that died part-way leaves behind.
+    put(&own, "specialists/.mine.md.migrating", "who");
+    put(&own, "skills/.tidy.migrating/SKILL.md", "ti");
+    let ids = ids(&["a"]);
+    assert_eq!(migrate_fleet_defs(&fleet, &personas, &ids).unwrap(), 2);
+    assert_eq!(
+        std::fs::read_to_string(own.join("specialists/mine.md")).unwrap(),
+        "whole"
+    );
+    assert_eq!(
+        std::fs::read_to_string(own.join("skills/tidy/SKILL.md")).unwrap(),
+        "tidy"
+    );
+    assert!(files_in(&fleet).is_empty());
+    assert_eq!(files_in(&own).len(), 2);
+}

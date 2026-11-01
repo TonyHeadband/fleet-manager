@@ -871,25 +871,52 @@ async fn internal_history(
 #[derive(serde::Deserialize)]
 struct EffectiveQuery {
     product: Option<String>,
+    persona: Option<String>,
 }
 
 async fn effective_settings(
     State(st): State<AppState>,
     Query(q): Query<EffectiveQuery>,
 ) -> Result<Json<EffectiveSettings>, ApiError> {
+    let mut persona = q.persona.clone();
     let entries = match &q.product {
         Some(id) => {
-            if st.store.product(id).await.map_err(internal)?.is_none() {
+            let Some(row) = st.store.product(id).await.map_err(internal)? else {
                 return Err(ProductError::NotFound(id.clone()).into());
-            }
+            };
+            persona = persona.or(row.default_persona);
             st.store.product_overrides(id).await.map_err(internal)?
         }
         None => Vec::new(),
     };
+    if let Some(id) = &persona {
+        if st.store.persona(id).await.map_err(internal)?.is_none() {
+            return Err(PersonaError::NotFound(id.clone()).into());
+        }
+    }
     let global = st.svc.cfg.limits;
     let (mode, effort) = (st.svc.cfg.default_mode, st.svc.cfg.default_effort);
-    let mut defs = known_defs_of(&st, DefKind::Orchestrator).await?;
-    defs.extend(known_defs_of(&st, DefKind::Specialist).await?);
+    // One persona's definitions when it is known, else every persona's, theirs over the built-ins.
+    let ids = match persona {
+        Some(id) => vec![id],
+        None => persona_ids(&st).await?,
+    };
+    let (personas_dir, fleet_dir) = (
+        st.svc.cfg.personas_dir.clone(),
+        st.svc.cfg.fleet_dir.clone(),
+    );
+    let defs = tokio::task::spawn_blocking(move || {
+        let mut defs = known_defs(&personas_dir, &ids, &fleet_dir, DefKind::Orchestrator);
+        defs.extend(known_defs(
+            &personas_dir,
+            &ids,
+            &fleet_dir,
+            DefKind::Specialist,
+        ));
+        defs
+    })
+    .await
+    .map_err(internal)?;
     Ok(Json(overrides::effective(
         &global, mode, effort, &defs, &entries,
     )))
