@@ -75,6 +75,15 @@ describe("Stat", () => {
     expect(shown()).toBe("250");
   });
 
+  it("a_value_change_after_the_step_but_inside_the_entry_window_shows_at_once", () => {
+    const { container, rerender } = render(<Stat label="L" value={100} />);
+    const shown = () => container.querySelector(".chart-stat-value")!.textContent;
+    act(() => void vi.advanceTimersByTime(500));
+    expect(shown()).toBe("100");
+    rerender(<Stat label="L" value={250} />);
+    expect(shown()).toBe("250");
+  });
+
   it("a_one_point_spark_draws_a_marker", () => {
     document.documentElement.dataset.animations = "off";
     const { container } = render(<Sparkline values={[4]} />);

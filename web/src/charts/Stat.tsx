@@ -13,6 +13,7 @@ const DELTA_COLOR = { good: "var(--tone-done)", bad: "var(--tone-danger)", neutr
 /** Counts up from 0 over the entry window; once the entry is over, a new value shows at once. */
 function useStepUp(value: number, entering: boolean): number {
   const [shown, setShown] = useState(0);
+  const [done, setDone] = useState(false);
   const latest = useRef(value);
   latest.current = value;
   useEffect(() => {
@@ -23,10 +24,11 @@ function useStepUp(value: number, entering: boolean): number {
       const t = Math.min(1, (ts - start) / motion.wipe);
       setShown(latest.current * t);
       if (t < 1) frame = requestAnimationFrame(step);
+      else setDone(true);
     });
     return () => cancelAnimationFrame(frame);
   }, [entering]);
-  return entering ? shown : value;
+  return entering && !done ? shown : value;
 }
 
 export function Stat({ label, value, format = plainFormat, delta, spark }: {
