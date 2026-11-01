@@ -47,5 +47,6 @@ describe("Toast", () => {
     expect(css).toMatch(/\.toast-mark\[data-tone="danger"\] \{[^}]*background: var\(--danger\);/);
     const motion = readFileSync("src/shell/motion.css", "utf8");
     expect(motion).toMatch(/prefers-reduced-motion: no-preference\) \{[^@]*\.toast/);
+    expect(motion).toMatch(/\.toast \{\s*animation: fui-wipe/);
   });
 });

@@ -58,9 +58,9 @@
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  /* A toast steps in where it lands; it never moves the view. */
+  /* A toast is drawn left to right like every HUD panel; it never moves the view. */
   .toast {
-    animation: fui-step-in var(--motion-step-in) ease-out both;
+    animation: fui-wipe var(--motion-menu) var(--ease-push) both;
   }
 }
 @keyframes fui-wipe {
