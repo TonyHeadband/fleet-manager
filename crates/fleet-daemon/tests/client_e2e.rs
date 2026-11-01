@@ -41,20 +41,21 @@ fn action(id: &str) -> ActionDef {
         .unwrap()
 }
 
-/// A solo task in the fixture's product, under its persona.
-fn solo(fx: &Fx, repos: &[&str], prompt: &str) -> SpawnRequest {
+/// A direct task on `repo` in the fixture's product, under its persona; makes `core` ready for one first.
+fn direct(fx: &Fx, repo: &str, prompt: &str) -> SpawnRequest {
+    ready_for_direct(fx);
     SpawnRequest {
         plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,
-        repos: repos.iter().map(|r| pick(fx, r)).collect(),
+        repos: vec![pick(fx, repo)],
         prompt: prompt.into(),
         slug: None,
         title: None,
         persona: PERSONA.into(),
-        kind: AgentKind::Solo,
-        role: None,
+        kind: AgentKind::Orchestrator,
+        role: Some("direct".into()),
     }
 }
 
@@ -81,7 +82,7 @@ async fn client_round_trips_against_the_real_daemon() {
     assert!(blocking!(c, c.repos_for("nobody")).unwrap().is_empty());
     assert_eq!(blocking!(c, c.ui_schema()).unwrap(), default_ui_schema());
 
-    let agent: Agent = blocking!(c, c.spawn(&solo(&fx, &["core"], "fix it")))
+    let agent: Agent = blocking!(c, c.spawn(&direct(&fx, "core", "fix it")))
         .unwrap()
         .agent;
     assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
@@ -122,7 +123,7 @@ async fn client_round_trips_against_the_real_daemon() {
 async fn errors_carry_the_daemons_message() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let err = blocking!(c, c.spawn(&solo(&fx, &["nope"], "x"))).unwrap_err();
+    let err = blocking!(c, c.spawn(&direct(&fx, "nope", "x"))).unwrap_err();
     assert!(err.message.contains("nope"), "{err}");
     let ghost = common::agent_fixture(&fx);
     let stop = action("stop");
@@ -150,7 +151,7 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
     assert!(matches!(next(), StreamMsg::Connected));
     assert!(matches!(next(), StreamMsg::Snapshot(s) if s.seq == 0));
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &["core"], "x")))
+    let agent = blocking!(c, c.spawn(&direct(&fx, "core", "x")))
         .unwrap()
         .agent;
     assert!(
@@ -162,7 +163,7 @@ async fn event_stream_sends_connected_then_snapshot_then_events() {
 async fn pane_stream_shows_the_agents_terminal() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &["core"], "x")))
+    let agent = blocking!(c, c.spawn(&direct(&fx, "core", "x")))
         .unwrap()
         .agent;
     let (tx, rx) = mpsc::channel();
@@ -183,7 +184,7 @@ async fn pane_stream_shows_the_agents_terminal() {
 async fn pane_stream_of_a_stopped_agent_ends_without_reconnecting() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &["core"], "x")))
+    let agent = blocking!(c, c.spawn(&direct(&fx, "core", "x")))
         .unwrap()
         .agent;
     assert!(pane_contains(&fx, &agent.id, "ready").await);
@@ -208,21 +209,11 @@ async fn pane_stream_of_a_stopped_agent_ends_without_reconnecting() {
 fn _unused(_: AgentId) {}
 
 #[tokio::test(flavor = "multi_thread")]
-async fn client_spawns_a_task_with_no_repos() {
-    let (url, fx) = start().await;
-    let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &[], "think first")))
-        .unwrap()
-        .agent;
-    assert!(agent.workspaces.is_empty());
-    assert_eq!(blocking!(c, c.snapshot()).unwrap().agents.len(), 1);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn client_adds_and_lists_repos() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &[], "x"))).unwrap().agent;
+    // Only a solo task takes another repo.
+    let agent = existing_solo(&fx, &[], "x").await;
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
     let id = agent.id.0.clone();
@@ -277,7 +268,8 @@ async fn wait_pending(fx: &Fx, id: &AgentId) {
 async fn client_grant_and_refuse_round_trip() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &[], "x"))).unwrap().agent;
+    // Only a solo task takes another repo.
+    let agent = existing_solo(&fx, &[], "x").await;
     let token = fx.store.agent_token(&agent.id).await.unwrap().unwrap();
     let tools = make_repo(&fx._tmp.path().join("tools"));
     let path = tools.to_str().unwrap().to_string();
@@ -311,13 +303,13 @@ async fn client_grant_and_refuse_round_trip() {
 async fn client_stop_and_the_stop_action_both_stop_the_agent() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let first = blocking!(c, c.spawn(&solo(&fx, &["core"], "x")))
+    let first = blocking!(c, c.spawn(&direct(&fx, "core", "x")))
         .unwrap()
         .agent;
     let (a, stop) = (first.clone(), action("stop"));
     assert_eq!(blocking!(c, c.run(&stop, &a, None)).unwrap(), None);
 
-    let second = blocking!(c, c.spawn(&solo(&fx, &["core"], "y")))
+    let second = blocking!(c, c.spawn(&direct(&fx, "core", "y")))
         .unwrap()
         .agent;
     let id = second.id.0.clone();
@@ -333,7 +325,7 @@ async fn client_stop_and_the_stop_action_both_stop_the_agent() {
 async fn client_archive_reports_what_was_kept() {
     let (url, fx) = start().await;
     let c = Arc::new(FleetClient::new(&url));
-    let agent = blocking!(c, c.spawn(&solo(&fx, &["core"], "x")))
+    let agent = blocking!(c, c.spawn(&direct(&fx, "core", "x")))
         .unwrap()
         .agent;
     // A file the agent did not create keeps the task folder; the report must say so.
@@ -579,7 +571,7 @@ async fn client_manages_products_releases_and_repos() {
     assert!(r.released_at.is_some());
 
     // The fixture's product has the task, so a release of `shop` is another product's.
-    let a = fx.svc.spawn(solo(&fx, &["core"], "work")).await.unwrap();
+    let a = existing_solo(&fx, &["core"], "work").await;
     let err = blocking!(c, c.set_task_release(&a.id.0, Some(r.id))).unwrap_err();
     assert!(err.to_string().contains("not a release"), "{err}");
     let t = blocking!(c, c.set_task_release(&a.id.0, None)).unwrap();

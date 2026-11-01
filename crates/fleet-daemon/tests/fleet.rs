@@ -210,7 +210,7 @@ async fn orchestrator_spawn_layout() {
 
     // A specialist the product hides is left out; a type with skills brings them.
     hide(&fx, &["reviewer"]).await;
-    let types = fx._tmp.path().join("fleet/orchestrators");
+    let types = persona_fleet(&fx, PERSONA).join("orchestrators");
     std::fs::create_dir_all(&types).unwrap();
     std::fs::write(
         types.join("direct.md"),

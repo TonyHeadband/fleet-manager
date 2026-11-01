@@ -468,9 +468,10 @@ async fn released_release_takes_no_new_task() {
     assert_eq!(error_of(&v), "release 1.0 is already released");
     assert_eq!(fx.store.task(&b.id).await.unwrap().unwrap().release, None);
 
+    ready_for_direct(&fx);
     let body = json!({
         "actor": "local", "product": PRODUCT, "release": r.id, "repos": [pick(&fx, "core")],
-        "prompt": "late", "slug": null, "persona": PERSONA
+        "prompt": "late", "slug": null, "persona": PERSONA, "kind": "orchestrator", "role": "direct"
     });
     let (s, v) = call(addr, "POST", "/api/agents", body).await;
     assert_eq!(s, 409, "{v}");

@@ -514,6 +514,7 @@ impl From<SpawnError> for ApiError {
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
             | SpawnError::SupervisorSpawn
+            | SpawnError::SoloRetired
             | SpawnError::StructuredRetired
             | SpawnError::NoSpecialists
             | SpawnError::PrStyle { .. }

@@ -1,6 +1,4 @@
-#[allow(dead_code)]
-#[path = "common/fake_forge.rs"]
-mod fake_forge;
+mod common;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -463,6 +461,9 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
         personas.display()
     );
     std::fs::write(&cfg, text).unwrap();
+    // A direct task needs a repo whose origin's `main` has a workflow.
+    let repo = common::make_repo(&dir.path().join("app"));
+    common::add_origin_with_workflow_in(dir.path(), &repo, &common::one_step("true"));
     // No route makes a product yet, so the database is given one before the daemon opens it.
     std::fs::create_dir_all(dir.path().join("state")).unwrap();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -479,8 +480,17 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
             })
             .await
             .unwrap();
+        store
+            .upsert_repo(&fleet_daemon::store::RepoRow {
+                product: "app".into(),
+                name: "app".into(),
+                path: Some(repo.clone()),
+                url: None,
+            })
+            .await
+            .unwrap();
     });
-    let forge = fake_forge::FakeForge::start();
+    let forge = common::fake_forge::FakeForge::start();
     let mut child = Daemon::new(
         command(&cfg)
             .env("FLEET_FORGE_API", forge.base_url())
@@ -516,12 +526,10 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     assert_eq!(status, 200, "{body}");
     let (status, body) = send(port, "POST", "/api/personas/p/check", "");
     assert_eq!(status, 200, "{body}");
-    let (status, body) = send(
-        port,
-        "POST",
-        "/api/agents",
-        r#"{"actor":"test","product":"app","prompt":"log me","slug":"log-me","persona":"p"}"#,
-    );
+    let body = serde_json::json!({"actor": "test", "product": "app", "prompt": "log me", "slug": "log-me",
+        "persona": "p", "kind": "orchestrator", "role": "direct",
+        "repos": [{"repo": "app", "local": repo.to_string_lossy()}]});
+    let (status, body) = send(port, "POST", "/api/agents", &body.to_string());
     assert_eq!(status, 200, "{body}");
     let spawned: serde_json::Value = serde_json::from_str(&body).unwrap();
     let id = spawned["agent"]["id"].as_str().unwrap().to_string();
@@ -543,7 +551,7 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     let spawned = find("agent spawned");
     assert_eq!(field(spawned, "agent_id"), Some(id.as_str()), "{text}");
     assert_eq!(field(spawned, "task"), Some("log-me"), "{text}");
-    assert_eq!(field(spawned, "repos"), Some("0"), "{text}");
+    assert_eq!(field(spawned, "repos"), Some("1"), "{text}");
     let stopped = find("agent stopped");
     assert_eq!(field(stopped, "agent_id"), Some(id.as_str()), "{text}");
     find("shutdown signal received");

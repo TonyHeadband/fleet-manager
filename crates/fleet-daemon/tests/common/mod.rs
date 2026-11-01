@@ -142,9 +142,14 @@ pub fn remove_line(claude: &[String]) -> String {
 /// Deletes `claude` at `repo`'s next checkout, which `git worktree add` makes: a spawn finds claude installed, then
 /// fails to start it after its worktree and card exist.
 pub fn vanish_on_checkout(repo: &Path, claude: &[String]) {
+    on_checkout(repo, &remove_line(claude));
+}
+
+/// Runs the shell `script` at each of `repo`'s checkouts, which `git worktree add` makes.
+pub fn on_checkout(repo: &Path, script: &str) {
     let hook = repo.join(".git/hooks/post-checkout");
     std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
-    std::fs::write(&hook, format!("#!/bin/sh\n{}\n", remove_line(claude))).unwrap();
+    std::fs::write(&hook, format!("#!/bin/sh\n{script}\n")).unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -544,32 +549,42 @@ pub fn file_url(path: &Path) -> String {
 
 /// Gives `core` a bare `file://` origin holding its `main`, so `open_pr` really fetches and pushes; returns it.
 pub fn add_origin(fx: &Fx) -> PathBuf {
-    let tmp = fx._tmp.path();
+    add_origin_in(fx._tmp.path(), &fx.repo)
+}
+
+/// Gives `repo` a bare `file://` origin at `tmp/origin.git` holding its `main`; returns it.
+pub fn add_origin_in(tmp: &Path, repo: &Path) -> PathBuf {
     let bare = tmp.join("origin.git");
     git(
         tmp,
         &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()],
     );
-    git(&fx.repo, &["remote", "add", "origin", &file_url(&bare)]);
-    git(&fx.repo, &["push", "-q", "origin", "main"]);
+    git(repo, &["remote", "add", "origin", &file_url(&bare)]);
+    git(repo, &["push", "-q", "origin", "main"]);
     bare
 }
 
 fn commit_workflow(fx: &Fx, yaml: &str) {
-    std::fs::create_dir_all(fx.repo.join(".fleet")).unwrap();
-    std::fs::write(fx.repo.join(".fleet/workflow.yml"), yaml).unwrap();
-    git(&fx.repo, &["add", ".fleet/workflow.yml"]);
+    commit_workflow_in(&fx.repo, yaml);
+}
+
+fn commit_workflow_in(repo: &Path, yaml: &str) {
+    std::fs::create_dir_all(repo.join(".fleet")).unwrap();
+    std::fs::write(repo.join(".fleet/workflow.yml"), yaml).unwrap();
+    git(repo, &["add", ".fleet/workflow.yml"]);
     // Empty when `yaml` is already there: the caller still gets a new commit on `main`.
-    git(
-        &fx.repo,
-        &["commit", "-q", "--allow-empty", "-m", "workflow"],
-    );
+    git(repo, &["commit", "-q", "--allow-empty", "-m", "workflow"]);
 }
 
 /// `add_origin`, with `yaml` committed as `core`'s `.fleet/workflow.yml` on `main` first.
 pub fn add_origin_with_workflow(fx: &Fx, yaml: &str) -> PathBuf {
-    commit_workflow(fx, yaml);
-    add_origin(fx)
+    add_origin_with_workflow_in(fx._tmp.path(), &fx.repo, yaml)
+}
+
+/// `add_origin_in`, with `yaml` committed as `repo`'s `.fleet/workflow.yml` on `main` first.
+pub fn add_origin_with_workflow_in(tmp: &Path, repo: &Path, yaml: &str) -> PathBuf {
+    commit_workflow_in(repo, yaml);
+    add_origin_in(tmp, repo)
 }
 
 /// Commits `yaml` as `core`'s workflow on `main` and pushes it to the origin `add_origin` made; returns that origin.
@@ -577,6 +592,13 @@ pub fn push_workflow(fx: &Fx, yaml: &str) -> PathBuf {
     commit_workflow(fx, yaml);
     git(&fx.repo, &["push", "-q", "origin", "main"]);
     fx._tmp.path().join("origin.git")
+}
+
+/// Makes `core` ready for a direct task, once: `add_origin_with_workflow` with a one-step workflow.
+pub fn ready_for_direct(fx: &Fx) {
+    if !git(&fx.repo, &["remote"]).lines().any(|r| r == "origin") {
+        add_origin_with_workflow(fx, &one_step("true"));
+    }
 }
 
 /// A workflow of one step, `test`, running `command`.
@@ -588,17 +610,17 @@ pub fn one_step(command: &str) -> String {
     )
 }
 
-/// A solo agent on `core`, spawned and at its prompt (the fake printed `ready`).
-pub async fn spawn_ready(fx: &Fx) -> fleet_api::Agent {
-    let a = fx
-        .svc
+/// A solo task from before the retirement, which `POST /api/agents` no longer starts: tests spawn it through the
+/// service.
+pub async fn existing_solo(fx: &Fx, repos: &[&str], prompt: &str) -> fleet_api::Agent {
+    fx.svc
         .spawn(fleet_api::SpawnRequest {
             plan: None,
             actor: fleet_api::Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
-            repos: vec![pick(fx, "core")],
-            prompt: "do the thing".into(),
+            repos: repos.iter().map(|r| pick(fx, r)).collect(),
+            prompt: prompt.into(),
             slug: None,
             title: None,
             persona: PERSONA.into(),
@@ -606,7 +628,12 @@ pub async fn spawn_ready(fx: &Fx) -> fleet_api::Agent {
             role: None,
         })
         .await
-        .unwrap();
+        .unwrap()
+}
+
+/// A solo agent on `core`, spawned and at its prompt (the fake printed `ready`).
+pub async fn spawn_ready(fx: &Fx) -> fleet_api::Agent {
+    let a = existing_solo(fx, &["core"], "do the thing").await;
     wait_screen_in(&fx.sessions, &a.session, |s| s.contains("ready")).await;
     a
 }

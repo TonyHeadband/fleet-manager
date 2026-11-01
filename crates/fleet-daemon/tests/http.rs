@@ -39,8 +39,11 @@ async fn start() -> Server {
     serve(fixture().await).await
 }
 
+/// A direct task on `repo`; makes `core` ready for one first.
 fn spawn_body(fx: &Fx, repo: &str, prompt: &str) -> Value {
-    json!({"actor": "local", "product": PRODUCT, "repos": [pick(fx, repo)], "prompt": prompt, "slug": null, "persona": PERSONA})
+    ready_for_direct(fx);
+    json!({"actor": "local", "product": PRODUCT, "repos": [pick(fx, repo)], "prompt": prompt, "slug": null,
+        "persona": PERSONA, "kind": "orchestrator", "role": "direct"})
 }
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
@@ -91,6 +94,23 @@ async fn spawn_errors_are_json_with_the_right_status() {
     assert_eq!(s2, 400);
     let (s3, _) = http(srv.addr, "POST", "/api/agents", &[], None).await;
     assert!(s3 == 400 || s3 == 415 || s3 == 422, "{s3}");
+}
+
+#[tokio::test]
+async fn post_agents_refuses_a_new_solo_task() {
+    let srv = start().await;
+    let mut body = spawn_body(&srv.fx, "core", "x");
+    body["kind"] = json!("solo");
+    body["role"] = json!(null);
+    let refused = json!({"error": "solo tasks are retired: start a direct task with a plan"});
+    let (status, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!((status, &v), (400, &refused));
+    // A request with no `kind` is a solo one too.
+    body.as_object_mut().unwrap().remove("kind");
+    let (status, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!((status, &v), (400, &refused));
+    assert!(srv.fx.store.snapshot().await.unwrap().agents.is_empty());
+    assert!(srv.fx.store.tasks().await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -840,7 +860,8 @@ async fn http_repos_hides_credentials_a_remembered_url_already_has() {
 async fn http_add_repo_returns_the_workspace() {
     let srv = start().await;
     let tools = make_repo(&srv.fx._tmp.path().join("tools"));
-    let a = spawn(&srv, "add one").await;
+    // Only a solo task takes another repo.
+    let a = existing_solo(&srv.fx, &["core"], "add one").await;
     let path = format!("/api/agents/{}/repos", a.id.0);
     let (status, v) = json_of(
         srv.addr,
@@ -897,47 +918,22 @@ async fn http_add_repo_returns_the_workspace() {
 async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     use tokio::io::AsyncWriteExt;
     let srv = start().await;
-    // Only a URL repo fetches. Its base is cloned from a local bare repo, then its origin is repointed at a remote
-    // that accepts and never answers, which holds the attach's fetch for as long as the test wants.
-    let hang = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let seed = make_repo(&srv.fx._tmp.path().join("slow-seed"));
-    let bare = srv.fx._tmp.path().join("slow.git");
-    git(
-        srv.fx._tmp.path(),
-        &[
-            "clone",
-            "-q",
-            "--bare",
-            seed.to_str().unwrap(),
-            bare.to_str().unwrap(),
-        ],
+    let body = spawn_body(&srv.fx, "core", "slow one").to_string();
+    // `git worktree add` runs `core`'s post-checkout hook, which holds the spawn until the test lets it go: the task
+    // folder exists by then, the worktree is not finished.
+    let (held, release) = (
+        srv.fx._tmp.path().join("held"),
+        srv.fx._tmp.path().join("release"),
     );
-    let url = file_url(&bare);
-    let resolved = srv
-        .fx
-        .repos
-        .resolve(PRODUCT, &pick(&srv.fx, &url), &fixture_env(&srv.fx).await)
-        .await
-        .unwrap();
-    let row = &resolved.row;
-    // Rewritten for git's transport only: the clone still names the repo's URL, so it is still the repo's clone.
-    // https: a persona's git may use no other remote transport. The TLS handshake waits on this listener.
-    git(
-        &resolved.base,
-        &[
-            "config",
-            &format!(
-                "url.https://127.0.0.1:{}/slow.git.insteadOf",
-                hang.local_addr().unwrap().port()
-            ),
-            &url,
-        ],
+    let posix = |p: &std::path::Path| p.to_string_lossy().replace('\\', "/");
+    on_checkout(
+        &srv.fx.repo,
+        &format!(
+            "touch '{}'\nwhile [ ! -e '{}' ]; do sleep 0.1; done",
+            posix(&held),
+            posix(&release)
+        ),
     );
-    // The daemon's git inherits the environment, and a proxy there would take the fake remote's connection. An
-    // empty http.proxy in this repo's own config turns proxying off for its fetch alone, unlike a process-wide
-    // env change, which races the other tests' getenv and leaks into them.
-    git(&resolved.base, &["config", "http.proxy", ""]);
-    let body = spawn_body(&srv.fx, &row.name, "slow one").to_string();
     let request = format!(
         "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         srv.addr.port(),
@@ -945,26 +941,13 @@ async fn a_spawn_whose_client_hangs_up_mid_way_still_finishes() {
     );
     let mut client = tokio::net::TcpStream::connect(srv.addr).await.unwrap();
     client.write_all(request.as_bytes()).await.unwrap();
-    // The fetch reaching the remote means the spawn is mid-way: the task folder exists, the worktree does not.
-    // Polled against a deadline: a git that never connects (a refused protocol, a proxy) must fail the test, not hang it.
-    hang.set_nonblocking(true).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let fetch = loop {
-        match hang.accept() {
-            Ok((conn, _)) => break conn,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the fetch never reached the fake remote"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            Err(e) => panic!("accept: {e}"),
-        }
-    };
+    assert!(
+        wait_until(|| async { held.exists() }).await,
+        "the spawn never reached the worktree's checkout"
+    );
     drop(client);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    drop(fetch);
+    std::fs::write(&release, "").unwrap();
     assert!(
         wait_until(|| async { srv.fx.store.snapshot().await.unwrap().agents.len() == 1 }).await,
         "the spawn stopped with the client: {:?}",
@@ -1469,7 +1452,6 @@ async fn spawn_product_errors_are_400() {
 #[tokio::test]
 async fn task_limit_refusal_is_409() {
     let srv = start().await;
-    add_origin_with_workflow(&srv.fx, &one_step("true"));
     srv.fx
         .store
         .set_product_overrides(
@@ -1483,9 +1465,7 @@ async fn task_limit_refusal_is_409() {
         )
         .await
         .unwrap();
-    let mut body = spawn_body(&srv.fx, "core", "x");
-    body["kind"] = json!("orchestrator");
-    body["role"] = json!("direct");
+    let body = spawn_body(&srv.fx, "core", "x");
     let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
     assert_eq!(s, 200, "{v}");
     let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
@@ -2110,7 +2090,7 @@ async fn an_archive_that_refuses_the_folder_is_409_with_the_reason() {
     let srv = start().await;
     let a = spawn(&srv, "relinked").await;
     stop_over_http(&srv, &a).await;
-    let workdir = PathBuf::from(&a.workdir);
+    let workdir = PathBuf::from(&srv.fx.store.task(&a.id).await.unwrap().unwrap().workdir);
     let elsewhere = srv.fx._tmp.path().join("elsewhere");
     std::fs::rename(&workdir, &elsewhere).unwrap();
     std::os::unix::fs::symlink(&elsewhere, &workdir).unwrap();

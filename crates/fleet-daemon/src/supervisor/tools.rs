@@ -1,5 +1,5 @@
 //! The fleet tools a supervisor conversation calls over MCP. Each returns the tool's text and whether it failed.
-use crate::agents::{refuse_retired, AgentService};
+use crate::agents::AgentService;
 use crate::forge::log::{recorded, said, CallCtx};
 use crate::forge::{self, RepoRef};
 use crate::git;
@@ -265,7 +265,6 @@ async fn start_task(
         role: Some("direct".into()),
         plan: args.get("plan").and_then(Value::as_str).map(String::from),
     };
-    refuse_retired(&req).map_err(|e| e.to_string())?;
     let agent = svc.spawn(req).await.map_err(|e| e.to_string())?;
     let task = task_id(&agent).clone();
     let origin = conversation.clone();
