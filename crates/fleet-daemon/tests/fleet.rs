@@ -2016,6 +2016,15 @@ async fn a_fixed_title_passes_and_opens_the_pr() {
     assert_eq!(p.gate_runs[1].pr_url.as_deref(), Some(url.as_str()));
 }
 
+/// The migration announcements: the room also holds the task's own notices (checks passed, PR opened).
+async fn migration_announcements(fx: &Fx) -> Vec<String> {
+    daemon_announcements(fx)
+        .await
+        .into_iter()
+        .filter(|t| t.starts_with("migration "))
+        .collect()
+}
+
 #[tokio::test]
 async fn a_pr_adding_a_migration_announces_it() {
     let fx = fleet_fixture().await;
@@ -2026,7 +2035,7 @@ async fn a_pr_adding_a_migration_announces_it() {
     let t = fx.store.task(&a.id).await.unwrap().unwrap();
     let title = t.title.filter(|x| !x.is_empty()).unwrap_or(t.name);
     assert_eq!(
-        daemon_announcements(&fx).await,
+        migration_announcements(&fx).await,
         [
             format!("migration crates/x/migrations/017_more.sql taken by {title} on {branch}"),
             format!("migration db/migrations/016_rooms.sql taken by {title} on {branch}"),
@@ -2034,7 +2043,7 @@ async fn a_pr_adding_a_migration_announces_it() {
     );
     // The PR opened again for the same branch announces nothing twice.
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
-    assert_eq!(daemon_announcements(&fx).await.len(), 2);
+    assert_eq!(migration_announcements(&fx).await.len(), 2);
 }
 
 #[tokio::test]
@@ -2043,7 +2052,7 @@ async fn a_pr_without_migrations_announces_none() {
     let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     commit_lib(&a, "docs/migrations.md");
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
-    assert!(daemon_announcements(&fx).await.is_empty());
+    assert!(migration_announcements(&fx).await.is_empty());
 }
 
 #[tokio::test]

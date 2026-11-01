@@ -36,6 +36,18 @@ pub async fn migrations_taken(
     Ok(())
 }
 
+/// "<title> · <notice>", one announcement per event: unlike the others it is not deduplicated, as the same notice
+/// ("checks passed") is a new event each time it happens.
+pub async fn task_notice(
+    store: &Store,
+    product: &str,
+    task_title: &str,
+    notice: &str,
+) -> Result<(), StoreError> {
+    let room = product_room(store, product).await?;
+    post(store, room, format!("{task_title} · {notice}")).await
+}
+
 /// Stores the text in the product's room unless the daemon said exactly it there already, so a re-detected merge or
 /// a PR opened again for the same branch is announced once.
 async fn announce(store: &Store, product: &str, text: String) -> Result<(), StoreError> {
@@ -43,6 +55,10 @@ async fn announce(store: &Store, product: &str, text: String) -> Result<(), Stor
     if store.daemon_said(&room, &text).await? {
         return Ok(());
     }
+    post(store, room, text).await
+}
+
+async fn post(store: &Store, room: String, text: String) -> Result<(), StoreError> {
     let p = Post {
         id: 0,
         room,

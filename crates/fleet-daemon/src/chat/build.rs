@@ -1,7 +1,7 @@
 use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
 use crate::chat::summary::{result_of, summarize};
 use crate::forge::parse_timestamp;
-use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom, TaskEvent};
+use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -76,18 +76,6 @@ impl Builder {
 
     pub fn marker(&mut self, kind: MarkerKind, at: i64) -> ChatItem {
         self.mint(at, ChatBody::Marker { kind })
-    }
-
-    pub fn event(&mut self, e: &TaskEvent) -> ChatItem {
-        self.mint(
-            e.at,
-            ChatBody::Event {
-                task: e.task.clone(),
-                task_title: e.task_title.clone(),
-                kind: e.kind,
-                text: e.text.clone(),
-            },
-        )
     }
 
     pub fn new_session(&mut self, at: i64) -> ChatItem {

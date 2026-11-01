@@ -1,4 +1,3 @@
-use crate::{AgentId, TaskEventKind};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -40,13 +39,6 @@ pub enum ChatBody {
     },
     Marker {
         kind: MarkerKind,
-    },
-    /// Something that happened to a task the supervisor started, merged into its conversation's chat.
-    Event {
-        task: AgentId,
-        task_title: String,
-        kind: TaskEventKind,
-        text: String,
     },
 }
 

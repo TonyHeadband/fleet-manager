@@ -211,3 +211,70 @@ async fn needs_you_is_sent_once_per_transition() {
         .collect();
     assert_eq!(texts, ["needs you · one", "needs you · three"]);
 }
+
+async fn room_texts(fx: &Fx) -> Vec<String> {
+    let room = fleet_daemon::rooms::product_room_id(PRODUCT);
+    fx.store
+        .room_posts(&room, None, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.text)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_needs_you_and_a_checks_passed_post_once_each_in_the_product_room() {
+    let fx = fixture().await;
+    start_event_watcher(fx.svc.clone());
+    let conv = conversation(&fx).await;
+    let a = spawn_ready(&fx).await;
+    origin(&fx, &a.id, &conv).await;
+    fx.store
+        .update_task(&a.id, |t| t.title = Some("Build X".into()))
+        .await
+        .unwrap();
+
+    needs_you(&fx, &a.id, "breakdown v1 ready").await;
+    assert!(
+        wait_until(|| async { !room_texts(&fx).await.is_empty() }).await,
+        "needs you was not announced"
+    );
+    route_again(&fx, &a.id).await;
+
+    let texts = room_texts(&fx).await;
+    assert_eq!(
+        texts,
+        [
+            "Build X · needs you · breakdown v1 ready",
+            "Build X · checks passed"
+        ],
+        "one announcement per event, no bare title"
+    );
+    let room = fleet_daemon::rooms::product_room_id(PRODUCT);
+    let posts = fx.store.room_posts(&room, None, 100).await.unwrap();
+    assert!(posts
+        .iter()
+        .all(|p| p.kind == fleet_api::PostKind::Announcement
+            && p.sender == fleet_api::MemberRef::Daemon));
+    // The toast's event is still stored and broadcast.
+    assert_eq!(events(&fx, &conv).await.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn room_events_are_not_announced_again() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    route(
+        &fx.svc,
+        &a.id,
+        TaskEventKind::RoomMessage,
+        "x in y: hi".into(),
+    )
+    .await
+    .unwrap();
+    route(&fx.svc, &a.id, TaskEventKind::RoomAsk, "x in y: ok?".into())
+        .await
+        .unwrap();
+    assert!(room_texts(&fx).await.is_empty());
+}

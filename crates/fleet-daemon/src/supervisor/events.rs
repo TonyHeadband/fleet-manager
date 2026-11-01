@@ -1,5 +1,7 @@
-//! Task events: what the daemon already sees about a task, stored for the supervisor conversation that started it.
+//! Task events: what the daemon already sees about a task. The notices go to the task's product room; the event is
+//! stored and broadcast so the web toasts it. The supervisor's chat does not show them.
 use crate::agents::AgentService;
+use crate::rooms::announce;
 use crate::store::{Store, StoreError};
 use fleet_api::{task_id, AgentId, AgentKind, EventKind, Status, TaskEvent, TaskEventKind};
 use std::collections::HashMap;
@@ -39,12 +41,24 @@ pub(crate) async fn route_with(
         Some(o) => Some(o),
         None => latest_conversation(store, &t.persona).await?,
     };
+    let task_title = t.title.unwrap_or_else(|| t.id.0.clone());
+    // The task's own notices are for its product's room. Room messages and asks are posts there already, and a
+    // merge is announced there as "landed" by the merge checker.
+    let in_room = !matches!(
+        kind,
+        TaskEventKind::RoomMessage | TaskEventKind::RoomAsk | TaskEventKind::PrMerged
+    );
+    if !t.product.is_empty() && in_room {
+        if let Err(e) = announce::task_notice(store, &t.product, &task_title, &text).await {
+            warn!(task = %t.id.0, error = %e, "cannot announce the task's notice in the product room");
+        }
+    }
     store
         .add_task_event(&TaskEvent {
             id: 0,
             conversation,
             persona: t.persona,
-            task_title: t.title.unwrap_or_else(|| t.id.0.clone()),
+            task_title,
             task: t.id,
             kind,
             text,
