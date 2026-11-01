@@ -595,7 +595,6 @@ impl Store {
         Ok(())
     }
 
-    /// The specialists the product hides from its orchestrators; empty for an unknown product.
     /// Stores `row` stamped with the current time; its `id` and `at` are ignored.
     pub async fn record_forge_call(&self, row: &ForgeCallRow) -> Result<()> {
         sqlx::query(
@@ -644,6 +643,7 @@ impl Store {
             .collect())
     }
 
+    /// The specialists the product hides from its orchestrators; empty for an unknown product.
     pub async fn hidden_specialists(&self, product: &str) -> Result<Vec<String>> {
         let raw: Option<String> =
             sqlx::query_scalar("SELECT hidden_specialists FROM products WHERE id = ?")
