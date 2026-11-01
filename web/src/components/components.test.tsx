@@ -18,6 +18,9 @@ import { FakeEventSource, agent, agentIn, fakeClient, fileDiff, persona, schema,
 import { screenText } from "../ui/screenText";
 import { title } from "../api/schema";
 import { personaRows, personaTags } from "../board/filters";
+import type { ChatSpeakers } from "../chat/speakers";
+
+const speakers: ChatSpeakers = { owner: { id: "owner", name: "Ada" }, agent: { id: "a1", name: "docs" } };
 
 const NOW = 1000 + 5 * 60;
 // An orchestrated task "Fix login" (o) and its fleet agents.
@@ -653,7 +656,7 @@ describe("PreviewPane diff tab", () => {
 
   it("PreviewPane_diff_tab_shows_each_workspace_diff", async () => {
     const loadDiff = vi.fn().mockResolvedValue(report);
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
     expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(await screen.findByText("hello")).toBeInTheDocument();
@@ -666,7 +669,7 @@ describe("PreviewPane diff tab", () => {
 
   it("reloads on Refresh and shows a failure instead of an empty diff", async () => {
     const loadDiff = vi.fn().mockRejectedValueOnce(new Error("no such agent")).mockResolvedValue(report);
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no such agent");
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -675,14 +678,14 @@ describe("PreviewPane diff tab", () => {
   });
 
   it("stays read-only on both tabs", async () => {
-    const { container } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    const { container } = render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("hello");
     expect(container.querySelector("input, textarea, [contenteditable='true'], select")).toBeNull();
   });
 
   it("offers no Diff tab when the caller cannot load one", () => {
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
     expect(screen.queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
   });
 });
@@ -694,7 +697,7 @@ describe("PreviewPane as a carousel", () => {
   const slots = () => [...track().querySelectorAll<HTMLElement>(":scope > .pane-slot")];
 
   it("tabs_slide_the_track", async () => {
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
     expect(track().style.getPropertyValue("--index")).toBe("0");
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(track().style.getPropertyValue("--index")).toBe("1");
@@ -706,7 +709,7 @@ describe("PreviewPane as a carousel", () => {
   });
 
   it("the_chat_still_follows_the_end", async () => {
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
     const log = screen.getByRole("log", { name: "Chat" });
     Object.defineProperty(log, "scrollHeight", { configurable: true, get: () => 500 });
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
@@ -718,7 +721,7 @@ describe("PreviewPane as a carousel", () => {
 
   it("diff_loads_on_first_visit_only", async () => {
     const loadDiff = vi.fn().mockResolvedValue(report);
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
     expect(loadDiff).not.toHaveBeenCalled();
     expect(slots()[1]).toBeEmptyDOMElement();
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
@@ -729,9 +732,9 @@ describe("PreviewPane as a carousel", () => {
   });
 
   it("the_breakdown_slot_exists_only_with_its_tab", () => {
-    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} />);
+    const { rerender } = render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} />);
     expect(slots()).toHaveLength(1);
-    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ id: "breakdown", label: "Breakdown", first: false, node: <p>plan</p> }]} />);
+    rerender(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ id: "breakdown", label: "Breakdown", first: false, node: <p>plan</p> }]} />);
     expect(slots()).toHaveLength(3);
   });
 
@@ -754,9 +757,9 @@ describe("PreviewPane as Lite draws it", () => {
     const answers: Array<(r: { workspaces: { repo: string; diff: string; truncated: boolean }[] }) => void> = [];
     const loadDiff = vi.fn(() => new Promise<never>((resolve) => answers.push(resolve as never)));
     const report = (repo: string) => ({ workspaces: [{ repo, diff: fileDiff(`${repo}.txt`, `+${repo} change`), truncated: false }] });
-    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a" factory={factory} loadDiff={loadDiff} />);
+    const { rerender } = render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="b" factory={factory} loadDiff={loadDiff} />);
+    rerender(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="b" factory={factory} loadDiff={loadDiff} />);
     await act(async () => answers[0]!(report("from-a")));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(loadDiff, "b's own diff is asked for").toHaveBeenCalledTimes(2);
@@ -776,15 +779,15 @@ describe("PreviewPane as Lite draws it", () => {
       return <p>{`${id}'s plan`}</p>;
     };
     const tabs = (id: string) => [{ id: "breakdown", label: "Breakdown", first: false, node: <Probe id={id} /> }];
-    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a" factory={factory} extraTabs={tabs("a")} />);
+    const { rerender } = render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a" factory={factory} extraTabs={tabs("a")} />);
     await userEvent.click(screen.getByRole("tab", { name: "Breakdown" }));
-    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="b" factory={factory} extraTabs={tabs("b")} />);
+    rerender(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="b" factory={factory} extraTabs={tabs("b")} />);
     expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
     expect(drawn, "not even one frame of b on a's Breakdown tab").not.toContain("b");
   });
 
   it("preview_says_session_ended_when_closed", () => {
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} />);
     act(() => FakeEventSource.for("/chat").emit("page", { items: [{ seq: 0, at: 0, body: { type: "reply", text: "ready" } }], earlier: 0 }));
     act(() => FakeEventSource.for("/chat").emit("ended", 0));
     const log = screen.getByRole("log", { name: "Chat" });
@@ -803,7 +806,7 @@ describe("PreviewPane as Lite draws it", () => {
 
   it("diff_lines_are_coloured_by_their_kind", async () => {
     const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("x", "-old", "+new", " same"), truncated: false }] });
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("new");
     const kinds = [...screen.getByLabelText("Changes").querySelectorAll(".diff-cell")].map((l) => l.getAttribute("data-kind"));
@@ -812,7 +815,7 @@ describe("PreviewPane as Lite draws it", () => {
 
   it("switching_back_to_the_chat_keeps_the_loaded_diff", async () => {
     const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("x.txt", "+x"), truncated: false }] });
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("x");
     await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
@@ -823,7 +826,7 @@ describe("PreviewPane as Lite draws it", () => {
 
   it("the_diff_says_loading_until_it_lands", async () => {
     let land!: (r: { workspaces: [] }) => void;
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={() => new Promise((r) => (land = r))} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={() => new Promise((r) => (land = r))} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     await act(async () => land({ workspaces: [] }));
@@ -833,12 +836,12 @@ describe("PreviewPane as Lite draws it", () => {
   it("another_tab_can_come_first_and_be_picked", async () => {
     const onTab = vi.fn();
     const extra = [{ id: "breakdown", label: "Breakdown", first: true, node: <p>the plan</p> }];
-    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={extra} tab="breakdown" onTab={onTab} />);
+    const { rerender } = render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={extra} tab="breakdown" onTab={onTab} />);
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Chat", "Diff"]);
     expect(screen.getByText("the plan")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
     expect(onTab).toHaveBeenCalledWith("chat");
-    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ ...extra[0]!, first: false }]} tab="chat" onTab={onTab} />);
+    rerender(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ ...extra[0]!, first: false }]} tab="chat" onTab={onTab} />);
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Chat", "Diff", "Breakdown"]);
   });
 });
@@ -846,7 +849,7 @@ describe("PreviewPane as Lite draws it", () => {
 describe("PreviewPane", () => {
   it("PreviewPane_renders_the_chat_stream_read_only", () => {
     const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-    const { container } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="fix the tests" factory={factory} />);
+    const { container } = render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" title="fix the tests" factory={factory} />);
     expect(FakeEventSource.for("/chat").url).toBe("/api/agents/a1/chat");
     act(() => FakeEventSource.for("/chat").emit("page", { items: [{ seq: 0, at: 0, body: { type: "reply", text: "hello" } }], earlier: 0 }));
     expect(screen.getByRole("log", { name: "Chat" })).toHaveTextContent("hello");
@@ -855,7 +858,7 @@ describe("PreviewPane", () => {
 
   it("says so when the session has ended", () => {
     const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
+    render(<PreviewPane speakers={speakers} baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
     act(() => FakeEventSource.for("/chat").emit("ended", 0));
     expect(screen.getByText(/^Session ended/)).toBeInTheDocument();
   });

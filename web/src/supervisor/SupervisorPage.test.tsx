@@ -39,7 +39,7 @@ function clientWith(lists: Record<string, Conversation[]> = { me: LIST }) {
 
 const chatOf = (id: string) => FakeEventSource.instances.filter((i) => i.url.includes(`/api/agents/${id}/chat`) && !i.closed);
 const page = (client = clientWith(), persona = "me") => (
-  <SupervisorPage baseUrl="" client={client} persona={persona} agents={[]} tasks={[]} loaded factory={factory} />
+  <SupervisorPage baseUrl="" client={client} persona={persona} personas={[]} agents={[]} tasks={[]} loaded factory={factory} />
 );
 const picker = () => screen.getByRole("button", { name: "Conversation" });
 
@@ -60,6 +60,18 @@ describe("Supervisor page", () => {
     await waitFor(() => expect(chatOf("c2")).toHaveLength(1));
     expect(picker()).toHaveTextContent("Chat panes");
     expect(chatOf("c1")).toHaveLength(0);
+  });
+
+  it("names_the_owner_and_the_supervisor_in_the_chat", async () => {
+    render(<SupervisorPage baseUrl="" client={clientWith()} persona="me" personas={[{ ...persona("me"), name: "Ada" }]} agents={[]} tasks={[]} loaded factory={factory} />);
+    await waitFor(() => expect(chatOf("c2")).toHaveLength(1));
+    const items = [
+      { seq: 0, at: NOW, body: { type: "prompt", text: "hi", from: "owner" } },
+      { seq: 1, at: NOW, body: { type: "reply", text: "hello" } },
+    ];
+    act(() => chatOf("c2")[0]!.emit("page", { items, earlier: 0 }));
+    const names = [...document.querySelectorAll(".chat-speaker-name")].map((n) => n.textContent);
+    expect(names).toEqual(["Ada", "Supervisor"]);
   });
 
   it("shows_the_empty_copy_for_a_persona_with_no_conversation", async () => {

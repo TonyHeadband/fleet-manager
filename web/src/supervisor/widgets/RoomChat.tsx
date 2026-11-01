@@ -7,7 +7,8 @@ import type { ChatBody } from "../../api/generated/ChatBody";
 import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
 import { AskFrame } from "../../chat/AskFrame";
-import { Entry, type Speaker } from "../../chat/ChatPane";
+import { Entry } from "../../chat/ChatPane";
+import { grouper, type Speaker } from "../../chat/speakers";
 import { ReplyBox } from "../../components/ReplyBox";
 import { Avatar } from "../../ui/Avatar";
 import { Button } from "../../ui/Button";
@@ -147,13 +148,19 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
   // An orchestrator posts as its task: its agent is the task's own id, or names the task.
   const agentFor = (id: string | null) => (id === null ? undefined : (agents.find((a) => a.id === id) ?? agents.find((a) => a.kind === "orchestrator" && a.task === id)));
   const speakerOf = (p: Post): Speaker => {
-    if (p.sender === "owner") return { name: p.sender_name, avatar: <Avatar seed={persona} title={persona} /> };
+    if (p.sender === "owner") return { id: "owner", name: p.sender_name, avatar: <Avatar seed={persona} title={persona} /> };
     const sender = agentFor(agentOf(p.sender));
-    if (sender?.kind === "supervisor") return { name: p.sender_name, avatar: <Avatar kind="specialist" seed={`supervisor:${persona}`} title="supervisor" /> };
+    const id = agentOf(p.sender) ?? p.sender_name;
+    if (sender?.kind === "supervisor") return { id, name: p.sender_name, avatar: <Avatar kind="specialist" seed={`supervisor:${persona}`} title="supervisor" /> };
     const role = sender?.role;
-    return { name: p.sender_name, avatar: role ? <Avatar kind="specialist" seed={role} title={role} /> : <Avatar /> };
+    return { id, name: p.sender_name, avatar: role ? <Avatar kind="specialist" seed={role} title={role} /> : <Avatar /> };
   };
-  const item = (p: Post, body: ChatBody) => <Entry key={p.id} item={{ seq: p.id, at: p.at, body }} speaker={body.type === "reply" || p.sender === "owner" ? speakerOf(p) : undefined} />;
+  // Posts are in order; a post that is no message (a system line, an ask) ends the run before it.
+  const talk = grouper();
+  const item = (p: Post, body: ChatBody) => {
+    const speaker = body.type === "reply" || p.sender === "owner" ? speakerOf(p) : undefined;
+    return <Entry key={p.id} item={{ seq: p.id, at: p.at, body }} speaker={speaker} head={talk.next(speaker, p.at)} />;
+  };
 
   const answers = new Map(posts.flatMap((p) => (p.kind === "answer" && p.reply_to != null ? [[p.reply_to, p] as const] : [])));
   const asked = new Set(posts.filter((p) => p.kind === "ask").map((p) => p.id));
@@ -164,6 +171,7 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
     if (p.kind === "announcement") return [item(p, { type: "prompt", text: `${p.sender_name} · ${p.text}`, from: "system" })];
     if (p.sender === "owner") return [item(p, { type: "prompt", text: p.text, from: "owner" })];
     if (p.kind === "ask") {
+      talk.reset();
       const forOwner = p.to === "owner" || agentFor(agentOf(p.to))?.kind === "supervisor";
       return [
         <RoomAsk

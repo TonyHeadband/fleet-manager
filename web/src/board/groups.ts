@@ -129,7 +129,12 @@ export function specialistLabel(nick: string | undefined, specialist: string): s
 /** What a fleet agent is called: its specialist, by the nickname its persona gave it. */
 export function fleetName(a: Agent, personas: Persona[]): string {
   const specialist = a.role ?? "specialist";
-  return specialistLabel(personas.find((p) => p.id === a.persona)?.nicknames?.[specialist], specialist);
+  return specialistLabel(nickname(a, personas), specialist);
+}
+
+/** The nickname the agent's persona gave its specialist, if any. */
+export function nickname(a: Agent, personas: Persona[]): string | undefined {
+  return personas.find((p) => p.id === a.persona)?.nicknames?.[a.role ?? "specialist"];
 }
 
 /** A fleet row's status in words, for assistive tech. */

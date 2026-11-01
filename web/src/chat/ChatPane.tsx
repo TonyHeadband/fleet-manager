@@ -10,6 +10,7 @@ import { PlusMinus } from "../ui/PlusMinus";
 import { AskMessage } from "./AskMessage";
 import { Markdown } from "./Markdown";
 import { blocks, mergeItems, opensItself, type Section } from "./sections";
+import { grouper, speakerOf, type ChatSpeakers, type Speaker } from "./speakers";
 import "./chat.css";
 
 export type ChatClient = Pick<FleetClient, "chatHistory" | "answerAsk">;
@@ -19,6 +20,8 @@ interface Props {
   agentId: string;
   client: ChatClient;
   factory?: EventSourceFactory;
+  /** Who the owner's messages and the agent's replies are shown as. */
+  speakers: ChatSpeakers;
 }
 
 type Call = Extract<ChatBody, { type: "call" }>;
@@ -59,7 +62,7 @@ export function ChatPane(props: Props) {
   return <Chat key={`${props.baseUrl} ${props.agentId}`} {...props} />;
 }
 
-function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props) {
+function Chat({ baseUrl, agentId, client, factory = browserEventSource, speakers }: Props) {
   const [items, setItems] = useState<ChatItem[]>([]);
   // The first page came: an empty chat is then really empty, not still loading.
   const [loaded, setLoaded] = useState(false);
@@ -143,9 +146,11 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
 
   const answered = (id: string, label: string) =>
     setAsks((list) => list.map((s) => (s.ask.id === id ? { ask: { ...s.ask, answered: label }, after: lastSeq.current } : s)));
-  const askNode = (s: Shown) => (
-    <AskMessage key={`ask ${s.ask.id}`} agentId={agentId} ask={s.ask} client={client} onAnswered={(label) => answered(s.ask.id, label)} />
-  );
+  const talk = grouper();
+  const askNode = (s: Shown) => {
+    talk.reset();
+    return <AskMessage key={`ask ${s.ask.id}`} agentId={agentId} ask={s.ask} client={client} onAnswered={(label) => answered(s.ask.id, label)} />;
+  };
 
   // Answered asks go in where they were answered; the one still waiting ends the chat.
   const placed = asks.filter((s) => s.ask.answered !== null);
@@ -156,9 +161,13 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
     const first = block.kind === "item" ? block.item.seq : block.key;
     for (; shown < placed.length && placed[shown]!.after < first; shown++) rows.push(askNode(placed[shown]!));
     if (block.kind === "section") {
+      talk.reset();
       const open = opened.get(block.key) ?? opensItself(block);
       rows.push(<CallSection key={`s ${block.key}`} section={block} open={open} onToggle={() => setOpened((m) => new Map(m).set(block.key, !open))} />);
-    } else rows.push(<Entry key={block.item.seq} item={block.item} />);
+    } else {
+      const speaker = speakerOf(block.item, speakers);
+      rows.push(<Entry key={block.item.seq} item={block.item} speaker={speaker} head={talk.next(speaker, block.item.at)} />);
+    }
   }
   rows.push(...placed.slice(shown).map(askNode), ...waiting.map(askNode));
   const endedShown = items.some((i) => i.body.type === "marker" && i.body.kind === "session_ended");
@@ -180,44 +189,52 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
   );
 }
 
-/** Who said it, in a group chat (a room): the name over the text, after the sender's avatar. */
-export interface Speaker {
-  name: string;
-  avatar?: ReactNode;
-}
-
-function SpeakerLine({ speaker }: { speaker: Speaker }) {
+function SpeakerLine({ speaker, at }: { speaker: Speaker; at: number }) {
   return (
     <p className="chat-speaker">
-      {speaker.avatar}
       <span className="chat-speaker-name">{speaker.name}</span>
+      <time className="chat-speaker-time">{clock(at)}</time>
     </p>
   );
 }
 
-/** One chat item. `speaker` names the owner's prompt or a reply where several speak; an agent's own chat has none. */
-export function Entry({ item, speaker }: { item: ChatItem; speaker?: Speaker }) {
+/** A message in the Slack layout: the avatar left, the name and time over the text, which a run's later messages align under. */
+function Message({ className, from, speaker, at, head, children }: { className: string; from?: "owner"; speaker: Speaker; at: number; head: boolean; children: ReactNode }) {
+  return (
+    <div className={`${className} chat-msg`} data-from={from} data-continued={head ? undefined : ""}>
+      {head && speaker.avatar}
+      <div className="chat-msg-body">
+        {head && <SpeakerLine speaker={speaker} at={at} />}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One chat item. An owner's prompt or a reply is a message from `speaker`, under a header unless it continues the
+ * speaker's run (`head` false); every other item is a narrow row without one.
+ */
+export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?: Speaker; head?: boolean }) {
   const body = item.body;
   switch (body.type) {
     case "prompt":
       // Prompts the owner did not type (a resume, an orchestrator's message) are a small line, not the owner's block.
-      return body.from === "owner" ? (
-        <div className="chat-prompt" data-from="owner">
-          {speaker && <SpeakerLine speaker={speaker} />}
+      return body.from === "owner" && speaker ? (
+        <Message className="chat-prompt" from="owner" speaker={speaker} at={item.at} head={head}>
           <Markdown text={body.text} />
-        </div>
+        </Message>
       ) : (
         <p className="chat-line" data-from="system">
           {body.text}
         </p>
       );
     case "reply":
-      return (
-        <div className="chat-reply">
-          {speaker && <SpeakerLine speaker={speaker} />}
+      return speaker ? (
+        <Message className="chat-reply" speaker={speaker} at={item.at} head={head}>
           <Markdown text={body.text} />
-        </div>
-      );
+        </Message>
+      ) : null;
     case "marker":
       return (
         <p className="chat-line" data-marker={body.kind}>

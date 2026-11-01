@@ -72,6 +72,7 @@ import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
 import { SupervisorPage } from "./supervisor/SupervisorPage";
 import { EVENT_TONE } from "./chat/ChatPane";
+import { agentSpeaker, ownerSpeaker } from "./chat/speakers";
 import { ToastStack, useToasts } from "./ui/Toast";
 import type { TaskEvent } from "./api/generated/TaskEvent";
 import { entryId, entryName, liveTasks } from "./tasks/model";
@@ -727,7 +728,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   if (route === "supervisor") {
     return (
       <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Supervisor</h1>} footer={footer} dialog={appDialogs(dialog)}>
-        <SupervisorPage baseUrl={client.baseUrl} client={client} persona={persona} agents={snapshot.agents} tasks={tasks?.tasks ?? []} loaded={snapshot.seq > 0} factory={streams} />
+        <SupervisorPage baseUrl={client.baseUrl} client={client} persona={persona} personas={personaList} agents={snapshot.agents} tasks={tasks?.tasks ?? []} loaded={snapshot.seq > 0} factory={streams} />
       </Shell>
     );
   }
@@ -991,6 +992,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               agentId={open.id}
               client={client}
               factory={streams}
+              speakers={{ owner: ownerSpeaker(persona, personaList), agent: agentSpeaker(open, personaList) }}
               loadDiff={() => client.diff(open.id)}
               extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []}
               onShown={showTab}

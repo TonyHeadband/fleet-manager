@@ -11,6 +11,9 @@ import type { TaskEventKind } from "../api/generated/TaskEventKind";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, factory, fakeClient, persona, product, schema } from "../test/fixtures";
 import { ChatPane, Entry, type ChatClient } from "./ChatPane";
+import type { ChatSpeakers } from "./speakers";
+
+const speakers: ChatSpeakers = { owner: { id: "owner", name: "Ada" }, agent: { id: "a1", name: "docs" } };
 
 // 14:09 UTC, as the footer's clock reads it.
 const AT = 86_400 * 19_000 + 14 * 3600 + 9 * 60;
@@ -32,7 +35,7 @@ const fakeChat = (over: Partial<ChatClient> = {}): ChatClient => ({
   ...over,
 });
 const start = (client = fakeChat()) => {
-  render(<ChatPane baseUrl="" agentId="a1" client={client} factory={factory} />);
+  render(<ChatPane baseUrl="" agentId="a1" client={client} factory={factory} speakers={speakers} />);
   return client;
 };
 const feed = () => screen.getByRole("log", { name: "Chat" });
@@ -63,7 +66,7 @@ beforeEach(() => {
 });
 
 describe("ChatPane", () => {
-  it("owner_prompts_sit_right_and_replies_render_markdown", () => {
+  it("owner_prompts_and_replies_render_markdown", () => {
     start();
     page([
       prompt("Write the failing test for `backfill_tasks`"),
@@ -82,8 +85,6 @@ describe("ChatPane", () => {
     expect(link).toHaveAttribute("href", "https://example.test");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noreferrer");
-    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
-    expect(css).toMatch(/\.chat-prompt\[data-from="owner"\] \{[^}]*align-self: flex-end;[^}]*background: var\(--raised\);/);
   });
 
   it("system_prompts_and_markers_are_lines", () => {
@@ -345,19 +346,17 @@ describe("ChatPane", () => {
     expect(css).toMatch(/\.chat-ask-options\[data-row\] button \{[^}]*padding-inline: var\(--layout-badge-x\);/);
   });
 
-  it("the_detail_panel_chat_is_unchanged", () => {
-    // Without a speaker, Entry draws exactly what the agent's chat drew before rooms gave it one.
+  it("an_entry_is_a_message_only_with_a_speaker_and_other_rows_stay_narrow", () => {
     const html = (i: ChatItem) => {
-      const { container, unmount } = render(<Entry item={i} />);
+      const { container, unmount } = render(<Entry item={i} speaker={speakers.agent} />);
       const out = container.innerHTML;
       unmount();
       return out;
     };
-    expect(html(reply("Done."))).toBe('<div class="chat-reply"><div class="markdown"><p>Done.</p>\n</div></div>');
-    expect(html(prompt("Go on"))).toBe('<div class="chat-prompt" data-from="owner"><div class="markdown"><p>Go on</p>\n</div></div>');
     expect(html(prompt("Resumed", "system"))).toBe('<p class="chat-line" data-from="system">Resumed</p>');
-    const named = render(<Entry item={reply("Done.")} speaker={{ name: "Fix login" }} />);
-    expect(named.container.querySelector(".chat-reply > .chat-speaker")).toHaveTextContent("Fix login");
+    expect(html(marker("compacted"))).toBe('<p class="chat-line" data-marker="compacted">Context compacted</p>');
+    const named = render(<Entry item={reply("Done.")} speaker={{ id: "x", name: "Fix login" }} />);
+    expect(named.container.querySelector(".chat-reply .chat-speaker")).toHaveTextContent("Fix login");
   });
 
   it("chat_css_uses_tokens_only", () => {

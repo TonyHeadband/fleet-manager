@@ -3,8 +3,10 @@ import type { FleetClient } from "../api/client";
 import type { EventSourceFactory } from "../api/events";
 import type { Agent } from "../api/generated/Agent";
 import type { Conversation } from "../api/generated/Conversation";
+import type { Persona } from "../api/generated/Persona";
 import type { Task } from "../api/generated/Task";
 import { ChatPane, type ChatClient } from "../chat/ChatPane";
+import { ownerSpeaker, supervisorSpeaker } from "../chat/speakers";
 import { ReplyBox } from "../components/ReplyBox";
 import { navigate, supervisorHref, useSupervisorConversation } from "../shell/routes";
 import { ErrorLine } from "../ui/ErrorLine";
@@ -22,6 +24,8 @@ interface Props {
   client: SupervisorClient;
   /** The drawer's persona: one supervisor each. */
   persona: string | null;
+  /** The personas, for the owner's name in the chat. */
+  personas: Persona[];
   /** The fleet's agents, for the conversations' live status. */
   agents: Agent[];
   /** The task list the app already keeps; empty until it loads. */
@@ -39,7 +43,7 @@ export function SupervisorPage(props: Props) {
   return <Page key={props.persona ?? ""} {...props} />;
 }
 
-function Page({ baseUrl, client, persona, agents, tasks, loaded, factory }: Props) {
+function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, factory }: Props) {
   const [list, setList] = useState<Conversation[] | null>(null);
   // "+ New" was pressed: the chat is empty until the first message makes the conversation.
   const [blank, setBlank] = useState(false);
@@ -110,7 +114,7 @@ function Page({ baseUrl, client, persona, agents, tasks, loaded, factory }: Prop
         </header>
         <div className="supervisor-chat-body">
           {current !== null ? (
-            <ChatPane baseUrl={baseUrl} agentId={current} client={client} factory={factory} />
+            <ChatPane baseUrl={baseUrl} agentId={current} client={client} factory={factory} speakers={{ owner: ownerSpeaker(persona, personas), agent: supervisorSpeaker(persona) }} />
           ) : (
             list !== null && <p className="supervisor-empty">Start a conversation with your supervisor.</p>
           )}

@@ -7,7 +7,7 @@
 .chat-feed > :first-child { margin-top: auto; }
 .chat-feed > * { flex: none; min-width: 0; }
 
-.chat-prompt[data-from="owner"] { align-self: flex-end; max-width: 82%; padding: var(--layout-list-row-y) var(--layout-list-row-x); background: var(--raised); border: 1px solid var(--border); color: var(--text-high); }
+.chat-prompt[data-from="owner"] { color: var(--text-high); }
 .chat-reply { color: var(--text); }
 
 /* A line: what the owner did not type, a marker, the end of the session. */
@@ -81,7 +81,13 @@
 .chat-ask-note { font-size: var(--size-small); color: var(--text-low); }
 .chat-empty { margin: 0; font-size: var(--size-small); color: var(--text-low); }
 
-/* Who said it, where several speak (a room): the avatar, then the name in mono caps. */
+/* Who said it, Slack-style: the avatar left; the name in mono caps and the time on one line over the text, which the
+   later messages of a run align under, as the first one's. */
 .chat-speaker { display: flex; align-items: center; gap: var(--space-item); margin: 0 0 var(--panel-gap-s); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-low); font-weight: var(--weight-mono); }
-.chat-speaker .avatar { width: calc(var(--size-meta) * 2 * 3 / 4); height: calc(var(--size-meta) * 2); }
 .chat-speaker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-msg { display: grid; grid-template-columns: calc(var(--size-meta) * 4 * 3 / 4) minmax(0, 1fr); column-gap: var(--space-item); align-items: start; }
+.chat-msg > .avatar { grid-column: 1; grid-row: 1; width: calc(var(--size-meta) * 4 * 3 / 4); height: calc(var(--size-meta) * 4); }
+.chat-msg-body { grid-column: 2; grid-row: 1; min-width: 0; }
+.chat-msg .chat-speaker { align-items: baseline; }
+.chat-msg .chat-speaker-name { color: var(--text-high); }
+.chat-speaker-time { flex: none; font-family: var(--font-mono); font-weight: var(--weight-mono); font-size: var(--size-meta); color: var(--text-low); }
