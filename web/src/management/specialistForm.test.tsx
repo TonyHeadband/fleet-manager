@@ -320,6 +320,15 @@ describe("SpecialistForm", () => {
     });
   });
 
+  it("the_form_has_help_lines_and_a_small_avatar_tile", async () => {
+    await form(ownCopy, { builtin: false, overridden: true });
+    expect(screen.getByText("The file's name; it also draws the avatar.")).toBeInTheDocument();
+    expect(screen.getByText("What this persona's cards and chat call it.")).toBeInTheDocument();
+    const css = readFileSync("src/management/specialistForm.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.specialist-form \.avatar \{[^}]*width: calc\(var\(--form-avatar-h\) \* 3 \/ 4\);[^}]*height: var\(--form-avatar-h\);/);
+    expect(css).toMatch(/\[readonly\][^{]*\{[^}]*background: var\(--sunken\)/);
+  });
+
   it("form_css_uses_tokens_only", () => {
     const css = readFileSync("src/management/specialistForm.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
@@ -363,6 +372,23 @@ describe("New definition", () => {
     await userEvent.click(await screen.findByRole("button", { name: kind === "specialist" ? "+ New specialist" : "+ New orchestrator" }));
     return Object.assign(client, { view });
   }
+
+  it("a_row_shows_its_nickname_and_an_open_file_its_origin", async () => {
+    const client = fakeClient({
+      personaDefinitions: vi.fn().mockResolvedValue([info({ nickname: "Ferris", builtin: true, overridden: true })]),
+      personaDefinition: vi.fn(async (_p: string, k: DefKind, name: string) => ({ kind: k, name, text: TEXT, builtin: false })),
+    });
+    render(<Tab client={client} />);
+    const row = await screen.findByRole("button", { name: /^rust / });
+    expect(row).toHaveTextContent("· Ferris");
+    await userEvent.click(row);
+    expect(await screen.findByText(/your copy · overrides built-in/i)).toHaveClass("badge");
+  });
+
+  it("an_unopened_definition_shows_no_origin_badge", async () => {
+    await dialog();
+    expect(document.querySelector(".definition-editor .badge")).toBeNull();
+  });
 
   it("new_refuses_a_builtin_name", async () => {
     await dialog();

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "../generated/layout";
 import { END_SLACK, motionOn } from "../shell/entry";
 
@@ -58,11 +59,13 @@ export function Modal({
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
   }, [closable]);
-  return (
+  // On the window, not in place: a sliding tab's transform would become the fixed backdrop's frame and carry it away.
+  return createPortal(
     <div ref={backdrop} className="dialog-backdrop" onMouseDown={(e) => outside && e.target === e.currentTarget && close.current?.()}>
       <section className={className} role="dialog" aria-modal="true" aria-label={label} aria-labelledby={labelledBy}>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

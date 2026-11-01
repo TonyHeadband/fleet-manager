@@ -46,7 +46,7 @@ interface Props {
   roleFixed: boolean;
 }
 
-function Field(props: { label: string; wide?: boolean; error: string | null; children: (id: string) => ReactNode }) {
+function Field(props: { label: string; wide?: boolean; hint?: string; error: string | null; children: (id: string) => ReactNode }) {
   const id = useId();
   return (
     <div className={props.wide ? "form-field wide" : "form-field"}>
@@ -54,6 +54,7 @@ function Field(props: { label: string; wide?: boolean; error: string | null; chi
         {props.label}
       </label>
       {props.children(id)}
+      {props.hint !== undefined && <span className="note">{props.hint}</span>}
       {props.error !== null && <ErrorLine text={props.error} />}
     </div>
   );
@@ -146,10 +147,10 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
         <div className="form-body form-identity">
           <Avatar kind="specialist" seed={name} title={name} />
           <div className="form-fields">
-            <Field label="Name" error={null}>
+            <Field label="Name" hint="The file's name; it also draws the avatar." error={null}>
               {(id) => <input id={id} readOnly value={name} />}
             </Field>
-            <Field label="Nickname" error={nickError}>
+            <Field label="Nickname" hint="What this persona's cards and chat call it." error={nickError}>
               {(id) => (
                 <input
                   id={id}

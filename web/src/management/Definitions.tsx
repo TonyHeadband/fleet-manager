@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import type { DefFile } from "../api/generated/DefFile";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
+import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { ErrorLine } from "../ui/ErrorLine";
@@ -26,6 +27,13 @@ const KINDS: Record<DefKind, { label: string; folder: string }> = {
   skill: { label: "Skills", folder: "skills" },
   pr_style: { label: "PR styles", folder: "pr-styles" },
 };
+
+const ORIGIN_TEXT = { builtin: "built-in", copy: "your copy · overrides built-in", yours: "yours" } as const;
+
+function origin(d: DefInfo): keyof typeof ORIGIN_TEXT {
+  if (d.overridden) return "copy";
+  return d.builtin ? "builtin" : "yours";
+}
 
 function tag(d: DefInfo) {
   if (d.overridden) return "overrides built-in";
@@ -90,7 +98,10 @@ export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; d
                 >
                   <span className="definition-row">
                     <span className="definition-row-head">
-                      <span className="list-row-name">{d.name}</span>
+                      <span className="list-row-name">
+                        {d.name}
+                        {d.nickname && <span className="low"> · {d.nickname}</span>}
+                      </span>
                       <span className="low">{tag(d)}</span>
                     </span>
                     {modeEffort(d) && <span className="low">{modeEffort(d)}</span>}
@@ -178,10 +189,17 @@ function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; def
   };
 
   return (
-    <div className="definition-editor">
-      <h3 className="mono-label caption" id={captionId}>
-        {KINDS[kind].folder}/{name}
-      </h3>
+    <div className="definition-editor" data-form={isForm(kind) || undefined}>
+      <div className="definition-caption">
+        <h3 className="mono-label caption" id={captionId}>
+          {KINDS[kind].folder}/{name}
+        </h3>
+        {file && info && (
+          <Badge label="Where this file comes from" field="origin" tone={origin(info) === "copy" ? "active" : undefined}>
+            {ORIGIN_TEXT[origin(info)]}
+          </Badge>
+        )}
+      </div>
       {info?.error && <ErrorLine text={info.error} />}
       {body()}
       {confirm && (

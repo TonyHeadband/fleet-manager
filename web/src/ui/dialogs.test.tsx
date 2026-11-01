@@ -14,6 +14,20 @@ const motion = readFileSync("src/shell/motion.css", "utf8").replace(/\s+/g, " ")
 const reduced = motion.slice(motion.indexOf("@media (prefers-reduced-motion: no-preference)"));
 
 describe("dialogs", () => {
+  it("a_dialog_escapes_a_transformed_ancestor", () => {
+    // A transform makes its element the frame of a fixed child: the tab track would carry the backdrop off screen.
+    render(
+      <div style={{ transform: "translateX(-100px)" }} data-testid="track">
+        <Modal label="Reset" onClose={() => {}}>
+          <h2>Reset</h2>
+        </Modal>
+      </div>,
+    );
+    const backdrop = screen.getByRole("dialog", { name: "Reset" }).parentElement;
+    expect(backdrop?.parentElement).toBe(document.body);
+    expect(screen.getByTestId("track")).not.toContainElement(backdrop);
+  });
+
   it("a_dialog_is_a_titled_instrument", () => {
     render(
       <Modal label="New product" onClose={() => {}}>

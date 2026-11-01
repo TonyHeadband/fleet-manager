@@ -293,11 +293,11 @@ describe("ConfirmDialog", () => {
   it("the_confirm_dialog_focuses_cancel", async () => {
     const onGo = vi.fn();
     const onCancel = vi.fn();
-    const { container } = render(<ConfirmDialog title="Stop it?" body="It ends." go="Stop all" onGo={onGo} onCancel={onCancel} />);
+    render(<ConfirmDialog title="Stop it?" body="It ends." go="Stop all" onGo={onGo} onCancel={onCancel} />);
     expect(screen.getByRole("dialog", { name: "Stop it?" })).toHaveAttribute("aria-modal", "true");
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await userEvent.keyboard("{Escape}");
-    await userEvent.click(container.querySelector(".dialog-backdrop")!);
+    await userEvent.click(document.querySelector(".dialog-backdrop")!);
     expect(onCancel).toHaveBeenCalledTimes(2);
     await userEvent.click(screen.getByText("It ends."));
     expect(onCancel, "a click inside is not outside").toHaveBeenCalledTimes(2);

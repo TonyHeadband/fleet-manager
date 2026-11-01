@@ -114,3 +114,22 @@
   flex-direction: column;
   gap: var(--space-item);
 }
+.definition-editor[data-form] {
+  max-width: none;
+}
+.definition-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+}
+.specialist-form {
+  --form-avatar-h: calc(7 * var(--size-meta) * 1.5);
+}
+.specialist-form .avatar {
+  width: calc(var(--form-avatar-h) * 3 / 4);
+  height: var(--form-avatar-h);
+}
+.form-field input[readonly],
+.form-field textarea[readonly] {
+  background: var(--sunken);
+}
