@@ -1,0 +1,43 @@
+/* The Diff pane: the changed files' tree beside the picked file's hunks (DiffView.tsx). */
+.diff-view { flex: 1; display: flex; gap: var(--layout-canvas-gap); min-height: 0; min-width: 0; }
+.diff-failed { color: var(--danger); }
+.diff-tree { flex: none; width: var(--layout-diff-tree); overflow: auto; border: 1px solid var(--border); padding: var(--panel-gap-s) 0; font-family: var(--font-mono); font-size: var(--size-code); }
+.diff-repo-group + .diff-repo-group { margin-top: var(--panel-band-gap); }
+.diff-repo { display: flex; align-items: center; gap: var(--space-button-gap); padding: var(--layout-list-row-y) var(--layout-list-row-x); color: var(--text-high); }
+.diff-repo .diff-counts { margin-left: auto; }
+.diff-tree .note { padding: 0 var(--layout-list-row-x); }
+.diff-dir { padding: var(--layout-list-row-y) var(--layout-list-row-x); color: var(--text-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.diff-tree .list-row { display: flex; align-items: center; gap: var(--space-button-gap); width: 100%; padding-left: calc(var(--layout-list-row-x) * 2); font: inherit; }
+/* The picked file: raised, with the accent's inner edge, as the drawer's marker. */
+.diff-tree .list-row[aria-pressed="true"] { background: var(--raised); color: var(--text-high); box-shadow: inset var(--layout-marker-w) 0 var(--fill); }
+.diff-mark { flex: none; width: 1ch; }
+.diff-mark[data-status="A"] { color: var(--tone-done); }
+.diff-mark[data-status="M"] { color: var(--tone-active); }
+.diff-mark[data-status="D"] { color: var(--danger); }
+.diff-mark[data-status="R"] { color: var(--tone-caution); }
+.diff-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-tree .list-row .diff-counts { margin-left: auto; }
+.diff-counts { flex: none; display: inline-flex; gap: var(--space-chip-gap); }
+.diff-counts [data-kind="add"] { color: var(--tone-done); }
+.diff-counts [data-kind="del"] { color: var(--danger); }
+
+.diff-file { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); }
+.diff-file-head { flex: none; display: flex; align-items: center; gap: var(--space-item); padding: var(--layout-list-row-y) var(--layout-list-row-x); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-high); min-width: 0; }
+.diff-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-from { color: var(--text-low); white-space: nowrap; }
+.diff-modes { margin-left: auto; display: flex; gap: var(--space-chip-gap); }
+.diff-body { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--size-code); }
+.diff-body > .note { padding: var(--layout-list-row-y) var(--layout-list-row-x); margin: 0; }
+.diff-hunk-head { padding: var(--panel-gap-xs) var(--layout-list-row-x); background: var(--raised); color: var(--text-low); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+/* Long lines wrap inside their column, so the two sides stay aligned row by row. */
+.diff-row { display: grid; color: var(--text); }
+.diff-body[data-mode="split"] .diff-row { grid-template-columns: 1fr 1fr; }
+.diff-body[data-mode="unified"] .diff-row { grid-template-columns: 5ch 5ch 1fr; }
+.diff-cell { display: grid; grid-template-columns: 5ch 1fr; min-width: 0; }
+.diff-cell + .diff-cell { border-left: 1px solid var(--border); }
+.diff-no { padding-right: var(--space-button-gap); text-align: right; color: var(--text-low); user-select: none; }
+.diff-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding-left: var(--space-button-gap); }
+:is(.diff-cell, .diff-row)[data-kind="add"] { background: var(--tint-done); color: var(--text-high); }
+:is(.diff-cell, .diff-row)[data-kind="del"] { background: var(--tint-danger); color: var(--text-high); }
+/* A side with no line: a hard-edged hatch, never a fade. */
+.diff-cell[data-empty] { background: repeating-linear-gradient(135deg, transparent 0 var(--layout-dash), var(--border) var(--layout-dash) calc(var(--layout-dash) + 1px)); }
