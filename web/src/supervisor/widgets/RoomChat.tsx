@@ -54,8 +54,8 @@ const agentOf = (m: Post["sender"] | null | undefined) => (m && typeof m === "ob
 
 /**
  * A room as a group chat, drawn with the agent chat's items: the owner's posts on the right, agents' messages as
- * replies under their name and traces, announcements and Fleet Manager's posts as system lines, and asks in the accent
- * outline with their answer. Below, the owner's post box: who to (everyone or one member) and what kind.
+ * replies under their name and traces, announcements and Fleet Manager's posts as system lines, and asks with their
+ * answer (an open ask in the accent outline, an answered one in the text colour). Below, the owner's post box: who to (everyone or one member) and what kind.
  */
 export function RoomChat(props: Props) {
   // Another room starts afresh: its own posts, draft and pickers.
@@ -254,8 +254,8 @@ interface AskProps {
 }
 
 /**
- * An ask, in the accent outline as the agent chat draws one: the question under its sender, then its answer. Open and
- * asked of the owner or the supervisor, it takes an answer; a breakdown's ask is approved or sent back with changes.
+ * An ask as the agent chat draws one (only an open ask is in the accent outline): the question under its sender, then
+ * its answer. Open and asked of the owner or the supervisor, it takes an answer; a breakdown's ask is approved or sent back with changes.
  */
 function RoomAsk({ ask, speaker, answer, answerable, client, onAnswered, onStale }: AskProps) {
   const [text, setText] = useState("");

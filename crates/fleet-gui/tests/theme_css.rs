@@ -613,6 +613,14 @@ fn the_canvas_tokens_are_exported() {
 }
 
 #[test]
+fn a_message_folds_at_a_whole_number_of_lines() {
+    // Chat text is `--size-body` at the `.markdown` line-height of 1.5; a fold height off a line boundary cuts a line.
+    let line = size::BODY * 1.5;
+    let lines = panel::FOLD_MAX / line;
+    assert_eq!(lines, 8.0, "FOLD_MAX is {} lines of {line}px", lines);
+}
+
+#[test]
 fn the_shell_sizes_are_exported() {
     let css = css();
     assert!(css.contains("--layout-panel-min: 360px;"), "{css}");
