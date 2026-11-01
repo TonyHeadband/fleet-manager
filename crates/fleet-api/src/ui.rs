@@ -310,7 +310,7 @@ pub fn default_ui_schema() -> UiSchema {
                     Condition::All {
                         conditions: vec![
                             Condition::StatusIn {
-                                statuses: vec![NeedsYou],
+                                statuses: vec![Working, NeedsYou, Review],
                             },
                             Condition::Not {
                                 condition: Box::new(Condition::BlockedReasonIn {

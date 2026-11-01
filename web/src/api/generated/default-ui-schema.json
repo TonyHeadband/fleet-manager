@@ -195,7 +195,9 @@
           {
             "type": "status_in",
             "statuses": [
-              "needs_you"
+              "working",
+              "needs_you",
+              "review"
             ]
           },
           {

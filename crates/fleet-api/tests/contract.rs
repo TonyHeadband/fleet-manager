@@ -261,7 +261,8 @@ fn eval_conditions() {
     let schema = default_ui_schema();
     let needs = visible(&schema, &agent(Status::NeedsYou, false));
     assert!(needs.contains(&"answer".to_string()) && needs.contains(&"stop".to_string()));
-    assert!(!visible(&schema, &working).contains(&"answer".to_string()));
+    assert!(visible(&schema, &working).contains(&"answer".to_string()));
+    assert!(!visible(&schema, &agent(Status::Stopped, false)).contains(&"answer".to_string()));
     let paused = visible(&schema, &agent(Status::Review, true));
     assert!(paused.contains(&"resume".to_string()) && !paused.contains(&"pause".to_string()));
 }
@@ -663,6 +664,18 @@ fn blocked(reason: BlockedReason) -> Agent {
 fn answer_is_hidden_for_a_repo_access_request() {
     let a = blocked(BlockedReason::RepoAccess);
     assert!(!visible(&default_ui_schema(), &a).contains(&"answer".to_string()));
+}
+
+#[test]
+fn answer_is_offered_while_the_session_is_live() {
+    let schema = default_ui_schema();
+    for status in [Status::Working, Status::NeedsYou, Status::Review] {
+        assert!(visible(&schema, &agent(status, false)).contains(&"answer".to_string()));
+    }
+    assert!(!visible(&schema, &agent(Status::Stopped, false)).contains(&"answer".to_string()));
+    let mut working = agent(Status::Working, false);
+    working.blocked_reason = Some(BlockedReason::RepoAccess);
+    assert!(!visible(&schema, &working).contains(&"answer".to_string()));
 }
 
 #[test]

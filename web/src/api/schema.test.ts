@@ -44,10 +44,10 @@ describe("evalCondition blocked reasons", () => {
 
 describe("visibleActions", () => {
   it("visibleActions_follows_conditions", () => {
-    expect(ids(schema, agent({ status: "working" }))).toEqual(["pause", "stop"]);
+    expect(ids(schema, agent({ status: "working" }))).toEqual(["answer", "pause", "stop"]);
     // No Pause on a Needs you card: Escape would deny the pending request.
     expect(ids(schema, agent({ status: "needs_you" }))).toEqual(["answer", "stop"]);
-    expect(ids(schema, agent({ status: "review", paused: true }))).toEqual(["resume", "stop"]);
+    expect(ids(schema, agent({ status: "review", paused: true }))).toEqual(["answer", "resume", "stop"]);
     // A stopped agent has nothing left to stop.
     expect(ids(schema, agent({ status: "stopped" }))).toEqual([]);
     expect(ids(schema, agent({ status: "stopped", paused: true }))).toEqual([]);

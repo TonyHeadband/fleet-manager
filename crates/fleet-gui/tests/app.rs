@@ -299,7 +299,7 @@ fn clicking_a_card_opens_a_read_only_preview_with_a_diff_tab() {
     a.handle_stream(snapshot(vec![agent(
         "a1",
         "open me",
-        Status::Working,
+        Status::Stopped,
         &["core"],
     )]));
     let mut h = harness(a);
@@ -433,29 +433,30 @@ fn a_reply_edited_while_sending_is_kept() {
 }
 
 #[test]
-fn a_working_agent_has_no_reply_box() {
+fn a_working_agent_has_a_reply_box_and_a_stopped_one_does_not() {
     let mut a = app();
-    a.handle_stream(snapshot(vec![agent(
-        "a1",
-        "busy",
-        Status::Working,
-        &["core"],
-    )]));
+    a.handle_stream(snapshot(vec![
+        agent("a1", "busy", Status::Working, &["core"]),
+        agent("a2", "done", Status::Stopped, &["core"]),
+    ]));
     let mut h = harness(a);
     h.run();
     h.get_by_label("busy").click();
+    h.run();
+    assert_eq!(h.query_all_by_role(Role::MultilineTextInput).count(), 1);
+    h.get_by_label("done").click();
     h.run();
     assert_eq!(h.query_all_by_role(Role::MultilineTextInput).count(), 0);
 }
 
 #[test]
 fn a_reply_box_that_appears_later_does_not_take_the_focus() {
-    // Opened while Working (no box), the agent then turns Needs you: the cursor may be in the New agent dialog by then.
+    // Opened while Stopped (no box), the agent then turns Needs you: the cursor may be in the New agent dialog by then.
     let mut a = app();
     a.handle_stream(snapshot(vec![agent(
         "a1",
         "busy",
-        Status::Working,
+        Status::Stopped,
         &["core"],
     )]));
     let mut h = harness(a);

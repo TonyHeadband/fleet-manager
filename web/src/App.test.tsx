@@ -158,12 +158,12 @@ describe("App", () => {
     expect(box).toHaveFocus();
   });
 
-  it("a_working_agent_gets_no_reply_box", async () => {
+  it("a_working_agent_gets_the_reply_box", async () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
     act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
     await userEvent.click(screen.getByText("fix the tests"));
-    expect(within(screen.getByRole("complementary", { name: "Detail" })).queryByRole("textbox")).toBeNull();
+    expect(within(screen.getByRole("complementary", { name: "Detail" })).getByPlaceholderText("Answer…")).toBeInTheDocument();
   });
 
   it("ctrl_enter_sends_the_reply", async () => {
@@ -313,7 +313,7 @@ describe("App", () => {
   it("a_reply_box_that_appears_later_does_not_take_the_focus", async () => {
     render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => 1300} />);
     await screen.findByRole("region", { name: "Working" });
-    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
+    act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a", status: "stopped" })] }, "1"));
     await userEvent.click(screen.getByText("fix the tests"));
     act(() => FakeEventSource.for("/api/events").emit("event", { seq: 2, kind: { type: "status_changed", id: "a", status: "needs_you", activity: "asks", since: 1200, has_changes: false, paused: false, blocked_reason: "question" } }, "2"));
     const box = await screen.findByPlaceholderText("Answer…");
