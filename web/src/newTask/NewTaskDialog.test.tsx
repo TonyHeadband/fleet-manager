@@ -99,6 +99,33 @@ describe("New task, as Lite's dialog", () => {
     expect(group.getByRole("radio", { name: "portal" }), "a pick unticks").toHaveAttribute("aria-checked", "false");
   });
 
+  it("the_repo_radios_move_with_the_arrow_keys", async () => {
+    await openDialog({}, { repos: [repoInfo("core"), repoInfo("portal"), repoInfo("web")] });
+    const group = within(screen.getByRole("radiogroup", { name: "Repo" }));
+    const radio = (name: string) => group.getByRole("radio", { name });
+    // One stop in the tab order: the first radio while none is chosen, then the chosen one.
+    await waitFor(() => expect(radio("core")).toHaveAttribute("tabindex", "0"));
+    expect(radio("portal")).toHaveAttribute("tabindex", "-1");
+    radio("core").focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(radio("portal")).toHaveFocus();
+    expect(radio("portal")).toHaveAttribute("aria-checked", "true");
+    expect(radio("portal")).toHaveAttribute("tabindex", "0");
+    expect(radio("core")).toHaveAttribute("tabindex", "-1");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(radio("web")).toHaveFocus();
+    expect(radio("web")).toHaveAttribute("aria-checked", "true");
+    // The ends wrap round.
+    await userEvent.keyboard("{ArrowDown}");
+    expect(radio("core")).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(radio("web")).toHaveFocus();
+    await userEvent.keyboard("{ArrowUp}");
+    expect(radio("portal")).toHaveFocus();
+    expect(radio("portal")).toHaveAttribute("aria-checked", "true");
+    expect(radio("web")).toHaveAttribute("aria-checked", "false");
+  });
+
   it("new_task_needs_a_repo", async () => {
     await openDialog();
     await userEvent.type(screen.getByLabelText("Goal"), "go");

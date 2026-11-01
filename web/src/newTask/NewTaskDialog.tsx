@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent } from "react";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
 import type { RepoInfo } from "../api/generated/RepoInfo";
@@ -17,6 +17,8 @@ import {
 
 /** Links to views that arrive in later steps show in place, disabled, as the board's do. */
 const NOT_YET = "not on the web yet";
+/** The ARIA radio pattern: these keys move to the next or previous radio, wrapping, and choose it. */
+const ARROW_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 
 interface Props {
   draft: Draft;
@@ -52,6 +54,20 @@ export function NewTaskDialog({ draft, onDraft, personas, product, repos, reposE
   const why = blocked ?? fleetBlocker(draft) ?? startBlocker(repos, draft, listings);
   const canStart = !draft.busy && draft.prompt.trim() !== "" && why === null;
   const start = () => canStart && onStart();
+
+  // One tab stop in the repo radios: the chosen one, else the first.
+  const radios = useRef<HTMLDivElement>(null);
+  const tabStop = Math.max(0, repos.findIndex((r) => draft.chosen.includes(r.name)));
+  const stepRepo = (e: KeyboardEvent<HTMLDivElement>) => {
+    const by = ARROW_STEP[e.key];
+    if (by === undefined || repos.length === 0) return;
+    e.preventDefault();
+    const buttons = [...(radios.current?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
+    const from = buttons.indexOf(document.activeElement as HTMLElement);
+    const to = ((from < 0 ? tabStop : from) + by + repos.length) % repos.length;
+    onDraft({ ...draft, chosen: [repos[to].name] });
+    buttons[to]?.focus();
+  };
 
   return (
     <Modal label="New task" className="dialog new-task" onClose={onClose}>
@@ -100,9 +116,9 @@ export function NewTaskDialog({ draft, onDraft, personas, product, repos, reposE
         {repos.length === 0 ? (
           <p className="note">This product has no repos; add them in Products</p>
         ) : (
-          <div className="chips">
-            {repos.map((r) => (
-              <Chip key={r.name} radio selected={draft.chosen.includes(r.name)} onClick={() => onDraft(toggleRepo(draft, r.name))}>
+          <div className="chips" ref={radios} onKeyDown={stepRepo}>
+            {repos.map((r, i) => (
+              <Chip key={r.name} radio tabIndex={i === tabStop ? 0 : -1} selected={draft.chosen.includes(r.name)} onClick={() => onDraft(toggleRepo(draft, r.name))}>
                 {r.name}
               </Chip>
             ))}
