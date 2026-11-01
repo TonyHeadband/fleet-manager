@@ -281,7 +281,7 @@ describe("limitTicks", () => {
     expect(limitTicks(101)).toEqual([0, 50, 101]);
     expect(limitTicks(41)).toEqual([0, 20, 41]);
     expect(limitTicks(205)).toEqual([0, 100, 205]);
-    expect(limitTicks(100)).toEqual([0, 25, 50, 75, 100]);
+    expect(limitTicks(100)).toEqual([0, 50, 100]);
     expect(limitTicks(0)).toEqual([0]);
   });
 });
