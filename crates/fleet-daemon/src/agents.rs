@@ -70,6 +70,8 @@ pub const RESUMED: &str = "resumed after daemon restart";
 /// Claude's prompt for an agent interrupted mid-work.
 pub const RESUME_PROMPT: &str =
     "The fleet daemon restarted and interrupted you. Continue where you left off.";
+/// What `resume` types into a session that is still alive.
+pub const CONTINUE_PROMPT: &str = "continue";
 /// A resumed claude that exits within this long could not resume; it is stopped, not retried.
 const RESUME_GRACE: Duration = Duration::from_secs(5);
 
@@ -2605,7 +2607,7 @@ impl AgentService {
         if !a.paused {
             return Ok(());
         }
-        self.submit(&a.session, "continue").await?;
+        self.submit(&a.session, CONTINUE_PROMPT).await?;
         self.store.update_agent(id, |a| a.paused = false).await?;
         Ok(())
     }

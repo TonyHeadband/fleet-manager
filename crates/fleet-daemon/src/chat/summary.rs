@@ -112,21 +112,16 @@ fn edit_delta(input: &Value) -> String {
     )
 }
 
-/// The first `OUTPUT_LINES` lines, cut to `OUTPUT_BYTES` on a character boundary.
+/// The last `OUTPUT_LINES` lines, cut from the front to `OUTPUT_BYTES` on a character boundary: a failure's cause
+/// sits at the end.
 fn cap(text: &str) -> String {
-    let mut out = text
-        .lines()
-        .take(OUTPUT_LINES)
-        .collect::<Vec<_>>()
-        .join("\n");
-    if out.len() > OUTPUT_BYTES {
-        let mut end = OUTPUT_BYTES;
-        while !out.is_char_boundary(end) {
-            end -= 1;
-        }
-        out.truncate(end);
+    let lines: Vec<&str> = text.lines().collect();
+    let out = lines[lines.len().saturating_sub(OUTPUT_LINES)..].join("\n");
+    let mut start = out.len().saturating_sub(OUTPUT_BYTES);
+    while !out.is_char_boundary(start) {
+        start += 1;
     }
-    out
+    out[start..].to_string()
 }
 
 #[cfg(test)]
@@ -217,9 +212,19 @@ mod tests {
         let out = out.unwrap();
         assert!(out.lines().count() <= OUTPUT_LINES);
         assert!(out.len() <= OUTPUT_BYTES);
+        assert!(out.ends_with("line 9999"));
+        assert!(!out.contains("line 0\n"));
 
         let wide = "é".repeat(OUTPUT_BYTES);
         let (_, _, out) = result_of("Bash", &json!({}), &json!(wide), true);
         assert!(out.unwrap().len() <= OUTPUT_BYTES);
+
+        let long_lines = (0..3)
+            .map(|i| format!("{i}{}", "x".repeat(OUTPUT_BYTES)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_, _, out) = result_of("Bash", &json!({}), &json!(long_lines), true);
+        let out = out.unwrap();
+        assert!(out.len() <= OUTPUT_BYTES && out.ends_with('x') && !out.contains('0'));
     }
 }

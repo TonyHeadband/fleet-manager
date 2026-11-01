@@ -1,4 +1,4 @@
-use crate::agents::{PROMPT_POINTER, RESUME_PROMPT};
+use crate::agents::{CONTINUE_PROMPT, PROMPT_POINTER, RESUME_PROMPT};
 use crate::chat::summary::{result_of, summarize};
 use crate::merges::parse_timestamp;
 use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom};
@@ -20,16 +20,19 @@ pub struct Builder {
     next_seq: u64,
     last_at: i64,
     prompt_text: Option<String>,
+    prompt_from: PromptFrom,
     open: HashMap<String, OpenCall>,
 }
 
 impl Builder {
-    /// `prompt_text` is the task's PROMPT.md, shown in place of the pointer line the agent was started with.
-    pub fn new(prompt_text: Option<String>) -> Self {
+    /// `prompt_text` is the task's PROMPT.md, shown in place of the pointer line the agent was started with;
+    /// `prompt_from` is who wrote it (the owner, or an orchestrator for a specialist).
+    pub fn new(prompt_text: Option<String>, prompt_from: PromptFrom) -> Self {
         Self {
             next_seq: 0,
             last_at: 0,
             prompt_text,
+            prompt_from,
             open: HashMap::new(),
         }
     }
@@ -112,9 +115,9 @@ impl Builder {
         let (text, from) = if text == PROMPT_POINTER {
             (
                 self.prompt_text.clone().unwrap_or_else(|| text.to_string()),
-                PromptFrom::Owner,
+                self.prompt_from,
             )
-        } else if text == RESUME_PROMPT {
+        } else if text == RESUME_PROMPT || text == CONTINUE_PROMPT {
             (text.to_string(), PromptFrom::System)
         } else {
             (text.to_string(), PromptFrom::Owner)
@@ -206,7 +209,7 @@ fn display_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{PROMPT_POINTER, RESUME_PROMPT};
+    use crate::agents::{CONTINUE_PROMPT, PROMPT_POINTER, RESUME_PROMPT};
     use fleet_api::{CallStatus, ChatBody, PromptFrom};
     use serde_json::json;
 
@@ -242,7 +245,7 @@ mod tests {
 
     #[test]
     fn the_first_prompt_shows_prompt_md() {
-        let mut b = Builder::new(Some("Fix the bug.".into()));
+        let mut b = Builder::new(Some("Fix the bug.".into()), PromptFrom::Owner);
         let items = b.line(&user(json!(PROMPT_POINTER)));
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].at, 1_793_503_644);
@@ -257,7 +260,7 @@ mod tests {
 
     #[test]
     fn system_prompts_are_marked() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = b.line(&user(json!(RESUME_PROMPT)));
         assert_eq!(
             items[0].body,
@@ -269,8 +272,34 @@ mod tests {
     }
 
     #[test]
+    fn the_resume_continue_is_a_system_line() {
+        let mut b = Builder::new(None, PromptFrom::Owner);
+        let items = b.line(&user(json!(CONTINUE_PROMPT)));
+        assert_eq!(
+            items[0].body,
+            ChatBody::Prompt {
+                text: CONTINUE_PROMPT.into(),
+                from: PromptFrom::System
+            }
+        );
+    }
+
+    #[test]
+    fn a_specialists_first_prompt_is_a_system_line() {
+        let mut b = Builder::new(Some("Review it.".into()), PromptFrom::System);
+        let items = b.line(&user(json!(PROMPT_POINTER)));
+        assert_eq!(
+            items[0].body,
+            ChatBody::Prompt {
+                text: "Review it.".into(),
+                from: PromptFrom::System
+            }
+        );
+    }
+
+    #[test]
     fn typed_prompts_are_the_owners() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("tools"));
         match &items[0].body {
             ChatBody::Prompt { text, from } => {
@@ -284,7 +313,7 @@ mod tests {
     #[test]
     fn a_tool_use_is_running_until_its_result() {
         let text = fixture("tools");
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let mut lines = text.lines();
         let mut running = None;
         for l in lines.by_ref() {
@@ -310,7 +339,7 @@ mod tests {
 
     #[test]
     fn targets_and_results_per_tool() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("tools"));
         let calls: Vec<_> = items
             .iter()
@@ -351,7 +380,7 @@ mod tests {
 
     #[test]
     fn grep_and_glob_summaries_follow_the_tool_use_block() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let use_line = |id: &str, name: &str, input: serde_json::Value| {
             json!({"type": "assistant", "timestamp": "2026-11-01T03:27:24.604Z", "message": {"content": [
                 {"type": "tool_use", "id": id, "name": name, "input": input}]}})
@@ -376,7 +405,7 @@ mod tests {
 
     #[test]
     fn mcp_tools_drop_their_server_prefix() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("mcp"));
         let tools: Vec<_> = items
             .iter()
@@ -389,13 +418,13 @@ mod tests {
         let line = json!({"type": "assistant", "timestamp": "2026-11-01T03:27:24.604Z", "message": {"content": [
             {"type": "tool_use", "id": "f", "name": "mcp__fleet__finish_step", "input": {}}]}})
         .to_string();
-        let items = Builder::new(None).line(&line);
+        let items = Builder::new(None, PromptFrom::Owner).line(&line);
         assert_eq!(call_parts(&items[0]).0, "finish_step");
     }
 
     #[test]
     fn a_denied_call_fails() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("permission"));
         assert!(items.iter().any(|i| matches!(
             i.body,
@@ -408,7 +437,7 @@ mod tests {
 
     #[test]
     fn compaction_is_one_marker() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("compact"));
         let markers: Vec<_> = items
             .iter()
@@ -439,7 +468,7 @@ mod tests {
 
     #[test]
     fn clear_commands_add_nothing() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("clear-after"));
         assert!(
             matches!(&items[0].body, ChatBody::Prompt { text, .. } if text.starts_with("Read notes.txt"))
@@ -448,7 +477,7 @@ mod tests {
 
     #[test]
     fn unknown_records_are_skipped() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         assert!(b.line(r#"{"type":"brand-new-thing","x":1}"#).is_empty());
         assert!(b.line("not json").is_empty());
         let odd = json!({"type": "assistant", "timestamp": "2026-11-01T03:27:24.604Z",
@@ -461,7 +490,7 @@ mod tests {
 
     #[test]
     fn seqs_rise_across_items_and_markers() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let a = b.new_session(5);
         let c = b.marker(MarkerKind::SessionEnded, 6);
         let p = b.line(&user(json!("hi")));
@@ -476,7 +505,7 @@ mod tests {
 
     #[test]
     fn replies_carry_text() {
-        let mut b = Builder::new(None);
+        let mut b = Builder::new(None, PromptFrom::Owner);
         let items = run(&mut b, &fixture("mcp"));
         assert!(items
             .iter()
