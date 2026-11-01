@@ -333,6 +333,15 @@ pub fn watermark_alpha(dark: bool) -> f32 {
     }
 }
 
+/// A generated avatar's lightness, chroma and dim lightness (oklch); the seed picks only the hue.
+pub fn avatar_oklch(dark: bool) -> (f32, f32, f32) {
+    if dark {
+        (0.74, 0.14, 0.58)
+    } else {
+        (0.56, 0.15, 0.70)
+    }
+}
+
 /// A selected item's wash: its strength at the right edge and 0.45 in, which fades out leftward.
 pub fn selection_alpha(dark: bool) -> (f32, f32) {
     if dark {
