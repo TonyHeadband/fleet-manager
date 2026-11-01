@@ -2609,6 +2609,7 @@ fn def(kind: fleet_api::DefKind, name: &str, error: Option<&str>) -> fleet_api::
         error: error.map(String::from),
         mode: None,
         effort: None,
+        nickname: None,
     }
 }
 

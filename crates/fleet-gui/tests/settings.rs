@@ -1603,6 +1603,7 @@ fn settings_saves_the_pr_keys() {
         error: (name == "broken").then(|| "broken.md: no title".to_string()),
         mode: None,
         effort: None,
+        nickname: None,
     })
     .collect())));
     let mut h = harness(app.with_limits(Limits::default()));

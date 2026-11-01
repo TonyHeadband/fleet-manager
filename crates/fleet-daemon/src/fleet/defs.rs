@@ -336,12 +336,6 @@ pub fn persona_defs_root(personas_dir: &Path, id: &str) -> PathBuf {
 }
 
 impl Defs {
-    /// Transitional: `user` is `Config.fleet_dir`, used as both the persona root and the fleet root. Callers move to
-    /// `for_persona` / `shared`, then this goes.
-    pub fn new(user: PathBuf) -> Defs {
-        Defs::for_persona(user.clone(), user)
-    }
-
     /// Specialists, orchestrators and skills from `persona_root` over the built-ins; PR styles from `fleet_root`.
     /// Neither folder need exist until something is saved.
     pub fn for_persona(persona_root: PathBuf, fleet_root: PathBuf) -> Defs {
@@ -491,6 +485,7 @@ impl Defs {
                     mode,
                     effort,
                     error,
+                    nickname: None,
                 });
             }
         }
@@ -564,6 +559,7 @@ impl Defs {
             mode,
             effort,
             error: None,
+            nickname: None,
         })
     }
 

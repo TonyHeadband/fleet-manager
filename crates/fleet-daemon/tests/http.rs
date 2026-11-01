@@ -1591,57 +1591,290 @@ async fn text_of(srv: &Server, method: &str, path: &str, body: &str) -> (u16, Va
     )
 }
 
-#[tokio::test]
-async fn definition_routes_read_write_and_reset() {
-    let srv = start().await;
-    let (s, v) = json_of(srv.addr, "GET", "/api/definitions", None).await;
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v.as_array().unwrap().len(), 18, "{v}");
+fn persona_folder(srv: &Server) -> PathBuf {
+    srv.fx._tmp.path().join("personas").join(PERSONA)
+}
 
-    let (s, v) = json_of(srv.addr, "GET", "/api/definitions/specialist/rust", None).await;
+fn defs_path(rest: &str) -> String {
+    format!("/api/personas/{PERSONA}/definitions{rest}")
+}
+
+fn nick_path(name: &str) -> String {
+    format!("/api/personas/{PERSONA}/nicknames/{name}")
+}
+
+#[tokio::test]
+async fn persona_definition_routes_read_write_and_reset() {
+    let srv = start().await;
+    let (s, v) = json_of(srv.addr, "GET", &defs_path(""), None).await;
+    assert_eq!(s, 200, "{v}");
+    assert!(v
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|d| d["kind"] != "pr_style"));
+
+    let (s, v) = json_of(srv.addr, "GET", &defs_path("/specialist/rust"), None).await;
     assert_eq!((s, v["builtin"].as_bool()), (200, Some(true)), "{v}");
     assert!(v["text"].as_str().unwrap().starts_with("---\nname: rust\n"));
     assert_eq!(
-        json_of(srv.addr, "GET", "/api/definitions/specialist/nope", None)
+        json_of(srv.addr, "GET", &defs_path("/specialist/nope"), None)
             .await
             .0,
         404
     );
 
     let bad = "---\nname: rust\nsummary: s\nlimit: {}\n---\nbody\n";
-    let (s, v) = text_of(&srv, "PUT", "/api/definitions/specialist/rust", bad).await;
+    let (s, v) = text_of(&srv, "PUT", &defs_path("/specialist/rust"), bad).await;
     assert_eq!(s, 400, "{v}");
     assert_eq!(v["error"], "specialists/rust.md: unknown key `limit`");
 
-    // Nothing to reset yet: the built-in itself cannot be deleted.
     assert_eq!(
-        json_of(srv.addr, "DELETE", "/api/definitions/specialist/rust", None)
+        json_of(srv.addr, "DELETE", &defs_path("/specialist/rust"), None)
             .await
             .0,
         404
     );
+}
 
+#[tokio::test]
+async fn a_save_lands_in_the_personas_folder_only() {
+    let srv = start().await;
     let good = "---\nname: rust\nsummary: Mine\n---\nbody\n";
-    let (s, v) = text_of(&srv, "PUT", "/api/definitions/specialist/rust", good).await;
+    let (s, v) = text_of(&srv, "PUT", &defs_path("/specialist/rust"), good).await;
     assert_eq!((s, v["overridden"].as_bool()), (200, Some(true)), "{v}");
-    assert!(srv
-        .fx
-        ._tmp
-        .path()
+    assert!(persona_folder(&srv)
         .join("fleet/specialists/rust.md")
         .is_file());
-    assert_eq!(
-        json_of(srv.addr, "DELETE", "/api/definitions/specialist/rust", None)
-            .await
-            .0,
-        204
-    );
     assert!(!srv
         .fx
         ._tmp
         .path()
         .join("fleet/specialists/rust.md")
         .exists());
+    assert_eq!(
+        json_of(srv.addr, "DELETE", &defs_path("/specialist/rust"), None)
+            .await
+            .0,
+        204
+    );
+    assert!(!persona_folder(&srv)
+        .join("fleet/specialists/rust.md")
+        .exists());
+}
+
+#[tokio::test]
+async fn the_fleet_routes_serve_pr_styles_only() {
+    let srv = start().await;
+    let (s, v) = json_of(srv.addr, "GET", "/api/definitions", None).await;
+    assert_eq!(s, 200, "{v}");
+    let list = v.as_array().unwrap();
+    assert!(
+        !list.is_empty() && list.iter().all(|d| d["kind"] == "pr_style"),
+        "{v}"
+    );
+
+    for kind in ["specialist", "orchestrator", "skill"] {
+        let path = format!("/api/definitions/{kind}/rust");
+        for method in ["GET", "DELETE"] {
+            assert_eq!(
+                json_of(srv.addr, method, &path, None).await.0,
+                400,
+                "{method} {kind}"
+            );
+        }
+        assert_eq!(text_of(&srv, "PUT", &path, "x").await.0, 400, "PUT {kind}");
+    }
+    let name = list[0]["name"].as_str().unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/definitions/pr_style/{name}"),
+        None,
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+
+    let (s, _) = json_of(srv.addr, "GET", &defs_path("/pr_style/plain"), None).await;
+    assert_eq!(s, 400);
+}
+
+#[tokio::test]
+async fn persona_definitions_list_carries_nicknames() {
+    let srv = start().await;
+    assert_eq!(
+        text_of(&srv, "PUT", &nick_path("rust"), "Ferris").await.0,
+        204
+    );
+    let (s, v) = json_of(srv.addr, "GET", &defs_path(""), None).await;
+    assert_eq!(s, 200, "{v}");
+    let row = |name: &str| {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["name"] == name && d["kind"] == "specialist")
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(row("rust")["nickname"], "Ferris");
+    assert!(row("rust")["builtin"].as_bool().unwrap());
+    assert!(!row("rust")["overridden"].as_bool().unwrap());
+    assert!(row("reviewer")["nickname"].is_null(), "{v}");
+}
+
+#[tokio::test]
+async fn nickname_put_merges_and_empty_clears() {
+    let srv = start().await;
+    assert_eq!(
+        text_of(&srv, "PUT", &nick_path("rust"), "Ferris").await.0,
+        204
+    );
+    assert_eq!(
+        text_of(&srv, "PUT", &nick_path("python"), "Monty").await.0,
+        204
+    );
+    let stored = |srv: &Server| -> Value {
+        serde_json::from_slice(&std::fs::read(persona_folder(srv).join("nicknames.json")).unwrap())
+            .unwrap()
+    };
+    assert_eq!(stored(&srv), json!({"rust": "Ferris", "python": "Monty"}));
+    assert_eq!(text_of(&srv, "PUT", &nick_path("rust"), "").await.0, 204);
+    assert_eq!(stored(&srv), json!({"python": "Monty"}));
+    let (s, v) = text_of(&srv, "PUT", &nick_path("rust"), "two\nlines").await;
+    assert_eq!(s, 400, "{v}");
+}
+
+#[tokio::test]
+async fn move_route_refuses_a_taken_name() {
+    let srv = start().await;
+    let mine = "---\nname: mine\nsummary: s\n---\nbody\n";
+    assert_eq!(
+        text_of(&srv, "PUT", &defs_path("/specialist/mine"), mine)
+            .await
+            .0,
+        200
+    );
+    let (s, v) = json_of(
+        srv.addr,
+        "POST",
+        &defs_path("/specialist/mine/move"),
+        Some(&json!({"to": "orchestrator"})),
+    )
+    .await;
+    assert_eq!((s, v["kind"].as_str()), (200, Some("orchestrator")), "{v}");
+    let folder = persona_folder(&srv).join("fleet");
+    assert!(folder.join("orchestrators/mine.md").is_file());
+    assert!(!folder.join("specialists/mine.md").exists());
+
+    // The same name already filed as the other role, by hand: the move must change nothing.
+    std::fs::write(
+        folder.join("specialists/twin.md"),
+        "---\nname: twin\nsummary: s\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::write(
+        folder.join("orchestrators/twin.md"),
+        "---\nname: twin\nsummary: s\n---\nbody\n",
+    )
+    .unwrap();
+    let (s, v) = json_of(
+        srv.addr,
+        "POST",
+        &defs_path("/specialist/twin/move"),
+        Some(&json!({"to": "orchestrator"})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(folder.join("specialists/twin.md").is_file());
+
+    let (s, _) = json_of(
+        srv.addr,
+        "POST",
+        &defs_path("/specialist/rust/move"),
+        Some(&json!({"to": "orchestrator"})),
+    )
+    .await;
+    assert_eq!(s, 404);
+}
+
+#[tokio::test]
+async fn deleting_an_own_definition_drops_its_nickname() {
+    let srv = start().await;
+    let mine = "---\nname: mine\nsummary: s\n---\nbody\n";
+    text_of(&srv, "PUT", &defs_path("/specialist/mine"), mine).await;
+    text_of(&srv, "PUT", &nick_path("mine"), "Minnie").await;
+    text_of(&srv, "PUT", &nick_path("rust"), "Ferris").await;
+    assert_eq!(
+        json_of(srv.addr, "DELETE", &defs_path("/specialist/mine"), None)
+            .await
+            .0,
+        204
+    );
+    let stored: Value = serde_json::from_slice(
+        &std::fs::read(persona_folder(&srv).join("nicknames.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored, json!({"rust": "Ferris"}));
+}
+
+#[tokio::test]
+async fn reset_of_an_override_keeps_its_nickname() {
+    let srv = start().await;
+    let good = "---\nname: rust\nsummary: Mine\n---\nbody\n";
+    text_of(&srv, "PUT", &defs_path("/specialist/rust"), good).await;
+    text_of(&srv, "PUT", &nick_path("rust"), "Ferris").await;
+    assert_eq!(
+        json_of(srv.addr, "DELETE", &defs_path("/specialist/rust"), None)
+            .await
+            .0,
+        204
+    );
+    let (_, v) = json_of(srv.addr, "GET", &defs_path(""), None).await;
+    let rust = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "rust")
+        .unwrap();
+    assert_eq!(rust["nickname"], "Ferris", "{v}");
+}
+
+#[tokio::test]
+async fn unknown_persona_is_404() {
+    let srv = start().await;
+    for (method, path) in [
+        ("GET", "/api/personas/nope/definitions"),
+        ("GET", "/api/personas/nope/definitions/specialist/rust"),
+        ("DELETE", "/api/personas/nope/definitions/specialist/rust"),
+        ("PUT", "/api/personas/nope/nicknames/rust"),
+        ("GET", "/api/personas/..%2Fx/definitions"),
+    ] {
+        assert_eq!(
+            json_of(srv.addr, method, path, None).await.0,
+            404,
+            "{method} {path}"
+        );
+    }
+    assert_eq!(
+        text_of(
+            &srv,
+            "PUT",
+            "/api/personas/nope/definitions/specialist/x",
+            "x"
+        )
+        .await
+        .0,
+        404
+    );
+    let (s, _) = json_of(
+        srv.addr,
+        "POST",
+        "/api/personas/nope/definitions/specialist/x/move",
+        Some(&json!({"to": "orchestrator"})),
+    )
+    .await;
+    assert_eq!(s, 404);
+    assert!(!srv.fx._tmp.path().join("personas/nope").exists());
 }
 
 #[tokio::test]

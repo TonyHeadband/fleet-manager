@@ -255,6 +255,17 @@ pub struct DefInfo {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub error: Option<String>,
+    /// What the persona calls it, on its persona's list; none elsewhere.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub nickname: Option<String>,
+}
+
+/// Body of the role-change route: the role the definition moves to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct MoveDefinition {
+    pub to: DefKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]

@@ -3,7 +3,7 @@ use crate::agent_config;
 use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
 use crate::chat::asks::{tool_input, AnswerError, Asks, SCREEN_ID};
 use crate::chat::stream::{self as chat, Chat, ChatWake};
-use crate::fleet::defs::{Defs, FleetError};
+use crate::fleet::defs::{persona_defs_root, Defs, FleetError};
 use crate::fleet::defs_migrate::known_defs;
 use crate::fleet::env;
 use crate::fleet::workflow::{self, WorkflowError};
@@ -35,11 +35,11 @@ use fleet_api::{
     ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind,
     EffectiveSettings, Event, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
     HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    InternalRemote, NewConversation, NewPersona, NewProduct, NewRelease, OrphanRequest,
-    OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
-    RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease,
-    SetToken, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskEvent,
-    TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    InternalRemote, MoveDefinition, NewConversation, NewPersona, NewProduct, NewRelease,
+    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
+    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse,
+    Task, TaskEvent, TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -211,6 +211,24 @@ pub fn router(state: AppState) -> Router {
             get(get_definition)
                 .put(put_definition)
                 .delete(reset_definition),
+        )
+        .route(
+            "/api/personas/{id}/definitions",
+            get(list_persona_definitions),
+        )
+        .route(
+            "/api/personas/{id}/definitions/{kind}/{name}",
+            get(get_persona_definition)
+                .put(put_persona_definition)
+                .delete(reset_persona_definition),
+        )
+        .route(
+            "/api/personas/{id}/definitions/{kind}/{name}/move",
+            post(move_persona_definition),
+        )
+        .route(
+            "/api/personas/{id}/nicknames/{name}",
+            put(put_persona_nickname),
         )
         .route("/api/events", get(events))
         .route("/api/products", get(products).post(create_product))
@@ -1120,15 +1138,55 @@ impl From<FleetError> for ApiError {
     }
 }
 
-/// Definitions are files: read and written on a blocking thread, as the agent config is.
-async fn with_defs<T: Send + 'static>(
+/// Definitions are files: read and written on a blocking thread, as the agent config is. These are the PR styles,
+/// which are fleet-wide.
+async fn with_pr_styles<T: Send + 'static>(
     st: &AppState,
+    kind: DefKind,
     f: impl FnOnce(Defs) -> Result<T, FleetError> + Send + 'static,
 ) -> Result<T, ApiError> {
-    let defs = Defs::new(st.svc.cfg.fleet_dir.clone());
+    if kind != DefKind::PrStyle {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "{kind:?} definitions belong to a persona: use /api/personas/{{id}}/definitions"
+            ),
+        ));
+    }
+    let defs = Defs::shared(st.svc.cfg.fleet_dir.clone());
     Ok(tokio::task::spawn_blocking(move || f(defs))
         .await
         .map_err(internal)??)
+}
+
+/// One persona's definitions. The persona is checked against the store before any path is built from its id.
+async fn with_persona_defs<T: Send + 'static>(
+    st: &AppState,
+    persona: &str,
+    kind: DefKind,
+    f: impl FnOnce(Defs) -> Result<T, FleetError> + Send + 'static,
+) -> Result<T, ApiError> {
+    known_persona(st, persona).await?;
+    if kind == DefKind::PrStyle {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "PR styles are fleet-wide: use /api/definitions".into(),
+        ));
+    }
+    let defs = Defs::for_persona(
+        persona_defs_root(&st.svc.cfg.personas_dir, persona),
+        st.svc.cfg.fleet_dir.clone(),
+    );
+    Ok(tokio::task::spawn_blocking(move || f(defs))
+        .await
+        .map_err(internal)??)
+}
+
+async fn known_persona(st: &AppState, id: &str) -> Result<(), ApiError> {
+    match st.store.persona(id).await.map_err(internal)? {
+        Some(_) => Ok(()),
+        None => Err(PersonaError::NotFound(id.to_string()).into()),
+    }
 }
 
 /// Every persona's id, for what a product accepts from any of them.
@@ -1176,14 +1234,24 @@ async fn product_targets(st: &AppState) -> Result<overrides::Targets, ApiError> 
 }
 
 async fn list_definitions(State(st): State<AppState>) -> Result<Json<Vec<DefInfo>>, ApiError> {
-    Ok(Json(with_defs(&st, |d| Ok(d.list())).await?))
+    Ok(Json(
+        with_pr_styles(&st, DefKind::PrStyle, |d| {
+            Ok(d.list()
+                .into_iter()
+                .filter(|i| i.kind == DefKind::PrStyle)
+                .collect())
+        })
+        .await?,
+    ))
 }
 
 async fn get_definition(
     State(st): State<AppState>,
     Path((kind, name)): Path<(DefKind, String)>,
 ) -> Result<Json<DefFile>, ApiError> {
-    Ok(Json(with_defs(&st, move |d| d.read(kind, &name)).await?))
+    Ok(Json(
+        with_pr_styles(&st, kind, move |d| d.read(kind, &name)).await?,
+    ))
 }
 
 async fn put_definition(
@@ -1192,7 +1260,7 @@ async fn put_definition(
     text: String,
 ) -> Result<Json<DefInfo>, ApiError> {
     Ok(Json(
-        with_defs(&st, move |d| d.write(kind, &name, &text)).await?,
+        with_pr_styles(&st, kind, move |d| d.write(kind, &name, &text)).await?,
     ))
 }
 
@@ -1200,7 +1268,102 @@ async fn reset_definition(
     State(st): State<AppState>,
     Path((kind, name)): Path<(DefKind, String)>,
 ) -> Result<StatusCode, ApiError> {
-    with_defs(&st, move |d| d.reset(kind, &name)).await?;
+    with_pr_styles(&st, kind, move |d| d.reset(kind, &name)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Roles that carry a nickname; a skill or a style has none.
+fn has_nickname(kind: DefKind) -> bool {
+    matches!(kind, DefKind::Orchestrator | DefKind::Specialist)
+}
+
+async fn nicknamed(st: &AppState, persona: &str, mut info: DefInfo) -> Result<DefInfo, ApiError> {
+    if has_nickname(info.kind) {
+        info.nickname = st
+            .svc
+            .personas()
+            .nicknames(persona)
+            .await?
+            .remove(&info.name);
+    }
+    Ok(info)
+}
+
+async fn list_persona_definitions(
+    State(st): State<AppState>,
+    Path(persona): Path<String>,
+) -> Result<Json<Vec<DefInfo>>, ApiError> {
+    let mut list = with_persona_defs(&st, &persona, DefKind::Specialist, |d| Ok(d.list())).await?;
+    list.retain(|i| i.kind != DefKind::PrStyle);
+    let nicknames = st.svc.personas().nicknames(&persona).await?;
+    for info in list.iter_mut().filter(|i| has_nickname(i.kind)) {
+        info.nickname = nicknames.get(&info.name).cloned();
+    }
+    Ok(Json(list))
+}
+
+async fn get_persona_definition(
+    State(st): State<AppState>,
+    Path((persona, kind, name)): Path<(String, DefKind, String)>,
+) -> Result<Json<DefFile>, ApiError> {
+    Ok(Json(
+        with_persona_defs(&st, &persona, kind, move |d| d.read(kind, &name)).await?,
+    ))
+}
+
+async fn put_persona_definition(
+    State(st): State<AppState>,
+    Path((persona, kind, name)): Path<(String, DefKind, String)>,
+    text: String,
+) -> Result<Json<DefInfo>, ApiError> {
+    let info = with_persona_defs(&st, &persona, kind, move |d| d.write(kind, &name, &text)).await?;
+    Ok(Json(nicknamed(&st, &persona, info).await?))
+}
+
+async fn reset_persona_definition(
+    State(st): State<AppState>,
+    Path((persona, kind, name)): Path<(String, DefKind, String)>,
+) -> Result<StatusCode, ApiError> {
+    let own = name.clone();
+    let had_builtin = with_persona_defs(&st, &persona, kind, move |d| {
+        let builtin = d
+            .list()
+            .iter()
+            .any(|i| i.kind == kind && i.name == own && i.builtin);
+        d.reset(kind, &own)?;
+        Ok(builtin)
+    })
+    .await?;
+    if !had_builtin && has_nickname(kind) {
+        st.svc
+            .personas()
+            .set_nickname(&persona, &name, None)
+            .await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn move_persona_definition(
+    State(st): State<AppState>,
+    Path((persona, kind, name)): Path<(String, DefKind, String)>,
+    Json(req): Json<MoveDefinition>,
+) -> Result<Json<DefInfo>, ApiError> {
+    let info = with_persona_defs(&st, &persona, kind, move |d| {
+        d.move_role(kind, req.to, &name)
+    })
+    .await?;
+    Ok(Json(nicknamed(&st, &persona, info).await?))
+}
+
+async fn put_persona_nickname(
+    State(st): State<AppState>,
+    Path((persona, name)): Path<(String, String)>,
+    text: String,
+) -> Result<StatusCode, ApiError> {
+    st.svc
+        .personas()
+        .set_nickname(&persona, &name, Some(text))
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -487,6 +487,8 @@ pub struct Personas {
     checked: Mutex<HashMap<String, (LoginState, LoginState)>>,
     /// Held while an id is picked and its row written, so two creates never take the same id.
     create_lock: tokio::sync::Mutex<()>,
+    /// Held while a `nicknames.json` is read, changed and written back, so two edits never lose each other.
+    nickname_lock: tokio::sync::Mutex<()>,
     /// The PATH the CLIs are looked for on, and how to install one that is missing.
     tools: Tools,
     forge: Arc<ForgeConfig>,
@@ -516,6 +518,7 @@ impl Personas {
             state_dir,
             checked: Mutex::new(HashMap::new()),
             create_lock: tokio::sync::Mutex::new(()),
+            nickname_lock: tokio::sync::Mutex::new(()),
             tools,
             forge,
             daemon_exe,
@@ -655,10 +658,39 @@ impl Personas {
             row.github_auth = a;
         }
         if let Some(n) = req.nicknames {
+            let _guard = self.nickname_lock.lock().await;
             write_nicknames(&self.personas_dir.join(&row.id), &clean_nicknames(n)?)?;
         }
         self.store.update_persona(&row).await?;
         self.view(row).await
+    }
+
+    /// The persona's nicknames, by specialist name.
+    pub async fn nicknames(&self, id: &str) -> Result<BTreeMap<String, String>, PersonaError> {
+        self.row(id).await?;
+        Ok(read_nicknames(&self.personas_dir.join(id)))
+    }
+
+    /// Sets, or with `None` (or blank) clears, one nickname, leaving the others as they are.
+    pub async fn set_nickname(
+        &self,
+        id: &str,
+        name: &str,
+        nickname: Option<String>,
+    ) -> Result<(), PersonaError> {
+        self.row(id).await?;
+        let dir = self.personas_dir.join(id);
+        let _guard = self.nickname_lock.lock().await;
+        let mut names = read_nicknames(&dir);
+        match nickname.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            Some(n) => {
+                names.insert(name.to_string(), n.to_string());
+            }
+            None => {
+                names.remove(name);
+            }
+        }
+        write_nicknames(&dir, &clean_nicknames(names)?)
     }
 
     pub async fn delete(&self, id: &str) -> Result<(), PersonaError> {

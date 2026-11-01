@@ -15,7 +15,8 @@ const SKILLS: [&str; 6] = [
 
 fn defs() -> (tempfile::TempDir, Defs) {
     let tmp = tempfile::tempdir().unwrap();
-    let d = Defs::new(tmp.path().join("fleet"));
+    let root = tmp.path().join("fleet");
+    let d = Defs::for_persona(root.clone(), root);
     (tmp, d)
 }
 

@@ -4,11 +4,11 @@ use crate::{
     ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer, ChatPage, CheckoutList, ControlRequest,
     Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
     EffectiveSettings, Event, FleetView, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
-    InternalFile, InternalFiles, InternalHistory, NewConversation, NewPersona, NewProduct,
-    NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product,
-    ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList,
-    RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse,
-    Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
+    InternalFile, InternalFiles, InternalHistory, MoveDefinition, NewConversation, NewPersona,
+    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
+    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo,
+    RepoList, RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse,
+    StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -192,23 +192,54 @@ pub fn get_agent_config() {}
 #[utoipa::path(put, path = "/api/agent-config", request_body = AgentConfigUpdate, responses((status = 200, body = AgentConfig), (status = 400)))]
 pub fn put_agent_config() {}
 
-/// Built-in and user orchestrator types, specialists and skills; one that does not load carries its `error`.
+/// The PR styles, built-in and user; one that does not load carries its `error`. Orchestrators, specialists and
+/// skills are per persona, under `/api/personas/{id}/definitions`.
 #[utoipa::path(get, path = "/api/definitions", responses((status = 200, body = Vec<DefInfo>)))]
 pub fn list_definitions() {}
 
-/// The user's copy when there is one, else the built-in (`builtin: true`, shown read-only). For a skill, its
-/// `SKILL.md`.
+/// A PR style: the user's copy when there is one, else the built-in (`builtin: true`, shown read-only). 400 for any
+/// other kind.
 #[utoipa::path(get, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 200, body = DefFile), (status = 404)))]
 pub fn get_definition() {}
 
 /// The body is the file's text (Markdown with frontmatter). It is validated first; 400 names the file and the
-/// problem. Saving under a built-in's name overrides it.
+/// problem, and for any kind but a PR style. Saving under a built-in's name overrides it.
 #[utoipa::path(put, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), request_body(content = String, content_type = "text/markdown"), responses((status = 200, body = DefInfo), (status = 400)))]
 pub fn put_definition() {}
 
 /// Deletes the user's copy, so the built-in applies again. 404 when there is no user copy, built-in or not.
 #[utoipa::path(delete, path = "/api/definitions/{kind}/{name}", params(("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 204), (status = 404)))]
 pub fn reset_definition() {}
+
+/// The persona's orchestrators, specialists and skills: the built-ins and its own, each with the persona's nickname
+/// for it. One that does not load carries its `error`. 404 for an unknown persona.
+#[utoipa::path(get, path = "/api/personas/{id}/definitions", params(("id" = String, Path)), responses((status = 200, body = Vec<DefInfo>), (status = 404)))]
+pub fn list_persona_definitions() {}
+
+/// The persona's copy when there is one, else the built-in (`builtin: true`, shown read-only). For a skill, its
+/// `SKILL.md`. 400 for a PR style, 404 for an unknown persona or definition.
+#[utoipa::path(get, path = "/api/personas/{id}/definitions/{kind}/{name}", params(("id" = String, Path), ("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 200, body = DefFile), (status = 400), (status = 404)))]
+pub fn get_persona_definition() {}
+
+/// The body is the file's text. It is saved in the persona's folder only; saving under a built-in's name overrides it
+/// for this persona. 400 names the file and the problem.
+#[utoipa::path(put, path = "/api/personas/{id}/definitions/{kind}/{name}", params(("id" = String, Path), ("kind" = DefKind, Path), ("name" = String, Path)), request_body(content = String, content_type = "text/markdown"), responses((status = 200, body = DefInfo), (status = 400), (status = 404)))]
+pub fn put_persona_definition() {}
+
+/// Deletes the persona's copy, so the built-in applies again. A definition with no built-in is gone, and its
+/// nickname with it; resetting an override keeps the nickname. 404 when there is no copy.
+#[utoipa::path(delete, path = "/api/personas/{id}/definitions/{kind}/{name}", params(("id" = String, Path), ("kind" = DefKind, Path), ("name" = String, Path)), responses((status = 204), (status = 400), (status = 404)))]
+pub fn reset_persona_definition() {}
+
+/// Moves the persona's own orchestrator or specialist to the other role, or changes nothing. 400 when the target
+/// role already has the name, built in or the persona's own, or when the source is built in.
+#[utoipa::path(post, path = "/api/personas/{id}/definitions/{kind}/{name}/move", params(("id" = String, Path), ("kind" = DefKind, Path), ("name" = String, Path)), request_body = MoveDefinition, responses((status = 200, body = DefInfo), (status = 400), (status = 404)))]
+pub fn move_persona_definition() {}
+
+/// Sets the persona's nickname for a specialist or orchestrator, built-in or not, without touching the others. An
+/// empty body clears it. 400 for more than one line or 32 characters.
+#[utoipa::path(put, path = "/api/personas/{id}/nicknames/{name}", params(("id" = String, Path), ("name" = String, Path)), request_body(content = String, content_type = "text/plain"), responses((status = 204), (status = 400), (status = 404)))]
+pub fn put_persona_nickname() {}
 
 /// Every breakdown version and gate run of an orchestrated task; a solo task has none.
 #[utoipa::path(get, path = "/api/tasks/{id}/fleet", params(("id" = String, Path)), responses((status = 200, body = FleetView), (status = 404)))]

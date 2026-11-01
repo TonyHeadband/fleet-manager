@@ -477,30 +477,30 @@ async fn client_saves_and_reads_the_agent_config() {
 async fn client_reads_saves_and_resets_definitions() {
     let (url, _fx) = start().await;
     let c = FleetClient::new(&url);
-    assert_eq!(blocking!(c, c.definitions()).unwrap().len(), 18);
-    let f = blocking!(c, c.definition(DefKind::Orchestrator, "direct")).unwrap();
-    assert!(f.builtin && f.text.contains("propose_breakdown"), "{f:?}");
+    assert_eq!(blocking!(c, c.definitions()).unwrap().len(), 5);
+    let f = blocking!(c, c.definition(DefKind::PrStyle, "plain")).unwrap();
+    assert!(f.builtin && f.text.contains("Nothing is checked"), "{f:?}");
 
-    let text = "---\nname: direct\nsummary: Mine\n---\nWork.\n";
-    let info = blocking!(c, c.save_definition(DefKind::Orchestrator, "direct", text)).unwrap();
+    let text = "---\nname: plain\nsummary: Mine\n---\nWork.\n";
+    let info = blocking!(c, c.save_definition(DefKind::PrStyle, "plain", text)).unwrap();
     assert!(info.overridden && info.summary == "Mine", "{info:?}");
-    let f = blocking!(c, c.definition(DefKind::Orchestrator, "direct")).unwrap();
+    let f = blocking!(c, c.definition(DefKind::PrStyle, "plain")).unwrap();
     assert_eq!((f.text.as_str(), f.builtin), (text, false));
 
     let err = blocking!(
         c,
-        c.save_definition(DefKind::Orchestrator, "direct", "---\nname: x\n---\n")
+        c.save_definition(DefKind::PrStyle, "plain", "---\nname: x\n---\n")
     )
     .unwrap_err();
-    assert!(err.to_string().contains("orchestrators/direct.md"), "{err}");
+    assert!(err.to_string().contains("pr-styles/plain.md"), "{err}");
 
-    blocking!(c, c.reset_definition(DefKind::Orchestrator, "direct")).unwrap();
+    blocking!(c, c.reset_definition(DefKind::PrStyle, "plain")).unwrap();
     assert!(
-        blocking!(c, c.definition(DefKind::Orchestrator, "direct"))
+        blocking!(c, c.definition(DefKind::PrStyle, "plain"))
             .unwrap()
             .builtin
     );
-    assert!(blocking!(c, c.reset_definition(DefKind::Orchestrator, "direct")).is_err());
+    assert!(blocking!(c, c.reset_definition(DefKind::PrStyle, "plain")).is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]

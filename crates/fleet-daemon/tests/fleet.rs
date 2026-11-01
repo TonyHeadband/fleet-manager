@@ -151,11 +151,11 @@ async fn orchestrator_spawn_layout() {
     );
 
     let md = std::fs::read_to_string(cwd.join("CLAUDE.md")).unwrap();
-    let def = Defs::new(fx.state_dir.join("no-user-defs"))
+    let def = Defs::shared(fx.state_dir.join("no-user-defs"))
         .orchestrator("direct")
         .unwrap();
     assert!(md.contains(def.prompt.trim()), "{md}");
-    let rust = Defs::new(fx.state_dir.join("no-user-defs"))
+    let rust = Defs::shared(fx.state_dir.join("no-user-defs"))
         .specialist("rust")
         .unwrap();
     assert!(
@@ -1241,7 +1241,7 @@ async fn specialist_gets_own_folder_branch_and_skills() {
     assert!(prompt.contains("build api"), "{prompt}");
     assert!(prompt.contains("fix the login bug"), "{prompt}");
     let md = std::fs::read_to_string(folder.join("CLAUDE.md")).unwrap();
-    let rust = Defs::new(fx.state_dir.join("no-user-defs"))
+    let rust = Defs::shared(fx.state_dir.join("no-user-defs"))
         .specialist("rust")
         .unwrap();
     assert!(md.contains(rust.prompt.trim()), "{md}");
@@ -5230,7 +5230,7 @@ async fn styled_fixture(style: &str) -> Fx {
 }
 
 fn style_commits(name: &str) -> Option<String> {
-    Defs::new(std::path::PathBuf::from("/nonexistent/no-user-defs"))
+    Defs::shared(std::path::PathBuf::from("/nonexistent/no-user-defs"))
         .pr_style(name)
         .unwrap()
         .commits

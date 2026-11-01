@@ -25,8 +25,8 @@ pub use chat::{
 pub use event::{Event, EventKind, Snapshot};
 pub use fleet::{
     rollup, task_id, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
-    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, Step, StepDraft, StepState,
-    StopTaskResponse,
+    DefKind, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep, MoveDefinition, Step,
+    StepDraft, StepState, StopTaskResponse,
 };
 pub use form::{
     breakdown_decision, check, check_submit, instructions, release_create, release_edit,
@@ -130,6 +130,12 @@ use utoipa::OpenApi;
         routes::get_definition,
         routes::put_definition,
         routes::reset_definition,
+        routes::list_persona_definitions,
+        routes::get_persona_definition,
+        routes::put_persona_definition,
+        routes::reset_persona_definition,
+        routes::move_persona_definition,
+        routes::put_persona_nickname,
         routes::fleet_view,
         routes::decide_breakdown,
         routes::stop_task,
@@ -169,6 +175,7 @@ use utoipa::OpenApi;
         Versioning,
         DefInfo,
         DefFile,
+        MoveDefinition,
         DecideBreakdown,
         StopTaskResponse,
         AgentId,

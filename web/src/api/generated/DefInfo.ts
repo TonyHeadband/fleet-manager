@@ -22,4 +22,8 @@ mode?: PermissionMode | null, effort?: Effort | null,
 /**
  * Why the definition cannot be used, when it cannot.
  */
-error?: string | null, };
+error?: string | null, 
+/**
+ * What the persona calls it, on its persona's list; none elsewhere.
+ */
+nickname?: string | null, };

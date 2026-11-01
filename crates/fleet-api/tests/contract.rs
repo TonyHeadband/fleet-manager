@@ -126,6 +126,10 @@ fn openapi_lists_all_routes() {
         "/api/personas/{id}/check",
         "/api/personas/{id}/token",
         "/api/agent-config",
+        "/api/personas/{id}/definitions",
+        "/api/personas/{id}/definitions/{kind}/{name}",
+        "/api/personas/{id}/definitions/{kind}/{name}/move",
+        "/api/personas/{id}/nicknames/{name}",
         "/api/products",
         "/api/products/{id}",
         "/api/products/{id}/repos",
@@ -867,6 +871,7 @@ fn ts_bindings_export() {
     FleetEvent::export_all(&cfg).unwrap();
     DefInfo::export_all(&cfg).unwrap();
     DefFile::export_all(&cfg).unwrap();
+    fleet_api::MoveDefinition::export_all(&cfg).unwrap();
     DecideBreakdown::export_all(&cfg).unwrap();
     StopTaskResponse::export_all(&cfg).unwrap();
     ProductList::export_all(&cfg).unwrap();
