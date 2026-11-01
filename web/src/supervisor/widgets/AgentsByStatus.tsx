@@ -12,7 +12,7 @@ const BARS: { status: Status; label: string }[] = [
   { status: "queued", label: "Queued" },
 ];
 
-function AgentsByStatus({ persona, agents }: WidgetProps) {
+function AgentsByStatus({ persona, agents, loaded }: WidgetProps) {
   // Supervisors are not fleet work, and a stopped agent is no longer an agent to count.
   const live = agents.filter((a) => a.persona === persona && a.kind !== "supervisor" && a.status !== "stopped");
   const bars = BARS.map(({ status, label }) => ({
@@ -23,7 +23,7 @@ function AgentsByStatus({ persona, agents }: WidgetProps) {
   return (
     <Widget def={AGENTS_BY_STATUS}>
       <div className="widget-stat">
-        <Stat label="Agents" value={live.length} />
+        <Stat label="Agents" value={loaded ? live.length : null} />
       </div>
       <div className="widget-chart">
         <ColumnBars label="Agents by status" bars={bars} />

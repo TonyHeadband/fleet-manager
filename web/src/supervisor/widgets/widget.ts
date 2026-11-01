@@ -6,6 +6,8 @@ export interface WidgetProps {
   persona: string;
   agents: Agent[];
   tasks: Task[];
+  /** False until the first snapshot arrives, so a count is not shown as 0 before it is known. */
+  loaded: boolean;
 }
 
 /** What the Supervisor page's grid, and later the board, needs to place and draw a widget. */

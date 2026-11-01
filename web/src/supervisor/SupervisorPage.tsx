@@ -24,6 +24,8 @@ interface Props {
   agents: Agent[];
   /** The task list the app already keeps; empty until it loads. */
   tasks: Task[];
+  /** The fleet snapshot has arrived. */
+  loaded: boolean;
   factory?: EventSourceFactory;
 }
 
@@ -35,7 +37,7 @@ export function SupervisorPage(props: Props) {
   return <Page key={props.persona ?? ""} {...props} />;
 }
 
-function Page({ baseUrl, client, persona, agents, tasks, factory }: Props) {
+function Page({ baseUrl, client, persona, agents, tasks, loaded, factory }: Props) {
   const [list, setList] = useState<Conversation[] | null>(null);
   // "+ New" was pressed: the chat is empty until the first message makes the conversation.
   const [blank, setBlank] = useState(false);
@@ -115,7 +117,7 @@ function Page({ baseUrl, client, persona, agents, tasks, factory }: Props) {
         {persona !== null && <ReplyBox label="Message" text={text} onText={setText} onSend={send} busy={busy} />}
       </section>
       <section className="supervisor-grid outlined" aria-label="Fleet widgets">
-        {persona !== null && [AGENTS_BY_STATUS, STORAGE].map((w) => <div key={w.id} className="supervisor-cell">{w.render({ persona, agents, tasks })}</div>)}
+        {persona !== null && [AGENTS_BY_STATUS, STORAGE].map((w) => <div key={w.id} className="supervisor-cell">{w.render({ persona, agents, tasks, loaded })}</div>)}
       </section>
     </div>
   );

@@ -39,7 +39,7 @@ function clientWith(lists: Record<string, Conversation[]> = { me: LIST }) {
 
 const chatOf = (id: string) => FakeEventSource.instances.filter((i) => i.url.includes(`/api/agents/${id}/chat`) && !i.closed);
 const page = (client = clientWith(), persona = "me") => (
-  <SupervisorPage baseUrl="" client={client} persona={persona} agents={[]} tasks={[]} factory={factory} />
+  <SupervisorPage baseUrl="" client={client} persona={persona} agents={[]} tasks={[]} loaded factory={factory} />
 );
 const picker = () => screen.getByRole("button", { name: "Conversation" });
 

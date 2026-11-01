@@ -42,17 +42,29 @@ afterEach(() => {
 
 describe("widgets", () => {
   it("agents_by_status_counts_the_personas_live_agents_only", () => {
-    render(AGENTS_BY_STATUS.render({ persona: "me", agents, tasks: [] }));
+    render(AGENTS_BY_STATUS.render({ persona: "me", agents, tasks: [], loaded: true }));
     const group = screen.getByRole("group", { name: "Agents" });
     expect(group).toBeTruthy();
     // The total is the big number: 2 working + 1 needs you.
-    expect(screen.getAllByText("3").length).toBeGreaterThan(0);
+    expect(within(group).getAllByText("3").length).toBeGreaterThan(0);
     const table = screen.getAllByRole("table", { hidden: true }).map((t) => t.textContent ?? "");
     const joined = table.join(" ");
     expect(joined).toMatch(/Working\s*2/);
     expect(joined).toMatch(/Needs you\s*1/);
     expect(joined).toMatch(/Review\s*0/);
     expect(joined).toMatch(/Queued\s*0/);
+  });
+
+  it("the_total_is_no_data_until_the_snapshot_arrives", () => {
+    const stat = (loaded: boolean) => {
+      const { container, unmount } = render(AGENTS_BY_STATUS.render({ persona: "me", agents: [], tasks: [], loaded }));
+      const text = container.querySelector(".widget-stat")?.textContent ?? "";
+      unmount();
+      return text;
+    };
+    expect(stat(false)).toContain("No data");
+    expect(stat(true)).not.toContain("No data");
+    expect(stat(true)).toContain("0");
   });
 
   it("storage_sums_footprints_by_kind", () => {
@@ -63,7 +75,7 @@ describe("widgets", () => {
       fullTask("d", "d", "running", null, { persona: "other", footprint: withItems([item("core worktree", 9e9)]) }),
       fullTask("e", "e", "running", null, { persona: "me", footprint: null }),
     ];
-    render(STORAGE.render({ persona: "me", agents: [], tasks }));
+    render(STORAGE.render({ persona: "me", agents: [], tasks, loaded: true }));
     const joined = screen.getAllByRole("table", { hidden: true }).map((t) => t.textContent ?? "").join(" ");
     expect(joined).toMatch(/worktrees\s*5\.0 KB/);
     expect(joined).toMatch(/build output\s*1\.5 KB/);
@@ -72,7 +84,7 @@ describe("widgets", () => {
 
   it("widgets_show_their_source", () => {
     for (const def of [AGENTS_BY_STATUS, STORAGE]) {
-      const { container, unmount } = render(def.render({ persona: "me", agents: [], tasks: [] }));
+      const { container, unmount } = render(def.render({ persona: "me", agents: [], tasks: [], loaded: true }));
       const widget = container.querySelector("section.widget") as HTMLElement;
       expect(within(widget).getByRole("heading", { name: def.title })).toBeTruthy();
       expect(widget.querySelector("footer.widget-source")?.textContent).toBe(def.source);
@@ -83,7 +95,7 @@ describe("widgets", () => {
   });
 
   it("widget_motion_is_off_when_motion_is_off", () => {
-    const props = { persona: "me", agents, tasks: [] };
+    const props = { persona: "me", agents, tasks: [], loaded: true };
     const on = render(AGENTS_BY_STATUS.render(props));
     expect(on.container.querySelector("[data-enter]")).not.toBeNull();
     on.unmount();
