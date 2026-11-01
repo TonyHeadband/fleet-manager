@@ -42,18 +42,6 @@ interface Shown {
 const MARKER = { new_session: "New session", compacted: "Context compacted", session_ended: "Session ended" } as const;
 const ended = (at: number) => `${MARKER.session_ended} · ${clock(at)}`;
 
-type EventKind = Extract<ChatBody, { type: "event" }>["kind"];
-/** An event's status mark: what needs the owner in the accent, a failure in danger, the rest done. */
-export const EVENT_TONE: Record<EventKind, "accent" | "danger" | "done"> = {
-  needs_you: "accent",
-  checks_failed: "danger",
-  checks_passed: "done",
-  pr_opened: "done",
-  pr_merged: "done",
-  room_message: "done",
-  room_ask: "accent",
-};
-
 /**
  * An agent's chat, read from Claude's transcript through the daemon: the owner's prompts, Claude's replies, each run
  * of tool calls as one section, and the prompt the agent waits on, answered here. Opens at the latest; earlier
@@ -285,14 +273,6 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
       return (
         <p className="chat-line" data-marker={body.kind}>
           {body.kind === "session_ended" ? ended(item.at) : MARKER[body.kind]}
-        </p>
-      );
-    case "event":
-      // A task's event, placed and drawn as a system prompt is.
-      return (
-        <p className="chat-line" data-from="system" data-event={body.kind}>
-          <span className="chat-mark" data-tone={EVENT_TONE[body.kind]} aria-hidden="true" />
-          <span className="chat-event-title">{body.task_title}</span> {body.text}
         </p>
       );
     case "call":

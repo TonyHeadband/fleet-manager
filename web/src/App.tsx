@@ -71,10 +71,10 @@ import { Shell } from "./shell/Shell";
 import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
 import { SupervisorPage } from "./supervisor/SupervisorPage";
-import { EVENT_TONE } from "./chat/ChatPane";
 import { agentSpeaker, ownerSpeaker } from "./chat/speakers";
 import { ToastStack, useToasts } from "./ui/Toast";
 import type { TaskEvent } from "./api/generated/TaskEvent";
+import type { TaskEventKind } from "./api/generated/TaskEventKind";
 import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
@@ -123,6 +123,17 @@ const wallClock = () => Math.floor(Date.now() / 1000);
 const TOKEN_RETAKE_MS = 5_000;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** A task event's toast mark: what needs the owner in the accent, a failure in danger, the rest done. */
+const EVENT_TONE: Record<TaskEventKind, "accent" | "danger" | "done"> = {
+  needs_you: "accent",
+  checks_failed: "danger",
+  checks_passed: "done",
+  pr_opened: "done",
+  pr_merged: "done",
+  room_message: "done",
+  room_ask: "accent",
+};
 
 export function App({ client, eventSource = browserEventSource, nowSeconds = wallClock, native = null, wizard = NO_WIZARD }: Props) {
   // Counts the new daemons' tokens taken: each makes a new factory, so the streams open again with it.
