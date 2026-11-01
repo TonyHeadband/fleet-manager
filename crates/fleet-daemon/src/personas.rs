@@ -759,6 +759,13 @@ impl Personas {
         Ok(persona_env(&row, &self.personas_dir, &self.gh))
     }
 
+    /// The persona's environment as stored, without asking either CLI: enough to find what its sessions left on disk,
+    /// even once a login has lapsed.
+    pub async fn env(&self, id: &str) -> Result<PersonaEnv, PersonaError> {
+        let row = self.row(id).await?;
+        Ok(persona_env(&row, &self.personas_dir, &self.gh))
+    }
+
     /// The environment to ask GitHub under, after asking `gh` alone: watching for merges needs no Claude login, so a
     /// lapsed one must not stop it.
     pub async fn gh_env(&self, id: &str) -> Result<PersonaEnv, PersonaError> {

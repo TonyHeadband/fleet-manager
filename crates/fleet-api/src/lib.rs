@@ -76,6 +76,8 @@ use utoipa::OpenApi;
         routes::pause_agent,
         routes::resume_agent,
         routes::terminal_stream,
+        routes::chat_stream,
+        routes::chat_history,
         routes::event_stream,
         routes::ui_schema,
         routes::list_products,

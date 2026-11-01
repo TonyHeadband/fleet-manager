@@ -1,13 +1,13 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, CheckoutList, ControlRequest, DecideBreakdown,
-    DefFile, DefInfo, DefKind, DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest,
-    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
-    PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate,
-    RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse,
-    StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
+    ArchivePlan, ArchiveReport, ArchiveRequest, ChatPage, CheckoutList, ControlRequest,
+    DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport, EffectiveSettings, Event, FleetView,
+    GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles,
+    InternalHistory, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
+    SpawnResponse, StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -30,6 +30,16 @@ pub fn resume_agent() {}
 
 #[utoipa::path(get, path = "/api/agents/{id}/terminal", params(("id" = String, Path)), responses((status = 200, content_type = "text/event-stream", body = String)))]
 pub fn terminal_stream() {}
+
+/// The agent's Claude sessions as chat. Events: `page` (a `ChatPage`, the latest 200 items, first), `items` (new or
+/// updated `ChatItem`s, merged by `seq`), and for a Stopped agent `ended` (its `status_since`), after which the stream
+/// closes.
+#[utoipa::path(get, path = "/api/agents/{id}/chat", params(("id" = String, Path)), responses((status = 200, content_type = "text/event-stream", body = ChatPage), (status = 404)))]
+pub fn chat_stream() {}
+
+/// Up to `limit` chat items before `before`, oldest first.
+#[utoipa::path(get, path = "/api/agents/{id}/chat/history", params(("id" = String, Path), ("before" = Option<u64>, Query, description = "A seq; default: after the last item"), ("limit" = Option<usize>, Query, description = "Default 200, at most 1000")), responses((status = 200, body = ChatPage), (status = 404)))]
+pub fn chat_history() {}
 
 #[utoipa::path(get, path = "/api/events", responses((status = 200, content_type = "text/event-stream", body = Event)))]
 pub fn event_stream() {}

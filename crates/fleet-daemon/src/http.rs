@@ -1,6 +1,7 @@
-//! The daemon's HTTP surface: JSON commands, SSE event and terminal streams, and the hook ingress.
+//! The daemon's HTTP surface: JSON commands, SSE event, terminal and chat streams, and the hook ingress.
 use crate::agent_config;
 use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
+use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{Defs, FleetError};
 use crate::fleet::env;
 use crate::fleet::workflow::{self, WorkflowError};
@@ -24,14 +25,15 @@ use axum::{Json, Router};
 use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
-    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, CheckoutInfo,
-    CheckoutList, ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings,
-    EventKind, FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut,
-    InternalBranches, InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona,
-    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo,
-    RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status,
-    StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, ChatPage,
+    CheckoutInfo, CheckoutList, ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind,
+    EffectiveSettings, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
+    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
+    InternalRemote, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
+    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
+    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
+    Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -60,6 +62,8 @@ pub struct AppState {
     tools: Tools,
     /// What the Tauri app must send with its origin, new at each start: `main` writes it to `<state_dir>/api-token`.
     api_token: Arc<str>,
+    /// Poked on each of an agent's hooks, so its chat streams read the transcript without waiting for their poll.
+    chat_wake: ChatWake,
 }
 
 impl AppState {
@@ -83,6 +87,7 @@ impl AppState {
             shutdown: Arc::new(tokio::sync::Notify::new()),
             tools,
             api_token: new_token().into(),
+            chat_wake: ChatWake::default(),
         }
     }
 
@@ -140,6 +145,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/pause", post(pause_agent))
         .route("/api/agents/{id}/resume", post(resume_agent))
         .route("/api/agents/{id}/terminal", get(terminal))
+        .route("/api/agents/{id}/chat", get(chat_stream))
+        .route("/api/agents/{id}/chat/history", get(chat_history))
         .route("/api/agents/{id}/attach", get(attach_agent))
         .route("/api/agents/{id}/diff", get(diff))
         .route("/api/agents/{id}/repos", post(add_repo))
@@ -262,8 +269,9 @@ fn token_of(req: &Request) -> Option<&str> {
         return t.to_str().ok();
     }
     let path = req.uri().path();
-    let stream =
-        path == "/api/events" || (path.starts_with("/api/agents/") && path.ends_with("/terminal"));
+    let stream = path == "/api/events"
+        || (path.starts_with("/api/agents/")
+            && (path.ends_with("/terminal") || path.ends_with("/chat")));
     if req.method() != axum::http::Method::GET || !stream {
         return None;
     }
@@ -1408,7 +1416,9 @@ async fn hook(
     let token = headers.get("x-fleet-token").and_then(|v| v.to_str().ok());
     let now = st.svc.options().clock.now();
     let id = AgentId(id);
-    if let IngestOutcome::Applied(events) = ingest(&st.store, &id, token, body, now).await? {
+    let outcome = ingest(&st.store, &id, token, body, now).await?;
+    st.chat_wake.poke(&id);
+    if let IngestOutcome::Applied(events) = outcome {
         // An agent that exited on its own is weighed like a stopped one, for the Tasks view.
         let exited = events.iter().any(|e| {
             matches!(
@@ -1662,6 +1672,107 @@ async fn terminal(
         }
     });
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
+}
+
+/// Every Claude session the agent has had, and the time its chat ended when it is Stopped.
+async fn chat_sources(
+    st: &AppState,
+    agent: &Agent,
+) -> Result<(Vec<(String, i64)>, Option<i64>), ApiError> {
+    let sessions = st
+        .store
+        .claude_sessions(&agent.id)
+        .await
+        .map_err(internal)?;
+    let ended = (agent.status == Status::Stopped).then_some(agent.status_since);
+    Ok((sessions, ended))
+}
+
+fn chat_event<T: serde::Serialize>(kind: &str, data: &T) -> Option<SseEvent> {
+    SseEvent::default().event(kind).json_data(data).ok()
+}
+
+/// `page` (the latest items), then `items` as the transcript grows. A Stopped agent's chat ends with `ended` (its
+/// `status_since`), then the stream closes so the clients stop reconnecting.
+async fn chat_stream(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<SseStream, ApiError> {
+    let agent = st.svc.agent(&AgentId(id)).await?;
+    // Subscribed before the first read, so a hook landing during it is not missed.
+    let mut wake = st.chat_wake.subscribe();
+    let (sessions, ended) = chat_sources(&st, &agent).await?;
+    let chat = Chat::open(&st.svc, &agent).await;
+    let (tx, rx) = mpsc::channel(16);
+    tokio::spawn(async move {
+        let Some((mut chat, _)) = chat::step(chat, sessions, ended).await else {
+            return;
+        };
+        let Some(page) = chat_event("page", &chat.page(None, chat::PAGE)) else {
+            return;
+        };
+        if tx.send(Ok(page)).await.is_err() {
+            return;
+        }
+        let mut ended = ended;
+        loop {
+            if let Some(at) = ended {
+                if let Some(e) = chat_event("ended", &at) {
+                    let _ = tx.send(Ok(e)).await;
+                }
+                return;
+            }
+            tokio::select! {
+                _ = tx.closed() => return,
+                _ = chat::woken(&mut wake, &agent.id) => {}
+                _ = tokio::time::sleep(chat::POLL) => {}
+            }
+            let Ok(now) = st.svc.agent(&agent.id).await else {
+                return;
+            };
+            let Ok((sessions, end)) = chat_sources(&st, &now).await else {
+                continue;
+            };
+            ended = end;
+            let Some((next, fresh)) = chat::step(chat, sessions, ended).await else {
+                return;
+            };
+            chat = next;
+            if fresh.is_empty() {
+                continue;
+            }
+            let Some(e) = chat_event("items", &fresh) else {
+                return;
+            };
+            if tx.send(Ok(e)).await.is_err() {
+                return;
+            }
+        }
+    });
+    Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
+}
+
+#[derive(serde::Deserialize)]
+struct HistoryQuery {
+    before: Option<u64>,
+    limit: Option<usize>,
+}
+
+const HISTORY_MAX: usize = 1000;
+
+async fn chat_history(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<HistoryQuery>,
+) -> Result<Json<ChatPage>, ApiError> {
+    let agent = st.svc.agent(&AgentId(id)).await?;
+    let (sessions, ended) = chat_sources(&st, &agent).await?;
+    let chat = Chat::open(&st.svc, &agent).await;
+    let (chat, _) = chat::step(chat, sessions, ended)
+        .await
+        .ok_or_else(|| internal("cannot read the chat"))?;
+    let limit = q.limit.unwrap_or(chat::PAGE).min(HISTORY_MAX);
+    Ok(Json(chat.page(q.before, limit)))
 }
 
 #[cfg(test)]

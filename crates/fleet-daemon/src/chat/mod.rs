@@ -1,6 +1,7 @@
 //! Claude Code transcript lines → chat items.
 mod build;
 mod read;
+pub mod stream;
 mod summary;
 
 pub use build::Builder;

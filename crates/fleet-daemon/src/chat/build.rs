@@ -71,6 +71,26 @@ impl Builder {
         self.marker(MarkerKind::NewSession, at)
     }
 
+    /// Ends the calls still waiting for a result, as their session has ended: each comes back failed, keeping its seq.
+    pub fn close_open(&mut self) -> Vec<ChatItem> {
+        let mut open: Vec<_> = self.open.drain().collect();
+        open.sort_by_key(|(_, c)| c.seq);
+        open.into_iter()
+            .map(|(id, call)| ChatItem {
+                seq: call.seq,
+                at: call.at,
+                body: ChatBody::Call {
+                    id,
+                    tool: call.tool,
+                    target: call.target,
+                    status: CallStatus::Failed,
+                    result: Some("interrupted".into()),
+                    output: None,
+                },
+            })
+            .collect()
+    }
+
     fn mint(&mut self, at: i64, body: ChatBody) -> ChatItem {
         let seq = self.next_seq;
         self.next_seq += 1;
@@ -501,6 +521,29 @@ mod tests {
                 kind: MarkerKind::NewSession
             }
         );
+    }
+
+    #[test]
+    fn open_calls_close_as_interrupted() {
+        let mut b = Builder::new(None, PromptFrom::Owner);
+        let use_line = |id: &str| {
+            json!({"type": "assistant", "timestamp": "2026-11-01T03:27:24.604Z", "message": {"content": [
+                {"type": "tool_use", "id": id, "name": "Read", "input": {"file_path": "/a"}}]}})
+            .to_string()
+        };
+        let first = b.line(&use_line("c1"))[0].clone();
+        let second = b.line(&use_line("c2"))[0].clone();
+        let closed = b.close_open();
+        assert_eq!(
+            closed.iter().map(|i| i.seq).collect::<Vec<_>>(),
+            [first.seq, second.seq]
+        );
+        assert_eq!(closed[0].at, first.at);
+        assert_eq!(
+            call_parts(&closed[1]),
+            ("Read", "/a", CallStatus::Failed, Some("interrupted"))
+        );
+        assert!(b.close_open().is_empty());
     }
 
     #[test]
