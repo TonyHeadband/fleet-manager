@@ -166,6 +166,10 @@ pub struct SpawnRequest {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub role: Option<String>,
+    /// A path in the product's internal repo (`plans/<name>.md`) the orchestrator carries out.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub plan: Option<String>,
 }
 
 /// Body of `POST /api/agents`.

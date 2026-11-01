@@ -593,6 +593,7 @@ pub async fn spawn_ready(fx: &Fx) -> fleet_api::Agent {
     let a = fx
         .svc
         .spawn(fleet_api::SpawnRequest {
+            plan: None,
             actor: fleet_api::Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

@@ -15,6 +15,7 @@ fn noon(date: &str) -> i64 {
 
 fn task(id: &str, state: TaskState, release: Option<i64>) -> Task {
     Task {
+        plan: None,
         id: AgentId(id.into()),
         name: format!("task-{id}"),
         goal: "goal".into(),

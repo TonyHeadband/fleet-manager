@@ -631,6 +631,7 @@ fn workspaces_changed_event_round_trips() {
 #[test]
 fn spawn_request_uses_repos() {
     let r = SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: "app".into(),
         release: Some(3),

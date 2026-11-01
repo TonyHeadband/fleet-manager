@@ -215,11 +215,9 @@ fn supervisor_tools() -> [Value; 4] {
                 "repos": repo_list,
                 "prompt": { "type": "string", "description": "What the task is to do and how it knows it is done." },
                 "title": { "type": "string", "description": "3 to 6 words, like a ticket." },
-                "kind": { "enum": ["solo", "orchestrator"] },
-                "role": { "type": "string", "description": "The orchestrator type, for kind orchestrator." },
                 "plan": { "type": "string", "description": "A plans/<name>.md path in the internal repo the task follows." },
             }),
-            &["product", "repos", "prompt", "kind"],
+            &["product", "repos", "prompt"],
         ),
     ]
 }

@@ -313,6 +313,7 @@ async fn stopping_an_agent_triggers_a_check() {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -550,6 +551,7 @@ async fn stopped_github_task_changing(fx: &Fx, change: bool) -> AgentId {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -767,6 +769,7 @@ async fn archive_of_running_task_is_not_stopped() {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

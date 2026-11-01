@@ -197,6 +197,7 @@ async fn a_task_being_spawned_is_not_an_orphan() {
     let core = pick(&fx, "core");
     let spawn = tokio::spawn(async move {
         svc.spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -236,6 +237,7 @@ async fn fleet_worktrees_are_not_orphans() {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

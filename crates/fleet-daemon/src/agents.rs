@@ -269,6 +269,8 @@ pub enum SpawnError {
     SpecialistSpawn,
     #[error("a supervisor conversation is started from the Supervisor page, not as a task")]
     SupervisorSpawn,
+    #[error("the structured orchestrator is retired: plans come from the supervisor")]
+    StructuredRetired,
     #[error("every specialist is hidden or does not load: unhide one in Management → Products")]
     NoSpecialists,
     #[error("release {release} is not a release of {product}")]
@@ -292,6 +294,15 @@ pub enum SpawnError {
 impl From<fleet_api::ToolError> for SpawnError {
     fn from(e: fleet_api::ToolError) -> Self {
         SpawnError::Tool(Box::new(e))
+    }
+}
+
+/// Refuses a new task of a retired type. Checked where new tasks come in (`POST /api/agents`, the supervisor's
+/// `start_task`), not in `spawn`: stored tasks of these types still run to their end.
+pub fn refuse_retired(req: &SpawnRequest) -> Result<(), SpawnError> {
+    match (req.kind, req.role.as_deref()) {
+        (AgentKind::Orchestrator, Some("structured")) => Err(SpawnError::StructuredRetired),
+        _ => Ok(()),
     }
 }
 
@@ -1518,6 +1529,7 @@ impl AgentService {
                     .orchestrator_plan(def, &req.persona, &req.product, &rows, &hidden)
                     .await?;
                 p.named = title.is_some();
+                p.plan = req.plan.clone();
                 Some(p)
             }
             None => None,

@@ -262,6 +262,8 @@ pub(crate) struct OrchestratorPlan {
     pub repo_env: BTreeMap<String, String>,
     /// The task has a title, so the orchestrator is not asked to name it.
     pub named: bool,
+    /// The plan in the internal repo the task carries out (`Task.plan`).
+    pub plan: Option<String>,
 }
 
 impl OrchestratorPlan {
@@ -284,6 +286,12 @@ impl OrchestratorPlan {
         let mut text = instructions_section(instructions);
         text.push_str(title_section(self.named));
         text.push_str(self.def.prompt.trim_end());
+        if let Some(plan) = &self.plan {
+            text.push_str(&format!(
+                "\n\n## Your plan\n\nYour plan is {plan} in the internal resources; read it first. It is the \
+                 agreed goal: do not re-agree it. Turn it into your breakdown, one step per plan task."
+            ));
+        }
         text.push_str("\n\n## Your specialists\n\n");
         for RosterEntry {
             name,
@@ -690,6 +698,7 @@ impl AgentService {
             pr: None,
             repo_env: BTreeMap::new(),
             named: false,
+            plan: None,
         })
     }
 
@@ -770,6 +779,7 @@ impl AgentService {
         let specialists = plan.specialists.iter().map(|s| s.name.clone()).collect();
         let pr_rules = plan.pr.clone();
         let repo_env = plan.repo_env.clone();
+        let task_plan = plan.plan.clone();
         self.store
             .update_task(id, move |p| {
                 p.kind = AgentKind::Orchestrator;
@@ -779,6 +789,7 @@ impl AgentService {
                 p.workdir = workdir;
                 p.pr_rules = pr_rules;
                 p.repo_env = repo_env;
+                p.plan = task_plan;
             })
             .await
     }
@@ -2500,6 +2511,7 @@ impl AgentService {
             pr: p.pr_rules.clone(),
             repo_env: p.repo_env.clone(),
             named: p.title.is_some(),
+            plan: p.plan.clone(),
         };
 
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the

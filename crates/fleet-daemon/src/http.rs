@@ -1,6 +1,6 @@
 //! The daemon's HTTP surface: JSON commands, SSE event, terminal and chat streams, and the hook ingress.
 use crate::agent_config;
-use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
+use crate::agents::{fleet_config, refuse_retired, AgentService, ServiceError, SpawnError};
 use crate::chat::asks::{tool_input, AnswerError, Asks, SCREEN_ID};
 use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{persona_defs_root, Defs, FleetError};
@@ -510,6 +510,7 @@ impl From<SpawnError> for ApiError {
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
             | SpawnError::SupervisorSpawn
+            | SpawnError::StructuredRetired
             | SpawnError::NoSpecialists
             | SpawnError::PrStyle { .. }
             | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,
@@ -1514,6 +1515,7 @@ async fn spawn_agent(
     State(st): State<AppState>,
     Json(req): Json<SpawnRequest>,
 ) -> Result<Json<SpawnResponse>, ApiError> {
+    refuse_retired(&req)?;
     let attach = st.attach.clone();
     let mut res = detached(async move { st.svc.spawn_reporting(req).await }).await??;
     with_attach(&attach, &mut res.agent);

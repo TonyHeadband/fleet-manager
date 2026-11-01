@@ -69,6 +69,7 @@ fn agent_settings_set_the_classic_renderer() {
 async fn spawn_seeds_the_persona_config() {
     let fx = fixture().await;
     let req = SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,

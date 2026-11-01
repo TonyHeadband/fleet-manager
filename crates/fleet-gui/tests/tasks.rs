@@ -31,6 +31,7 @@ fn ws(repo: &str) -> Workspace {
 
 fn task(id: &str, name: &str, state: TaskState, cause: Option<StopCause>) -> Task {
     Task {
+        plan: None,
         id: AgentId(id.into()),
         name: name.into(),
         goal: format!("{name} goal\nmore detail"),

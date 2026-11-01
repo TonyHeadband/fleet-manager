@@ -121,6 +121,7 @@ async fn stop_triggers_a_measurement_that_lands_on_the_card() {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -153,6 +154,7 @@ async fn a_crash_triggers_a_measurement() {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -179,6 +181,7 @@ async fn measure_all_skips_archived_tasks_and_missing_folders() {
     let a = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -195,6 +198,7 @@ async fn measure_all_skips_archived_tasks_and_missing_folders() {
     let b = fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

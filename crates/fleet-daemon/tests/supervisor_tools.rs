@@ -2,7 +2,7 @@ mod common;
 
 use common::net::*;
 use common::*;
-use fleet_api::{AgentId, PrState, TaskPr, TaskState};
+use fleet_api::{AgentId, AgentKind, PrState, TaskPr, TaskState};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::supervisor::Supervisor;
 use serde_json::{json, Value};
@@ -302,15 +302,21 @@ async fn write_doc_refuses_paths_outside_specs_and_plans() {
     }
 }
 
+/// `core` ready for the direct orchestrator `start_task` starts: an origin whose `main` has a workflow.
+fn ready_for_direct(srv: &Server) {
+    add_origin_with_workflow(&srv.fx, &one_step("true"));
+}
+
 #[tokio::test]
 async fn start_task_records_the_conversation_as_origin() {
     let srv = start().await;
+    ready_for_direct(&srv);
     let sup = conversation(&srv).await;
     let (text, err) = call(
         &srv,
         &sup,
         "start_task",
-        json!({"product": PRODUCT, "repos": ["core"], "prompt": "do it", "title": "Do It", "kind": "solo"}),
+        json!({"product": PRODUCT, "repos": ["core"], "prompt": "do it", "title": "Do It"}),
     )
     .await;
     assert!(!err, "{text}");
@@ -332,42 +338,72 @@ async fn start_task_records_the_conversation_as_origin() {
         &srv,
         &sup,
         "start_task",
-        json!({"product": "nope", "repos": [], "prompt": "x", "kind": "solo"}),
+        json!({"product": "nope", "repos": [], "prompt": "x"}),
     )
     .await;
     assert!(err && text.contains("nope"), "{text}");
-    let (text, err) = call(
-        &srv,
-        &sup,
-        "start_task",
-        json!({"product": PRODUCT, "repos": ["core"], "prompt": "x", "kind": "weird"}),
-    )
-    .await;
-    assert!(err && text.contains("kind"), "{text}");
 }
 
 #[tokio::test]
-async fn start_task_with_a_plan_names_it_in_the_prompt() {
+async fn start_task_always_starts_a_direct_orchestrator_with_the_plan_field() {
     let srv = start().await;
+    ready_for_direct(&srv);
     let sup = conversation(&srv).await;
+    // An old call's `kind` and `role` are ignored.
     let (text, err) = call(
         &srv,
         &sup,
         "start_task",
-        json!({"product": PRODUCT, "repos": ["core"], "prompt": "do it", "kind": "solo", "plan": "plans/2026-11-01-x.md"}),
+        json!({"product": PRODUCT, "repos": ["core"], "prompt": "do it", "kind": "solo",
+               "role": "structured", "plan": "plans/2026-11-01-x.md"}),
     )
     .await;
     assert!(!err, "{text}");
     let id = AgentId(text.split(' ').nth(1).unwrap().to_string());
+    let task = srv.fx.store.task(&id).await.unwrap().unwrap();
+    assert_eq!(
+        (task.kind, task.role.as_deref(), task.plan.as_deref()),
+        (
+            AgentKind::Orchestrator,
+            Some("direct"),
+            Some("plans/2026-11-01-x.md")
+        )
+    );
     let a = agent(&srv.fx, &id).await;
     let prompt =
         std::fs::read_to_string(PathBuf::from(&a.workdir).join(fleet_daemon::agents::PROMPT_FILE))
             .unwrap();
     assert!(
-        prompt.contains("do it")
-            && prompt
-                .trim_end()
-                .ends_with("The plan is plans/2026-11-01-x.md in the internal repo."),
+        prompt.contains("do it") && !prompt.contains("The plan is"),
         "{prompt}"
     );
+}
+
+#[tokio::test]
+async fn start_task_offers_no_kind_or_role() {
+    let srv = start().await;
+    let sup = conversation(&srv).await;
+    let v = rpc(
+        &srv,
+        &sup,
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+    )
+    .await;
+    let tool = v["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "start_task")
+        .unwrap()
+        .clone();
+    let props = &tool["inputSchema"]["properties"];
+    assert!(
+        props.get("kind").is_none() && props.get("role").is_none(),
+        "{tool}"
+    );
+    assert!(props.get("plan").is_some(), "{tool}");
+    assert!(!tool["inputSchema"]["required"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("kind")));
 }

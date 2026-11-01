@@ -204,6 +204,10 @@ pub struct Task {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub role: Option<String>,
+    /// The plan in the product's internal repo the task was started to carry out, if any.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub plan: Option<String>,
     /// The specialists the orchestrator may use: every one that loaded when the task started, less the product's
     /// hidden ones. Records from before the roster went away still read it as `roster`.
     #[serde(default, alias = "roster")]

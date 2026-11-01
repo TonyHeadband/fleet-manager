@@ -49,6 +49,7 @@ async fn new_release(addr: SocketAddr, product: &str, version: &str) -> Release 
 async fn spawn_in_fixture_product(fx: &Fx, prompt: &str) -> fleet_api::Agent {
     fx.svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

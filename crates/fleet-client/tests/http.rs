@@ -83,6 +83,7 @@ fn calls_that_may_clone_or_fetch_wait_past_the_usual_timeout() {
             "spawn",
             Box::new(|c| {
                 c.spawn(&fleet_api::SpawnRequest {
+                    plan: None,
                     actor: fleet_api::Actor("local".into()),
                     product: "p".into(),
                     release: None,

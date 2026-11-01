@@ -23,6 +23,7 @@ use std::time::Duration;
 
 fn request(fx: &Fx, kind: AgentKind, role: Option<&str>, repos: &[&str]) -> SpawnRequest {
     SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,
@@ -207,18 +208,16 @@ async fn orchestrator_spawn_layout() {
         .await
     );
 
-    // A specialist the product hides is left out; the structured type brings its skills.
+    // A specialist the product hides is left out; a type with skills brings them.
     hide(&fx, &["reviewer"]).await;
-    let b = fx
-        .svc
-        .spawn(request(
-            &fx,
-            AgentKind::Orchestrator,
-            Some("structured"),
-            &["core"],
-        ))
-        .await
-        .unwrap();
+    let types = fx._tmp.path().join("fleet/orchestrators");
+    std::fs::create_dir_all(&types).unwrap();
+    std::fs::write(
+        types.join("direct.md"),
+        "---\nname: direct\nsummary: s\nskills: [brainstorming, writing-plans]\n---\nBody.\n",
+    )
+    .unwrap();
+    let b = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let cwd = PathBuf::from(&b.workdir);
     assert_eq!(skills_in(&cwd), ["brainstorming", "writing-plans"]);
     assert!(cwd.join(".claude/skills/brainstorming/SKILL.md").is_file());
@@ -508,6 +507,93 @@ async fn a_specialist_cannot_be_spawned_over_http() {
     let (status, v) = json_of(addr, "POST", "/api/agents", Some(&body)).await;
     assert_eq!(status, 400, "{v}");
     assert_nothing_created(&fx).await;
+}
+
+const PLAN: &str = "plans/2026-11-01-login.md";
+
+fn planned(fx: &Fx, plan: &str) -> SpawnRequest {
+    SpawnRequest {
+        plan: Some(plan.into()),
+        ..orchestrator(fx, "direct")
+    }
+}
+
+fn plan_section(plan: &str) -> String {
+    format!(
+        "\n\n## Your plan\n\nYour plan is {plan} in the internal resources; read it first. It is the agreed goal: \
+         do not re-agree it. Turn it into your breakdown, one step per plan task."
+    )
+}
+
+#[tokio::test]
+async fn a_planned_direct_orchestrator_gets_its_plan_in_claude_md() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(planned(&fx, PLAN)).await.unwrap();
+    let md = std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap();
+    assert!(md.contains(&plan_section(PLAN)), "{md}");
+    let task = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(task.plan.as_deref(), Some(PLAN));
+    assert_eq!(
+        (task.kind, task.role.as_deref()),
+        (AgentKind::Orchestrator, Some("direct"))
+    );
+}
+
+#[tokio::test]
+async fn an_unplanned_direct_orchestrator_is_unchanged() {
+    let fx = fleet_fixture().await;
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let b = fx.svc.spawn(planned(&fx, PLAN)).await.unwrap();
+    let read = |a: &fleet_api::Agent| {
+        std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap()
+    };
+    let (unplanned, with_plan) = (read(&a), read(&b));
+    assert!(!unplanned.contains("## Your plan"), "{unplanned}");
+    // The plan is the only difference, once each task's own folder name is set aside.
+    let without = with_plan
+        .replace(&plan_section(PLAN), "")
+        .replace(&task_name_of(&b), &task_name_of(&a));
+    assert_eq!(without, unplanned);
+    assert_eq!(fx.store.task(&a.id).await.unwrap().unwrap().plan, None);
+}
+
+#[tokio::test]
+async fn a_new_structured_task_is_refused_with_its_message() {
+    let fx = fleet_fixture().await;
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    let body = serde_json::to_value(request(
+        &fx,
+        AgentKind::Orchestrator,
+        Some("structured"),
+        &["core"],
+    ))
+    .unwrap();
+    let (status, v) = json_of(addr, "POST", "/api/agents", Some(&body)).await;
+    assert_eq!(status, 400, "{v}");
+    assert_eq!(
+        v["error"],
+        "the structured orchestrator is retired: plans come from the supervisor"
+    );
+    assert_nothing_created(&fx).await;
+}
+
+#[tokio::test]
+async fn an_existing_solo_task_still_resumes() {
+    let fx = fixture().await;
+    // A solo task from before the retirement, as the store holds it.
+    let a = spawn_ready(&fx).await;
+    assert_eq!(a.kind, AgentKind::Solo);
+    set_status(&fx, &a.id, Status::Working).await;
+    let (svc, sessions) = restart(&fx).await;
+    svc.resume_interrupted().await.unwrap();
+    let s = wait_screen_in(&sessions, &a.session, |s| s.contains("ready")).await;
+    assert!(s.contains("arg=--resume"), "{s}");
+    let a = svc.agent(&a.id).await.unwrap();
+    assert_eq!((a.kind, a.status), (AgentKind::Solo, Status::Working));
+    sessions.shutdown_all();
 }
 
 /// `git` with exactly `vars` (plus `PATH`, to find git itself): none of the test process's own git setup applies.
@@ -3576,9 +3662,9 @@ async fn solo_has_no_model() {
 #[tokio::test]
 async fn restart_resolves_the_model_again() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert_eq!(a.model.as_deref(), Some("opus"));
-    set_models(&fx, &[("structured", "sonnet")]).await;
+    set_models(&fx, &[("direct", "sonnet")]).await;
     crash(&fx, &a.id).await;
     let b = fx.svc.restart_orchestrator(&a.id).await.unwrap();
     assert_eq!(b.model.as_deref(), Some("sonnet"));
@@ -3683,13 +3769,13 @@ async fn spawn_rechecks_a_step_mode_against_current_overrides() {
 #[tokio::test]
 async fn restart_re_resolves() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     assert_eq!(a.effort, Some(Effort::High));
     set_sections(
         &fx,
         &[
-            ("efforts", "structured", "low"),
-            ("modes", "structured", "acceptEdits"),
+            ("efforts", "direct", "low"),
+            ("modes", "direct", "acceptEdits"),
         ],
     )
     .await;
@@ -4188,7 +4274,7 @@ fn task_name_of(a: &fleet_api::Agent) -> String {
 #[tokio::test]
 async fn orchestrator_gets_internal_worktree() {
     let fx = fleet_fixture().await;
-    let a = fx.svc.spawn(orchestrator(&fx, "structured")).await.unwrap();
+    let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
     let name = task_name_of(&a);
     let task = Path::new(&a.workdir).parent().unwrap();
     let internal = task.join("internal");

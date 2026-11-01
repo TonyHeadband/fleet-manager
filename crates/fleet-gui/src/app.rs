@@ -2330,6 +2330,7 @@ impl FleetApp {
                 let product = self.active_product().map(str::to_string);
                 self.background(move |client| {
                     let req = SpawnRequest {
+                        plan: None,
                         actor: fleet_api::Actor("local".into()),
                         product: String::new(),
                         release,

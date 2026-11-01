@@ -35,6 +35,7 @@ async fn start() -> Server {
 
 async fn spawn(srv: &Server, prompt: &str) -> Agent {
     let req = SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,
@@ -557,6 +558,7 @@ async fn a_hold_past_its_limit_ends_the_call_and_the_decision_is_typed() {
     ));
     let srv = serve_with(fx, svc.clone()).await;
     let req = SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,
@@ -620,6 +622,7 @@ async fn a_request_racing_a_stop_is_not_held() {
         opts,
     ));
     let req = SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,
@@ -730,6 +733,7 @@ async fn the_fallback_types_only_onto_the_request_it_answers() {
         opts,
     ));
     let req = SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,
@@ -794,6 +798,7 @@ async fn propose_breakdown_schema_offers_mode_and_effort() {
         .fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -861,6 +866,7 @@ async fn tools_by_kind() {
         .fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,
@@ -944,6 +950,7 @@ async fn spawn_lead(srv: &Server) -> Agent {
     srv.fx
         .svc
         .spawn(SpawnRequest {
+            plan: None,
             actor: Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

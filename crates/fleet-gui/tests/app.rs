@@ -1979,6 +1979,7 @@ fn task(
     bytes: u64,
 ) -> fleet_api::Task {
     fleet_api::Task {
+        plan: None,
         id: AgentId(id.into()),
         name: format!("proj-{id}"),
         goal: format!("task {id}"),

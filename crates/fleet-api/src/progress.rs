@@ -182,6 +182,7 @@ mod tests {
     /// A task that changed repo `r`, with one PR on it per state in `prs`.
     fn task(id: &str, prs: &[PrState]) -> Task {
         Task {
+            plan: None,
             id: AgentId(id.into()),
             product: "app".into(),
             release: Some(1),

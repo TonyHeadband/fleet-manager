@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
     SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,

@@ -46,7 +46,7 @@ fn builtins_load_and_validate() {
         list.iter().all(|i| !i.summary.trim().is_empty()),
         "{list:?}"
     );
-    assert_eq!(names(&d, DefKind::Orchestrator), ["direct", "structured"]);
+    assert_eq!(names(&d, DefKind::Orchestrator), ["direct"]);
     assert_eq!(
         names(&d, DefKind::Specialist),
         [
@@ -64,10 +64,6 @@ fn builtins_load_and_validate() {
     assert_eq!(
         d.orchestrator("direct").unwrap().skills,
         Vec::<String>::new()
-    );
-    assert_eq!(
-        d.orchestrator("structured").unwrap().skills,
-        ["brainstorming", "writing-plans"]
     );
     for code in ["rust", "typescript-react", "test-writer"] {
         assert_eq!(
@@ -94,9 +90,10 @@ fn builtins_load_and_validate() {
     assert!(o.prompt.contains("propose_breakdown") && o.prompt.contains("open_pr"));
     assert!(d.specialist("rust").unwrap().prompt.contains("finish_step"));
 
-    for name in ["direct", "structured"] {
-        assert_eq!(d.orchestrator(name).unwrap().model.as_deref(), Some("opus"));
-    }
+    assert_eq!(
+        d.orchestrator("direct").unwrap().model.as_deref(),
+        Some("opus")
+    );
     assert_eq!(
         d.specialist("reviewer").unwrap().model.as_deref(),
         Some("opus")
@@ -159,7 +156,6 @@ fn builtins_carry_their_mode_and_effort() {
     let (_t, d) = defs();
     let list = d.list();
     let table = [
-        (DefKind::Orchestrator, "structured", Effort::High),
         (DefKind::Orchestrator, "direct", Effort::High),
         (DefKind::Specialist, "reviewer", Effort::High),
         (DefKind::Specialist, "rust", Effort::Medium),
@@ -501,21 +497,19 @@ fn no_builtin_mentions_subagents() {
 #[test]
 fn builtins_carry_the_limit_rules() {
     let (_tmp, d) = defs();
-    for name in ["direct", "structured"] {
-        let prompt = d.orchestrator(name).unwrap().prompt;
-        assert!(prompt.contains("limit reached"), "{name}");
-        assert!(prompt.contains("wait_for_fleet"), "{name}");
-    }
+    let name = "direct";
+    let prompt = d.orchestrator(name).unwrap().prompt;
+    assert!(prompt.contains("limit reached"), "{name}");
+    assert!(prompt.contains("wait_for_fleet"), "{name}");
 }
 
 #[test]
 fn builtin_orchestrators_mention_pr_rules() {
     let (_tmp, d) = defs();
-    for name in ["direct", "structured"] {
-        let prompt = d.orchestrator(name).unwrap().prompt;
-        for word in ["Pull requests", "release_note", "open_pr"] {
-            assert!(prompt.contains(word), "{name} lacks {word}");
-        }
+    let name = "direct";
+    let prompt = d.orchestrator(name).unwrap().prompt;
+    for word in ["Pull requests", "release_note", "open_pr"] {
+        assert!(prompt.contains(word), "{name} lacks {word}");
     }
 }
 
@@ -527,18 +521,6 @@ fn builtin_texts_write_designs_to_internal_resources() {
         let t = d.read(kind, name).unwrap().text;
         t.split_whitespace().collect::<Vec<_>>().join(" ")
     };
-    let structured = text(DefKind::Orchestrator, "structured");
-    for want in [
-        "tasks/<task-name>/design.md",
-        "tasks/<task-name>/plan.md",
-        "git -C <path> add -A && git -C <path> commit -m",
-        "Internal resources",
-        "`<task-name>` is the task folder named in `CLAUDE.md`",
-        "relative to the internal resources folder",
-    ] {
-        assert!(structured.contains(want), "structured lacks {want:?}");
-    }
-    assert!(!structured.contains("Commit it on the task branch"));
     for name in ["brainstorming", "writing-plans"] {
         let t = text(DefKind::Skill, name);
         assert!(
@@ -708,32 +690,31 @@ fn user_pr_style_overrides_builtin() {
 #[test]
 fn orchestrators_land_steps_without_merge_commits() {
     let (_t, d) = defs();
-    for name in ["direct", "structured"] {
-        let t = d.read(DefKind::Orchestrator, name).unwrap().text;
-        let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(!t.contains("git merge <step branch>"), "{name}");
-        for want in [
-            "git merge --ff-only <step branch>",
-            "git cherry-pick $(git merge-base HEAD <step branch>)..<step branch>",
-            "git merge-base --is-ancestor HEAD <step branch>",
-            "never a merge commit",
-            "do not rebase the step branch",
-            "git rebase origin/",
-            "GIT_SEQUENCE_EDITOR",
-            "once `open_pr` has returned a PR URL",
-        ] {
-            assert!(
-                t.to_lowercase().contains(&want.to_lowercase()),
-                "{name} lacks {want:?}"
-            );
-        }
-        // The only `git merge` left is the fast-forward one.
-        assert_eq!(
-            t.matches("git merge ").count(),
-            t.matches("git merge --ff-only").count(),
-            "{name}"
+    let name = "direct";
+    let t = d.read(DefKind::Orchestrator, name).unwrap().text;
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(!t.contains("git merge <step branch>"), "{name}");
+    for want in [
+        "git merge --ff-only <step branch>",
+        "git cherry-pick $(git merge-base HEAD <step branch>)..<step branch>",
+        "git merge-base --is-ancestor HEAD <step branch>",
+        "never a merge commit",
+        "do not rebase the step branch",
+        "git rebase origin/",
+        "GIT_SEQUENCE_EDITOR",
+        "once `open_pr` has returned a PR URL",
+    ] {
+        assert!(
+            t.to_lowercase().contains(&want.to_lowercase()),
+            "{name} lacks {want:?}"
         );
     }
+    // The only `git merge` left is the fast-forward one.
+    assert_eq!(
+        t.matches("git merge ").count(),
+        t.matches("git merge --ff-only").count(),
+        "{name}"
+    );
 }
 
 fn persona(tmp: &Path, id: &str) -> Defs {

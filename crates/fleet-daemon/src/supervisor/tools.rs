@@ -1,5 +1,5 @@
 //! The fleet tools a supervisor conversation calls over MCP. Each returns the tool's text and whether it failed.
-use crate::agents::AgentService;
+use crate::agents::{refuse_retired, AgentService};
 use crate::forge::log::{recorded, said, CallCtx};
 use crate::forge::{self, RepoRef};
 use crate::git;
@@ -225,11 +225,6 @@ async fn start_task(
 ) -> Reply {
     let product = str_arg(args, "product")?;
     let prompt = str_arg(args, "prompt")?;
-    let kind = match str_arg(args, "kind")? {
-        "solo" => AgentKind::Solo,
-        "orchestrator" => AgentKind::Orchestrator,
-        other => return Err(format!("`kind` must be solo or orchestrator, not {other}")),
-    };
     known_product(svc, product).await?;
     let mut repos = Vec::new();
     for name in args
@@ -256,25 +251,22 @@ async fn start_task(
             local,
         });
     }
-    let mut prompt = prompt.to_string();
-    if let Some(plan) = args.get("plan").and_then(Value::as_str) {
-        prompt.push_str(&format!("\n\nThe plan is {plan} in the internal repo."));
-    }
-    let agent = svc
-        .spawn(SpawnRequest {
-            actor: Actor(format!("supervisor:{}", conversation.0)),
-            product: product.to_string(),
-            release: None,
-            repos,
-            prompt,
-            slug: None,
-            title: args.get("title").and_then(Value::as_str).map(String::from),
-            persona: persona.to_string(),
-            kind,
-            role: args.get("role").and_then(Value::as_str).map(String::from),
-        })
-        .await
-        .map_err(|e| e.to_string())?;
+    // Every new task is a direct orchestrator; an old call's `kind` and `role` are ignored.
+    let req = SpawnRequest {
+        actor: Actor(format!("supervisor:{}", conversation.0)),
+        product: product.to_string(),
+        release: None,
+        repos,
+        prompt: prompt.to_string(),
+        slug: None,
+        title: args.get("title").and_then(Value::as_str).map(String::from),
+        persona: persona.to_string(),
+        kind: AgentKind::Orchestrator,
+        role: Some("direct".into()),
+        plan: args.get("plan").and_then(Value::as_str).map(String::from),
+    };
+    refuse_retired(&req).map_err(|e| e.to_string())?;
+    let agent = svc.spawn(req).await.map_err(|e| e.to_string())?;
     let task = task_id(&agent).clone();
     let origin = conversation.clone();
     svc.store

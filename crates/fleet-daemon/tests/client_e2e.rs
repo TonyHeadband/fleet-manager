@@ -44,6 +44,7 @@ fn action(id: &str) -> ActionDef {
 /// A solo task in the fixture's product, under its persona.
 fn solo(fx: &Fx, repos: &[&str], prompt: &str) -> SpawnRequest {
     SpawnRequest {
+        plan: None,
         actor: Actor("local".into()),
         product: PRODUCT.into(),
         release: None,

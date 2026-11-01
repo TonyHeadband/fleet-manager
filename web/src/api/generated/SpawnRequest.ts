@@ -27,4 +27,8 @@ persona?: string, kind?: AgentKind,
 /**
  * The orchestrator type, for `kind` = `Orchestrator`.
  */
-role?: string | null, };
+role?: string | null, 
+/**
+ * A path in the product's internal repo (`plans/<name>.md`) the orchestrator carries out.
+ */
+plan?: string | null, };

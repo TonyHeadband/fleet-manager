@@ -483,6 +483,7 @@ async fn spawn_bursting(srv: &Server) -> Agent {
         .fx
         .svc
         .spawn(fleet_api::SpawnRequest {
+            plan: None,
             actor: fleet_api::Actor("local".into()),
             product: PRODUCT.into(),
             release: None,

@@ -43,6 +43,10 @@ created_at: number | null, stopped_at: number | null, archived_at: number | null
  */
 origin?: AgentId | null, agents_used: number, times: StatusTimes, log: Array<LogEntry>, footprint: Footprint | null, last_screen: string | null, archive: ArchiveReport | null, persona: string, kind?: AgentKind, role?: string | null, 
 /**
+ * The plan in the product's internal repo the task was started to carry out, if any.
+ */
+plan?: string | null, 
+/**
  * The specialists the orchestrator may use: every one that loaded when the task started, less the product's
  * hidden ones. Records from before the roster went away still read it as `roster`.
  */

@@ -135,6 +135,7 @@ fn run() -> Result<(), String> {
             scope.spawn(move || {
                 sleep_until(t0 + p.at);
                 let req = SpawnRequest {
+                    plan: None,
                     actor: Actor("local".into()),
                     product: product.clone(),
                     release: None,

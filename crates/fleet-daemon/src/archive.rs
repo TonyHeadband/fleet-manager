@@ -645,6 +645,7 @@ impl AgentService {
         let now = self.opts.clock.now();
         let path = Path::new(&o.path);
         let record = Task {
+            plan: None,
             id: AgentId(uuid::Uuid::new_v4().simple().to_string()),
             // An orphan belongs to no product.
             product: String::new(),

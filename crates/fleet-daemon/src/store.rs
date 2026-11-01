@@ -1719,6 +1719,7 @@ fn ghost_tasks(tasks: &[Task], agents: &[Agent]) -> Vec<AgentId> {
 
 fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
     Task {
+        plan: None,
         id: a.id.clone(),
         product: a.product.clone(),
         release: None,
