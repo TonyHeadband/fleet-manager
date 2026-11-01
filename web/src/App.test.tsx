@@ -727,27 +727,28 @@ describe("App", () => {
       await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
     };
 
+    const snapshotWithTask = () =>
+      act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a1", product: "core" })] }, "1"));
+
     it("an_event_toasts_on_another_page", async () => {
       await open();
       emitEvent(taskEvent());
-      expect(screen.getByRole("button", { name: /fix the tests/ })).toHaveTextContent("wants you");
+      expect(await screen.findByRole("button", { name: /fix the tests/ })).toHaveTextContent("wants you");
     });
 
-    it("no_toast_when_the_conversation_is_on_screen", async () => {
+    it("a_toast_shows_even_when_the_conversation_is_on_screen", async () => {
       window.location.hash = "#supervisor?c=s1";
       await open();
       emitEvent(taskEvent());
-      expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
-      emitEvent(taskEvent({ id: 2, conversation: "s2", task_title: "other" }), 3);
-      expect(screen.getByRole("button", { name: /other/ })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: /fix the tests/ })).toHaveTextContent("wants you");
     });
 
-    it("no_toast_for_the_latest_conversation_when_the_address_names_none", async () => {
+    it("a_toast_shows_for_the_latest_conversation_when_the_address_names_none", async () => {
       window.location.hash = "#supervisor";
       await open();
       await waitFor(() => expect(window.location.hash).toBe("#supervisor?c=s1"));
       emitEvent(taskEvent());
-      expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: /fix the tests/ })).toBeInTheDocument();
     });
 
     it("toasts_only_for_the_drawer_persona", async () => {
@@ -756,12 +757,14 @@ describe("App", () => {
       expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
     });
 
-    it("clicking_a_toast_opens_its_conversation", async () => {
+    it("clicking_a_toast_opens_the_tasks_product_room", async () => {
       await open();
+      snapshotWithTask();
       emitEvent(taskEvent());
-      await userEvent.click(screen.getByRole("button", { name: /fix the tests/ }));
-      expect(window.location.hash).toBe("#supervisor?c=s1");
+      await userEvent.click(await screen.findByRole("button", { name: /fix the tests/ }));
+      expect(window.location.hash).toBe("#supervisor?c=s1&room=product%3Acore");
       expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
     });
+
   });
 });

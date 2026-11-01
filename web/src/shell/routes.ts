@@ -29,14 +29,27 @@ export function routeFromHash(hash: string): Route {
   return ON_WEB.find((r) => r === name) ?? "kanban";
 }
 
-/** The Supervisor page on a conversation (an agent id): `#supervisor?c=a1`. */
-export function supervisorHref(conversation?: string | null): string {
-  return conversation ? `#supervisor?c=${encodeURIComponent(conversation)}` : "#supervisor";
+/** The Supervisor page on a conversation (an agent id) and, optionally, a room open in the Rooms widget:
+ * `#supervisor?c=a1&room=product%3Acore`. */
+export function supervisorHref(conversation?: string | null, room?: string | null): string {
+  const q = new URLSearchParams();
+  if (conversation) q.set("c", conversation);
+  if (room) q.set("room", room);
+  const s = q.toString();
+  return s ? `#supervisor?${s}` : "#supervisor";
 }
+
+/** A product's room id, as the daemon names it (`rooms::product_room_id`). */
+export const productRoomId = (product: string) => `product:${product}`;
 
 /** The conversation the address names, or null for the persona's latest (or the empty page). */
 export function useSupervisorConversation(): string | null {
   return new URLSearchParams(useHash().split("?")[1] ?? "").get("c");
+}
+
+/** The room the address names for the Rooms widget to open, or null for its own pick. */
+export function useSupervisorRoom(): string | null {
+  return new URLSearchParams(useHash().split("?")[1] ?? "").get("room");
 }
 
 /** The address's hash, kept in step with it: the view, and the view's own place in it (a filter, a tab). */

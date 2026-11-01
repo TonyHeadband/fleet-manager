@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
 import type { RoomKind } from "../../api/generated/RoomKind";
+import { useSupervisorRoom } from "../../shell/routes";
 import { ErrorLine } from "../../ui/ErrorLine";
 import { ListDetail } from "../../ui/ListDetail";
 import { ListRow } from "../../ui/ListRow";
@@ -17,6 +18,11 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
   const [rooms, setRooms] = useState<Room[] | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A room the address names (a task notice's toast) is opened, and again each time the address names another.
+  const named = useSupervisorRoom();
+  useEffect(() => {
+    if (named !== null) setPicked(named);
+  }, [named]);
 
   // A task started is a room opened: ask again when the task list changes.
   const started = tasks.map((t) => t.id).join(" ");

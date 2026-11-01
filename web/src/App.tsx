@@ -44,9 +44,9 @@ import {
   tasksRouteFromHash,
   useHash,
   useFleetTab,
+  productRoomId,
   supervisorHref,
   useRoute,
-  useSupervisorConversation,
   useSettingsTab,
   useTasksRoute,
   type Route,
@@ -290,11 +290,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     personas.state !== "ready" || personas.value.some((p) => p.id === savedPersona)
       ? savedPersona
       : (personas.value.find((p) => p.ready)?.id ?? null);
-  const onScreen = useSupervisorConversation();
   taskToast.current = (e) => {
-    // A task event is for the drawer's supervisor, and not worth a toast where its conversation is already open.
-    if (e.persona !== persona || (route === "supervisor" && e.conversation !== null && e.conversation === onScreen)) return;
-    toasts.push({ title: e.task_title, text: e.text, tone: EVENT_TONE[e.kind], href: supervisorHref(e.conversation) });
+    // A task event is for the drawer's supervisor. The supervisor chat draws no row for it, so it always toasts, and
+    // the toast opens the task's product room, where the notice is posted.
+    if (e.persona !== persona) return;
+    const taskProduct = snapshot.agents.find((a) => a.id === e.task)?.product;
+    const href = supervisorHref(e.conversation, taskProduct ? productRoomId(taskProduct) : null);
+    toasts.push({ title: e.task_title, text: e.text, tone: EVENT_TONE[e.kind], href });
   };
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
