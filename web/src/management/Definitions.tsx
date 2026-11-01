@@ -35,6 +35,8 @@ function tag(d: DefInfo) {
 /** `auto · high`: what the definition's agents start with; nothing for a file that names neither. */
 const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · ");
 
+const isForm = (kind: DefKind): kind is "orchestrator" | "specialist" => kind === "orchestrator" || kind === "specialist";
+
 /** The file a new definition starts as: its name and a heading, with no summary yet. */
 const newText = (name: string) =>
   writeDef("", { fields: { name, summary: "", skills: [], model: null, mode: null, effort: null }, body: `# ${name}\n` });
@@ -60,12 +62,12 @@ export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; d
       detailLabel={selected ?? "Definition"}
       list={
         <>
-          {(kind === "specialist" || kind === "orchestrator") && (
+          {isForm(kind) && (
             <div className="definition-new">
               <Button onClick={() => setCreating(true)}>+ New {kind}</Button>
             </div>
           )}
-          {creating && (kind === "specialist" || kind === "orchestrator") && (
+          {creating && isForm(kind) && (
             <NewDefinitionDialog
               list={all}
               kind={kind}
@@ -136,10 +138,10 @@ function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; def
 
   const body = () => {
     // A new definition has a draft and no file until its first Save.
-    if (!file && !(draft !== undefined && (kind === "orchestrator" || kind === "specialist")))
+    if (!file && !(draft !== undefined && isForm(kind)))
       return error !== undefined ? <ErrorLine text={error} /> : <p className="note">Loading…</p>;
     // Orchestrators and specialists are a form; it draws its own bar, Override and Reset.
-    if (kind === "orchestrator" || kind === "specialist")
+    if (isForm(kind))
       return <SpecialistForm persona={defs.persona} kind={kind} name={name} info={info} defs={defs} skills={skills} roleFixed={roleFixed} />;
     if (!file) return null;
     if (draft === undefined)
@@ -161,7 +163,7 @@ function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; def
         <SaveBar
           dirty={defDirty(draft, file)}
           busy={defs.st.saving !== null}
-          onSave={() => defs.save(kind, name)}
+          onSave={() => void defs.save(kind, name).catch(() => {})}
           onRevert={() => defs.revert(key)}
         />
         {info?.overridden && !file.builtin && (

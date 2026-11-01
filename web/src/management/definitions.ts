@@ -177,14 +177,15 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
         picks: { ...s.picks, [active]: { kind, name } },
       }));
     },
-    save: (kind: DefKind, name: string) => {
+    /** Resolves once the file is written; rejects (the message is also under the definition) when it is not. */
+    save: (kind: DefKind, name: string): Promise<void> => {
       const key = keyOf(kind, name);
       const text = now.current.drafts[key];
-      if (now.current.saving || text === undefined) return;
+      if (now.current.saving || text === undefined) return Promise.reject(new Error("Nothing to save, or a save is under way"));
       bump(key);
       update((s) => ({ ...s, saving: { key, text }, errors: without(s.errors, key) }));
       const put = kind === "pr_style" || persona === null ? client.saveDefinition(kind, name, text) : client.savePersonaDefinition(persona, kind, name, text);
-      put.then(
+      return put.then(
         () => {
           bump(key);
           // A new definition has no file yet: what it sent is the file now.
@@ -196,7 +197,10 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
           reload(kind);
         },
         // The message goes under the editor; the draft stays to be fixed.
-        (e: unknown) => update((s) => ({ ...s, saving: null, errors: { ...s.errors, [key]: message(e) } })),
+        (e: unknown) => {
+          update((s) => ({ ...s, saving: null, errors: { ...s.errors, [key]: message(e) } }));
+          throw e;
+        },
       );
     },
     /** An empty nickname clears it. The list is read again so the row shows it, and `onNicknameChanged` lets the app's
@@ -219,7 +223,12 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
     revert: (key: DefKey) =>
       update((s) => {
         const file = s.files[key];
-        if (!file) return s;
+        // A new definition has no file to go back to: Revert discards it.
+        if (!file) {
+          const picked = s.picks[active];
+          const gone = picked !== undefined && keyOf(picked.kind, picked.name) === key;
+          return { ...s, drafts: without(s.drafts, key), errors: without(s.errors, key), picks: gone ? without(s.picks, active) : s.picks };
+        }
         const drafts = file.builtin ? without(s.drafts, key) : { ...s.drafts, [key]: file.text };
         return { ...s, drafts, errors: without(s.errors, key) };
       }),

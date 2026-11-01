@@ -4,13 +4,9 @@ import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
 import { Modal } from "../ui/Modal";
 import { Select } from "../ui/Select";
+import { ROLES } from "./SpecialistForm";
 
 type Role = "orchestrator" | "specialist";
-
-const ROLES = [
-  { value: "specialist", label: "Specialist" },
-  { value: "orchestrator", label: "Orchestrator" },
-];
 
 /** Why `name` cannot be a new definition of this persona, or null. The daemon's own check follows on Save. */
 export function refusal(name: string, list: DefInfo[]): string | null {
@@ -44,7 +40,7 @@ export function NewDefinitionDialog({ list, kind, roleFixed, onCreate, onClose }
   const ok = name !== "" && error === null;
   return (
     <Modal labelledBy={titleId} onClose={onClose}>
-      <h2 id={titleId}>New {kind}</h2>
+      <h2 id={titleId}>New {role}</h2>
       <form
         className="new-definition"
         onSubmit={(e) => {

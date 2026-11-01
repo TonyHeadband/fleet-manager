@@ -24,7 +24,7 @@ const MODES: { value: PermissionMode | ""; label: string }[] = [
   { value: "manual", label: "Manual" },
   { value: "dontAsk", label: "Don't ask" },
 ];
-const ROLES = [
+export const ROLES = [
   { value: "specialist", label: "Specialist" },
   { value: "orchestrator", label: "Orchestrator" },
 ];
@@ -74,6 +74,7 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
   const [preview, setPreview] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [roleError, setRoleError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
   if (nick.identity !== identity) {
     setNick({ identity, text: saved });
     setNickError(null);
@@ -98,7 +99,17 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
     if (fileDirty) {
       // Keys a field emptied while editing leave the file now; the save reads the draft as it stands.
       defs.edit(key, pruneDef(text));
-      defs.save(kind, name);
+      const written = defs.save(kind, name);
+      // A nickname for a definition with no file yet waits for the file; a refused file keeps both drafts.
+      if (!defs.st.files[key]) {
+        try {
+          await written;
+        } catch {
+          return;
+        }
+      } else {
+        written.catch(() => {});
+      }
     }
     if (!nickDirty) return;
     try {
@@ -117,10 +128,13 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
   const ownFile = info !== undefined && (info.overridden || !info.builtin);
   const move = async (to: string) => {
     setRoleError(null);
+    setMoving(true);
     try {
       await defs.move(kind, name, to as typeof kind);
     } catch (e) {
       setRoleError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -161,7 +175,7 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
                   label="Role"
                   value={kind}
                   options={ROLES}
-                  disabled={fileDirty || nickDirty || defs.st.saving !== null}
+                  disabled={fileDirty || nickDirty || moving || defs.st.saving !== null}
                   title={fileDirty || nickDirty ? "Save or revert first" : undefined}
                   onChange={(to) => void move(to)}
                 />
