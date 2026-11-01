@@ -446,6 +446,15 @@ fn option(id: &str, label: &str) -> AskOption {
     AskOption {
         id: id.into(),
         label: label.into(),
+        description: None,
+    }
+}
+
+/// A question's option, with the description Claude gave it.
+fn described(id: &str, label: &str) -> AskOption {
+    AskOption {
+        description: Some(format!("Choose {}.", label.to_lowercase())),
+        ..option(id, label)
     }
 }
 
@@ -685,9 +694,9 @@ async fn a_question_is_answered_through_its_hook() {
                     header: "Color".into(),
                     question: "Which color do you like?".into(),
                     options: vec![
-                        option("0.0", "Red"),
-                        option("0.1", "Green"),
-                        option("0.2", "Blue")
+                        described("0.0", "Red"),
+                        described("0.1", "Green"),
+                        described("0.2", "Blue")
                     ],
                     multi_select: false,
                 },
@@ -695,9 +704,9 @@ async fn a_question_is_answered_through_its_hook() {
                     header: "Fruits".into(),
                     question: "Which fruits do you like?".into(),
                     options: vec![
-                        option("1.0", "Apple"),
-                        option("1.1", "Banana"),
-                        option("1.2", "Cherry")
+                        described("1.0", "Apple"),
+                        described("1.1", "Banana"),
+                        described("1.2", "Cherry")
                     ],
                     multi_select: true,
                 },
@@ -801,4 +810,116 @@ async fn needs_you_with_no_hook_data_shows_the_screen() {
     set_status(&srv.fx, &a.id, Status::Working).await;
     hook(&srv, &a.id, json!({"hook_event_name": "UserPromptSubmit"})).await;
     assert_eq!(ask_until(&mut sse, Option::is_none).await, None);
+}
+
+/// Holds `body` as Claude would, returning the hook's eventual reply.
+async fn held(
+    srv: &Server,
+    id: &AgentId,
+    body: serde_json::Value,
+) -> tokio::task::JoinHandle<(u16, serde_json::Value)> {
+    let conn = send_hook(srv, id, &body).await;
+    tokio::spawn(hook_reply(conn))
+}
+
+async fn still_held(h: &mut tokio::task::JoinHandle<(u16, serde_json::Value)>) {
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), h)
+            .await
+            .is_err(),
+        "the held hook answered"
+    );
+}
+
+#[tokio::test]
+async fn another_hook_never_clears_an_unanswered_prompt() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let (mut sse, _) = open_chat(&srv, &a.id).await;
+    let mut h = held(&srv, &a.id, python_request()).await;
+    let ask = ask_until(&mut sse, Option::is_some).await.unwrap();
+    // A subagent or a parallel call keeps working while the main thread waits.
+    for event in ["PreToolUse", "PostToolUse", "SubagentStart", "Stop"] {
+        let (status, _) = hook(
+            &srv,
+            &a.id,
+            json!({"hook_event_name": event, "tool_name": "Read"}),
+        )
+        .await;
+        assert_eq!(status, 200, "{event}");
+    }
+    still_held(&mut h).await;
+    let (_, now) = open_chat(&srv, &a.id).await;
+    assert_eq!(now, Some(ask.clone()));
+    assert_eq!(
+        answer(&srv, &a.id, &ask.id, json!({"choice": "allow"})).await,
+        204
+    );
+    assert_eq!(
+        h.await.unwrap().1["hookSpecificOutput"]["decision"],
+        json!({"behavior": "allow"})
+    );
+}
+
+#[tokio::test]
+async fn a_second_request_queues_behind_the_first() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let (mut sse, _) = open_chat(&srv, &a.id).await;
+    let first = held(&srv, &a.id, python_request()).await;
+    let one = ask_until(&mut sse, Option::is_some).await.unwrap();
+    let mut second = held(
+        &srv,
+        &a.id,
+        permission_request("Bash", json!({"command": "ls"}), json!([])),
+    )
+    .await;
+    still_held(&mut second).await;
+    // The oldest unanswered prompt is the one shown.
+    let (_, now) = open_chat(&srv, &a.id).await;
+    assert_eq!(now.as_ref().map(|x| &x.id), Some(&one.id));
+
+    assert_eq!(
+        answer(&srv, &a.id, &one.id, json!({"choice": "allow"})).await,
+        204
+    );
+    assert_eq!(
+        first.await.unwrap().1["hookSpecificOutput"]["decision"],
+        json!({"behavior": "allow"})
+    );
+    let answered = ask_of(&mut sse).await.unwrap();
+    assert_eq!(
+        (answered.id.as_str(), answered.answered.as_deref()),
+        (one.id.as_str(), Some("Allow once"))
+    );
+    let two = ask_of(&mut sse).await.unwrap();
+    assert_ne!(two.id, one.id);
+    assert!(
+        matches!(&two.kind, AskKind::Permission { input, .. } if input == &json!({"command": "ls"})),
+        "{two:?}"
+    );
+    still_held(&mut second).await;
+    assert_eq!(
+        answer(&srv, &a.id, &two.id, json!({"choice": "deny"})).await,
+        204
+    );
+    assert_eq!(
+        second.await.unwrap().1["hookSpecificOutput"]["decision"]["behavior"],
+        json!("deny")
+    );
+}
+
+#[tokio::test]
+async fn an_ended_agents_prompts_are_released() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let (mut sse, _) = open_chat(&srv, &a.id).await;
+    let h = held(&srv, &a.id, python_request()).await;
+    ask_until(&mut sse, Option::is_some).await;
+    hook(&srv, &a.id, json!({"hook_event_name": "SessionEnd"})).await;
+    let reply = tokio::time::timeout(Duration::from_secs(5), h)
+        .await
+        .expect("the hook stayed held")
+        .unwrap();
+    assert_eq!(reply, (200, json!({})));
 }

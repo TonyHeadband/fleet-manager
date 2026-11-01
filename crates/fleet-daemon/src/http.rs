@@ -1450,7 +1450,8 @@ async fn hook(
         Some("PermissionRequest") => {}
         // Fires while a prompt is still open (about 6 s in), so it says nothing about the prompt being answered.
         Some("Notification") => {}
-        _ => st.asks.clear(&id),
+        Some("SessionEnd") => st.asks.forget(&id),
+        _ => st.asks.moved_on(&id),
     }
     st.chat_wake.poke(&id);
     if let IngestOutcome::Applied(events) = outcome {

@@ -25,20 +25,46 @@ struct Pending {
 
 #[derive(Default)]
 struct Inner {
-    pending: HashMap<AgentId, Pending>,
+    /// Each agent's held prompts, oldest first. Several can wait at once (a subagent, a parallel call).
+    pending: HashMap<AgentId, Vec<Pending>>,
     answered: VecDeque<String>,
     /// Rises with every change, so a reader of `get` can tell which queued changes it has already seen.
     version: u64,
 }
 
+impl Inner {
+    /// What the chat shows: the oldest unanswered prompt, else the last answered one until the agent moves on.
+    fn shown(&self, agent: &AgentId) -> Option<ChatAsk> {
+        let queue = self.pending.get(agent)?;
+        queue
+            .iter()
+            .find(|p| p.ask.answered.is_none())
+            .or_else(|| queue.last())
+            .map(|p| p.ask.clone())
+    }
+
+    /// Removes the prompts `drop` picks; true when any went.
+    fn remove(&mut self, agent: &AgentId, drop: impl Fn(&Pending) -> bool) -> bool {
+        let Some(queue) = self.pending.get_mut(agent) else {
+            return false;
+        };
+        let before = queue.len();
+        queue.retain(|p| !drop(p));
+        let removed = queue.len() != before;
+        if queue.is_empty() {
+            self.pending.remove(agent);
+        }
+        removed
+    }
+}
+
 /// A change of an agent's ask: the registry's version after it, the agent, and its ask now.
 pub type Change = (u64, AgentId, Option<ChatAsk>);
 
-/// One held prompt per agent: Claude asks one thing at a time.
 #[derive(Clone)]
 pub struct Asks {
     inner: Arc<Mutex<Inner>>,
-    /// Every change of an agent's ask, so a stream sends each one, the answered state included.
+    /// Every change of an agent's shown ask, so a stream sends each one, the answered state included.
     changes: broadcast::Sender<Change>,
 }
 
@@ -60,8 +86,8 @@ pub enum AnswerError {
     Bad(String),
 }
 
-/// A PermissionRequest held open. Dropping it (the hook timed out, or Claude closed the connection) forgets an
-/// unanswered ask, so the chat falls back to the screen.
+/// A PermissionRequest held open. Dropping it (the hook timed out, or Claude closed the connection) forgets its ask
+/// if still unanswered; nothing else removes an unanswered one.
 pub struct Held {
     asks: Asks,
     agent: AgentId,
@@ -82,13 +108,10 @@ impl Held {
 impl Drop for Held {
     fn drop(&mut self) {
         let mut inner = self.asks.inner.lock().expect("asks poisoned");
-        let ours = inner
-            .pending
-            .get(&self.agent)
-            .is_some_and(|p| p.ask.id == self.id && p.ask.answered.is_none());
-        if ours {
-            inner.pending.remove(&self.agent);
-            self.asks.changed(&mut inner, &self.agent, None);
+        if inner.remove(&self.agent, |p| {
+            p.ask.id == self.id && p.ask.answered.is_none()
+        }) {
+            self.asks.show(&mut inner, &self.agent);
         }
     }
 }
@@ -98,17 +121,14 @@ impl Asks {
         self.changes.subscribe()
     }
 
-    /// The agent's ask, and the version it was read at: changes up to that version are already in it.
+    /// The agent's shown ask, and the version it was read at: changes up to that version are already in it.
     pub fn get(&self, agent: &AgentId) -> (u64, Option<ChatAsk>) {
         let inner = self.inner.lock().expect("asks poisoned");
-        (
-            inner.version,
-            inner.pending.get(agent).map(|p| p.ask.clone()),
-        )
+        (inner.version, inner.shown(agent))
     }
 
-    /// Records the PermissionRequest `body` as `agent`'s ask, replacing any earlier one. None when the body is not one
-    /// the chat can show (a question it cannot read), so the hook answers at once and Claude asks in its TUI.
+    /// Queues the PermissionRequest `body` as one of `agent`'s asks. None when the body is not one the chat can show
+    /// (a question it cannot read), so the hook answers at once and Claude asks in its TUI.
     pub fn hold(&self, agent: &AgentId, body: &Value) -> Option<Held> {
         let (kind, input, session_rules) = parse(body)?;
         let ask = ChatAsk {
@@ -118,16 +138,20 @@ impl Asks {
         };
         let (tx, rx) = oneshot::channel();
         let mut inner = self.inner.lock().expect("asks poisoned");
-        inner.pending.insert(
-            agent.clone(),
-            Pending {
+        let before = inner.shown(agent);
+        inner
+            .pending
+            .entry(agent.clone())
+            .or_default()
+            .push(Pending {
                 ask: ask.clone(),
                 input,
                 session_rules,
                 reply: Some(tx),
-            },
-        );
-        self.changed(&mut inner, agent, Some(ask.clone()));
+            });
+        if inner.shown(agent) != before {
+            self.show(&mut inner, agent);
+        }
         Some(Held {
             asks: self.clone(),
             agent: agent.clone(),
@@ -136,11 +160,16 @@ impl Asks {
         })
     }
 
-    /// Sends the decision for `answer` to the held hook; the ask stays, answered, until `clear`.
+    /// Sends the decision for `answer` to the ask's held hook. The ask is announced answered, then the next unanswered
+    /// one shows; with none left it stays, answered, until `moved_on`.
     pub fn answer(&self, agent: &AgentId, id: &str, answer: &AskAnswer) -> Result<(), AnswerError> {
         let mut guard = self.inner.lock().expect("asks poisoned");
         let inner = &mut *guard;
-        let Some(p) = inner.pending.get_mut(agent).filter(|p| p.ask.id == id) else {
+        let found = inner
+            .pending
+            .get_mut(agent)
+            .and_then(|q| q.iter_mut().find(|p| p.ask.id == id));
+        let Some(p) = found else {
             return Err(if id == SCREEN_ID {
                 AnswerError::Screen
             } else if inner.answered.iter().any(|a| a == id) {
@@ -160,8 +189,8 @@ impl Asks {
         let sent = p.reply.take().is_some_and(|r| r.send(wrapped).is_ok());
         if !sent {
             // The hook went away while this answer was being made.
-            inner.pending.remove(agent);
-            self.changed(inner, agent, None);
+            inner.remove(agent, |p| p.ask.id == id);
+            self.show(inner, agent);
             return Err(AnswerError::Unknown);
         }
         p.ask.answered = Some(label);
@@ -170,16 +199,35 @@ impl Asks {
             inner.answered.pop_front();
         }
         inner.answered.push_back(ask.id.clone());
-        self.changed(inner, agent, Some(ask));
+        // Answered prompts before the last are done with; the last one stays shown until the agent moves on.
+        inner.remove(agent, |p| p.ask.answered.is_some() && p.ask.id != id);
+        self.changed(inner, agent, Some(ask.clone()));
+        if inner.shown(agent) != Some(ask) {
+            self.show(inner, agent);
+        }
         Ok(())
     }
 
-    /// The agent moved on (a tool ran, a turn ended): its prompt, answered or not, is no longer waiting.
-    pub fn clear(&self, agent: &AgentId) {
+    /// The agent moved on (a tool ran, a turn ended): its answered prompts are done with. Unanswered ones wait for
+    /// their own answer, timeout or dropped connection, since another thread of the agent may be what moved.
+    pub fn moved_on(&self, agent: &AgentId) {
+        let mut inner = self.inner.lock().expect("asks poisoned");
+        if inner.remove(agent, |p| p.ask.answered.is_some()) {
+            self.show(&mut inner, agent);
+        }
+    }
+
+    /// The agent ended: every prompt goes, and its held hooks answer `{}`.
+    pub fn forget(&self, agent: &AgentId) {
         let mut inner = self.inner.lock().expect("asks poisoned");
         if inner.pending.remove(agent).is_some() {
-            self.changed(&mut inner, agent, None);
+            self.show(&mut inner, agent);
         }
+    }
+
+    fn show(&self, inner: &mut Inner, agent: &AgentId) {
+        let ask = inner.shown(agent);
+        self.changed(inner, agent, ask);
     }
 
     /// Called with the lock held, so versions go out in order.
@@ -217,6 +265,7 @@ fn parse(body: &Value) -> Option<(AskKind, Value, Vec<Value>)> {
     let option = |id: &str, label: &str| AskOption {
         id: id.into(),
         label: label.into(),
+        description: None,
     };
     let mut options = vec![option("allow", "Allow once")];
     if !session_rules.is_empty() {
@@ -252,6 +301,10 @@ fn questions(input: &Value) -> Option<Vec<AskQuestion>> {
                     Some(AskOption {
                         id: format!("{q}.{o}"),
                         label: opt.get("label")?.as_str()?.to_string(),
+                        description: opt
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     })
                 })
                 .collect::<Option<Vec<_>>>()?;

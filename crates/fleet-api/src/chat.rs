@@ -111,6 +111,8 @@ pub enum AskKind {
 pub struct AskOption {
     pub id: String,
     pub label: String,
+    /// What Claude says about a question's option; None for a permission's.
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
