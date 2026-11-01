@@ -1,7 +1,8 @@
 //! Every forge call goes through `recorded`, which leaves one `forge_calls` row behind.
-use super::{ForgeError, RepoRef};
+use super::{Forge, ForgeError, RepoRef};
 use crate::store::{ForgeCallRow, Store};
 use fleet_api::AgentId;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::warn;
 
@@ -43,4 +44,34 @@ pub async fn recorded<T: Send + 'static>(
         warn!("could not record the {op} call on {}: {e}", row.repo);
     }
     result
+}
+
+/// What a refusal says of a failed forge call.
+pub(crate) fn said(e: &ForgeError) -> String {
+    match e {
+        ForgeError::TimedOut => "the GitHub call timed out".into(),
+        e => format!("GitHub said: {e}"),
+    }
+}
+
+/// A task's calls on one repo, each recorded.
+pub(crate) struct PrCalls<'a> {
+    pub(crate) store: &'a Store,
+    pub(crate) ctx: CallCtx,
+    pub(crate) forge: Arc<dyn Forge>,
+    pub(crate) repo: RepoRef,
+}
+
+impl PrCalls<'_> {
+    pub(crate) async fn call<T: Send + 'static>(
+        &self,
+        op: &'static str,
+        f: impl FnOnce(&dyn Forge, &RepoRef) -> Result<T, ForgeError> + Send + 'static,
+    ) -> Result<T, ForgeError> {
+        let (forge, repo) = (self.forge.clone(), self.repo.clone());
+        recorded(self.store, &self.ctx, "github", &self.repo, op, move || {
+            f(&*forge, &repo)
+        })
+        .await
+    }
 }

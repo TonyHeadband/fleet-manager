@@ -15,15 +15,15 @@ use crate::agents::{
 };
 use crate::archive::remove_whole;
 use crate::config::{GateBuild, LimitValues};
-use crate::forge::log::{recorded, CallCtx};
-use crate::forge::{self, Forge, ForgeError, NewPr, RepoRef};
+use crate::forge::log::{said, CallCtx, PrCalls};
+use crate::forge::{self, ForgeError, NewPr, RepoRef};
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::internal::{Internal, MergeOutcome, MergeReport, PushOutcome};
 use crate::overrides;
 use crate::personas::{gh_agent_dir, PersonaEnv};
 use crate::repos::Resolved;
-use crate::store::{Store, StoreError};
+use crate::store::StoreError;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
     DecideBreakdown, DefKind, Effort, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
@@ -1678,36 +1678,6 @@ struct Gating<'a>(&'a std::sync::Mutex<HashSet<String>>, String);
 impl Drop for Gating<'_> {
     fn drop(&mut self) {
         self.0.lock().expect("gating poisoned").remove(&self.1);
-    }
-}
-
-/// What a refusal says of a failed forge call.
-fn said(e: &ForgeError) -> String {
-    match e {
-        ForgeError::TimedOut => "the GitHub call timed out".into(),
-        e => format!("GitHub said: {e}"),
-    }
-}
-
-/// `open_pr`'s calls on one repo, each recorded for the task and its orchestrator.
-struct PrCalls<'a> {
-    store: &'a Store,
-    ctx: CallCtx,
-    forge: Arc<dyn Forge>,
-    repo: RepoRef,
-}
-
-impl PrCalls<'_> {
-    async fn call<T: Send + 'static>(
-        &self,
-        op: &'static str,
-        f: impl FnOnce(&dyn Forge, &RepoRef) -> Result<T, ForgeError> + Send + 'static,
-    ) -> Result<T, ForgeError> {
-        let (forge, repo) = (self.forge.clone(), self.repo.clone());
-        recorded(self.store, &self.ctx, "github", &self.repo, op, move || {
-            f(&*forge, &repo)
-        })
-        .await
     }
 }
 

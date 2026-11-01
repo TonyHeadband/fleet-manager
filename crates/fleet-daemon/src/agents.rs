@@ -134,7 +134,7 @@ pub struct ServiceOptions {
     /// act while a scan runs. Always `None` in the daemon.
     #[doc(hidden)]
     pub scan_gate: Option<Arc<RequestGate>>,
-    /// How long one `gh pr list` of the merge watcher may take; tests shorten it.
+    /// How long one PR list of the merge watcher may take; tests shorten it.
     pub merge_check_timeout: Duration,
     /// Test seam: added to every claude process's environment. Always empty in the daemon.
     #[doc(hidden)]

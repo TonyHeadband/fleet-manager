@@ -1,5 +1,6 @@
 mod common;
 
+use common::fake_forge::Recorded;
 use common::net::*;
 use common::*;
 use fleet_api::{
@@ -10,7 +11,7 @@ use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::store::RepoRow;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 const GHE_URL: &str = "https://ghe.example.com/acme/core.git/";
@@ -29,29 +30,18 @@ async fn call(addr: SocketAddr, method: &str, path: &str, body: Value) -> (u16, 
     json_of(addr, method, path, Some(&body)).await
 }
 
-/// The persona's gh config dir: where the fake gh reads its replies and logs its argv.
-async fn gh_dir(fx: &Fx) -> PathBuf {
-    let env = fixture_env(fx).await;
-    let dir = env
-        .vars
-        .iter()
-        .find(|(k, _)| k == "GH_CONFIG_DIR")
-        .map(|(_, v)| PathBuf::from(v))
-        .expect("GH_CONFIG_DIR");
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn reply_merged(fx: &Fx) {
+    let prs = [rest_pr("core", 6, "CLOSED"), rest_pr("core", 7, "MERGED")];
+    reply_for(fx, "core", &prs);
 }
 
-fn reply_merged(dir: &Path) {
-    let reply = json!([
-        { "url": "https://ghe.example.com/acme/core/pull/6", "state": "CLOSED", "mergedAt": null },
-        { "url": "https://ghe.example.com/acme/core/pull/7", "state": "MERGED", "mergedAt": MERGED_AT },
-    ]);
-    std::fs::write(dir.join("pr-list.json"), reply.to_string()).unwrap();
-}
-
-fn argv_log(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join("argv.log")).unwrap_or_default()
+/// The PR-list requests the fake forge got.
+fn pr_lists(fx: &Fx) -> Vec<Recorded> {
+    fx.forge
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "GET" && r.path_and_query.contains("/pulls"))
+        .collect()
 }
 
 async fn set_core_url(fx: &Fx, url: Option<&str>) {
@@ -125,10 +115,9 @@ async fn record(fx: &Fx, id: &AgentId) -> Task {
 #[tokio::test(flavor = "multi_thread")]
 async fn merged_pr_marks_task_done() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
     let local = path_only_task(&fx, "t2").await;
-    reply_merged(&dir);
+    reply_merged(&fx);
 
     fx.svc.check_merges().await;
 
@@ -155,27 +144,26 @@ async fn merged_pr_marks_task_done() {
     assert!(t.repos[0].changed);
     assert!(!t.done_by_hand);
     assert_eq!(task_outcome(&t), TaskOutcome::Merged);
-    let log = argv_log(&dir);
+    let lists = pr_lists(&fx);
+    assert_eq!(lists.len(), 1, "{lists:?}");
     assert!(
-        log.contains(
-            "pr list -R ghe.example.com/acme/core --head fleet/t1 --state all --json url,state,mergedAt"
-        ),
-        "{log}"
+        lists[0]
+            .path_and_query
+            .starts_with("/repos/acme/core/pulls?head=acme%3Afleet%2Ft1&state=all"),
+        "{}",
+        lists[0].path_and_query
     );
     // A task with no GitHub repo is never asked about.
-    assert!(!log.contains("fleet/t2"), "{log}");
     assert!(record(&fx, &local).await.prs.is_empty());
 
     // A done task is not checked again.
-    std::fs::remove_file(dir.join("argv.log")).unwrap();
     fx.svc.check_merges().await;
-    assert!(!argv_log(&dir).contains("pr list"));
+    assert_eq!(pr_lists(&fx).len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn gh_failure_changes_nothing() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
     let open = TaskPr {
         url: "https://ghe.example.com/acme/core/pull/7".into(),
@@ -188,12 +176,12 @@ async fn gh_failure_changes_nothing() {
         .update_task(&id, |t| t.prs = vec![seen])
         .await
         .unwrap();
-    reply_merged(&dir);
-    std::fs::write(dir.join("pr-fail"), "").unwrap();
+    reply_merged(&fx);
+    fx.forge.fail_next_on("GET", "/pulls", 502, "Bad Gateway");
 
     fx.svc.check_merges().await;
 
-    assert!(argv_log(&dir).contains("pr list"));
+    assert_eq!(pr_lists(&fx).len(), 1);
     let t = record(&fx, &id).await;
     assert_eq!(t.prs, vec![open]);
     assert_eq!(t.done_at, None);
@@ -202,17 +190,15 @@ async fn gh_failure_changes_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_changes_nothing() {
     let fx = fixture_options(|_| {}, |o| o.merge_check_timeout = Duration::from_secs(1)).await;
-    let dir = gh_dir(&fx).await;
-    // Only the PR query hangs: the persona's login check runs through the same program.
-    std::fs::write(dir.join("pr-hang"), "").unwrap();
     let id = github_task(&fx, "t1").await;
-    reply_merged(&dir);
+    reply_merged(&fx);
+    fx.forge.delay_next(Duration::from_secs(5));
 
     let started = Instant::now();
     fx.svc.check_merges().await;
 
-    assert!(started.elapsed() < Duration::from_secs(20));
-    assert!(argv_log(&dir).contains("pr list"));
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert_eq!(pr_lists(&fx).len(), 1);
     let t = record(&fx, &id).await;
     assert!(t.prs.is_empty());
     assert_eq!(t.done_at, None);
@@ -281,9 +267,8 @@ async fn path_only_task_named(fx: &Fx, id: &str) -> AgentId {
 #[tokio::test(flavor = "multi_thread")]
 async fn refresh_triggers_a_check() {
     let (addr, fx) = serve(fixture().await).await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
-    reply_merged(&dir);
+    reply_merged(&fx);
 
     let (s, _) = http(addr, "POST", "/api/tasks/refresh", &[], None).await;
 
@@ -325,7 +310,6 @@ async fn finished_task_cannot_change_release() {
 #[tokio::test(flavor = "multi_thread")]
 async fn stopping_an_agent_triggers_a_check() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let a = fx
         .svc
         .spawn(SpawnRequest {
@@ -347,7 +331,7 @@ async fn stopping_an_agent_triggers_a_check() {
     fx.svc.start_merge_watcher(Duration::from_secs(3600));
     assert!(wait_until(|| async { fx.svc.merge_checks_run() >= 1 }).await);
     assert!(record(&fx, &a.id).await.done_at.is_none());
-    reply_merged(&dir);
+    reply_merged(&fx);
     commit_in(&record(&fx, &a.id).await.repos[0].worktree);
 
     fx.svc.stop(&a.id).await.unwrap();
@@ -357,18 +341,23 @@ async fn stopping_an_agent_triggers_a_check() {
         "the stop did not check the task's PRs"
     );
     let branch = &record(&fx, &a.id).await.repos[0].branch;
-    assert!(argv_log(&dir).contains(&format!("--head {branch} ")));
+    assert!(
+        pr_lists(&fx).iter().any(|r| r
+            .path_and_query
+            .contains(&format!("head=acme%3A{}&", branch.replace('/', "%2F")))),
+        "{:?}",
+        pr_lists(&fx)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_watcher_checks_again_on_its_timer() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
 
     fx.svc.start_merge_watcher(Duration::from_millis(200));
     assert!(wait_until(|| async { fx.svc.merge_checks_run() >= 1 }).await);
-    reply_merged(&dir);
+    reply_merged(&fx);
 
     assert!(
         wait_until(|| async { record(&fx, &id).await.done_at.is_some() }).await,
@@ -379,14 +368,14 @@ async fn the_watcher_checks_again_on_its_timer() {
 #[tokio::test(flavor = "multi_thread")]
 async fn logged_out_persona_changes_nothing() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
-    reply_merged(&dir);
-    std::fs::remove_file(dir.parent().unwrap().join("forge/token")).unwrap();
+    reply_merged(&fx);
+    let persona = fx.svc.personas().get(PERSONA).await.unwrap();
+    std::fs::remove_file(token_file(&persona)).unwrap();
 
     fx.svc.check_merges().await;
 
-    assert!(!argv_log(&dir).contains("pr list"));
+    assert!(pr_lists(&fx).is_empty());
     let t = record(&fx, &id).await;
     assert!(t.prs.is_empty());
     assert_eq!(t.done_at, None);
@@ -396,9 +385,8 @@ async fn logged_out_persona_changes_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn merge_seen_with_claude_logged_out() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
-    reply_merged(&dir);
+    reply_merged(&fx);
     let claude = fixture_env(&fx).await.claude_dir().unwrap();
     std::fs::remove_file(claude.join(".fake-login")).unwrap();
 
@@ -426,17 +414,19 @@ fn pr(repo: &str, n: u32, state: PrState, merged_at: Option<i64>) -> TaskPr {
     }
 }
 
-fn gh_pr(repo: &str, n: u32, state: &str) -> Value {
+/// A PR as the REST API lists it: a merged one is closed with a `merged_at`.
+fn rest_pr(repo: &str, n: u32, state: &str) -> Value {
     let merged_at = (state == "MERGED").then_some(MERGED_AT);
-    json!({ "url": format!("https://ghe.example.com/acme/{repo}/pull/{n}"), "state": state, "mergedAt": merged_at })
+    json!({
+        "html_url": format!("https://ghe.example.com/acme/{repo}/pull/{n}"),
+        "number": n,
+        "state": if state == "OPEN" { "open" } else { "closed" },
+        "merged_at": merged_at,
+    })
 }
 
-fn reply_for(dir: &Path, repo: &str, prs: &[Value]) {
-    std::fs::write(
-        dir.join(format!("pr-list-{repo}.json")),
-        Value::from(prs.to_vec()).to_string(),
-    )
-    .unwrap();
+fn reply_for(fx: &Fx, repo: &str, prs: &[Value]) {
+    fx.forge.set_prs("acme", repo, prs.to_vec());
 }
 
 fn merged_at() -> i64 {
@@ -461,10 +451,9 @@ async fn two_github_repos(fx: &Fx) {
 #[tokio::test(flavor = "multi_thread")]
 async fn changed_repo_without_pr_keeps_task_open() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     two_github_repos(&fx).await;
     let id = task_on_repos(&fx, "t1", &["core", "lib"]).await;
-    reply_for(&dir, "core", &[gh_pr("core", 7, "MERGED")]);
+    reply_for(&fx, "core", &[rest_pr("core", 7, "MERGED")]);
 
     fx.svc.check_merges().await;
 
@@ -476,10 +465,12 @@ async fn changed_repo_without_pr_keeps_task_open() {
     assert!(t.repos.iter().all(|w| w.changed), "{:?}", t.repos);
     assert_eq!(t.done_at, None);
     assert_eq!(task_outcome(&t), TaskOutcome::Open);
-    assert!(argv_log(&dir).contains("pr list -R ghe.example.com/acme/lib --head fleet/t1 "));
+    assert!(pr_lists(&fx).iter().any(|r| r
+        .path_and_query
+        .starts_with("/repos/acme/lib/pulls?head=acme%3Afleet%2Ft1&")));
 
     // Once the other changed repo's PR merges too, the task is done.
-    reply_for(&dir, "lib", &[gh_pr("lib", 3, "MERGED")]);
+    reply_for(&fx, "lib", &[rest_pr("lib", 3, "MERGED")]);
     fx.svc.check_merges().await;
     let t = record(&fx, &id).await;
     assert_eq!(t.done_at, Some(merged_at()));
@@ -489,19 +480,21 @@ async fn changed_repo_without_pr_keeps_task_open() {
 #[tokio::test(flavor = "multi_thread")]
 async fn one_repo_failing_changes_nothing() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     two_github_repos(&fx).await;
     let id = task_on_repos(&fx, "t1", &["core", "lib"]).await;
     let seen = vec![pr("lib", 3, PrState::Open, None)];
     let kept = seen.clone();
     fx.store.update_task(&id, |t| t.prs = kept).await.unwrap();
-    reply_for(&dir, "core", &[gh_pr("core", 7, "MERGED")]);
-    reply_for(&dir, "lib", &[gh_pr("lib", 3, "MERGED")]);
-    std::fs::write(dir.join("pr-fail-lib"), "").unwrap();
+    reply_for(&fx, "core", &[rest_pr("core", 7, "MERGED")]);
+    reply_for(&fx, "lib", &[rest_pr("lib", 3, "MERGED")]);
+    fx.forge
+        .fail_next_on("GET", "/repos/acme/lib/pulls", 502, "Bad Gateway");
 
     fx.svc.check_merges().await;
 
-    assert!(argv_log(&dir).contains("-R ghe.example.com/acme/lib "));
+    assert!(pr_lists(&fx)
+        .iter()
+        .any(|r| r.path_and_query.starts_with("/repos/acme/lib/")));
     let t = record(&fx, &id).await;
     assert_eq!(t.prs, seen);
     assert!(t.repos.iter().all(|w| !w.changed), "{:?}", t.repos);
@@ -511,15 +504,14 @@ async fn one_repo_failing_changes_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn stale_reply_keeps_a_newly_opened_pr() {
     let fx = fixture_options(|_| {}, |_| {}).await;
-    let dir = gh_dir(&fx).await;
-    // The PR query waits for a `go` file, so the test can record a PR between the question and the answer.
-    std::fs::write(dir.join("pr-hold"), "").unwrap();
     let id = github_task(&fx, "t1").await;
-    reply_for(&dir, "core", &[gh_pr("core", 7, "MERGED")]);
+    reply_for(&fx, "core", &[rest_pr("core", 7, "MERGED")]);
 
+    // The fake logs a request on arrival and answers after the delay: a PR can be recorded in between.
+    fx.forge.delay_next(Duration::from_millis(1500));
     let svc = fx.svc.clone();
     let check = tokio::spawn(async move { svc.check_merges().await });
-    assert!(wait_until(|| async { dir.join("asked").exists() }).await);
+    assert!(wait_until(|| async { !pr_lists(&fx).is_empty() }).await);
     // What `open_pr` records while the check waits for GitHub.
     let opened = pr("core", 8, PrState::Open, None);
     let recorded = opened.clone();
@@ -527,7 +519,6 @@ async fn stale_reply_keeps_a_newly_opened_pr() {
         .update_task(&id, |t| t.prs = vec![recorded])
         .await
         .unwrap();
-    std::fs::write(dir.join("go"), "").unwrap();
     check.await.unwrap();
 
     let t = record(&fx, &id).await;
@@ -536,9 +527,9 @@ async fn stale_reply_keeps_a_newly_opened_pr() {
 
     // The task was queued again: that check starts from the PR just recorded, and GitHub now lists it.
     reply_for(
-        &dir,
+        &fx,
         "core",
-        &[gh_pr("core", 7, "MERGED"), gh_pr("core", 8, "OPEN")],
+        &[rest_pr("core", 7, "MERGED"), rest_pr("core", 8, "OPEN")],
     );
     assert!(wait_until(|| async { fx.svc.merge_checks_run() >= 1 }).await);
     let t = record(&fx, &id).await;
@@ -586,10 +577,9 @@ const OPEN_PR_REFUSAL: &str =
 #[tokio::test(flavor = "multi_thread")]
 async fn archive_refused_with_open_pr() {
     let (addr, fx) = serve(fixture().await).await;
-    let dir = gh_dir(&fx).await;
     let id = stopped_github_task(&fx).await;
     // Never recorded: the route's own check finds it.
-    reply_for(&dir, "core", &[gh_pr("core", 8, "OPEN")]);
+    reply_for(&fx, "core", &[rest_pr("core", 8, "OPEN")]);
 
     let (s, v) = json_of(
         addr,
@@ -620,7 +610,7 @@ async fn archive_refused_with_open_pr() {
     assert_eq!(t.prs, vec![pr("core", 8, PrState::Open, None)]);
 
     // GitHub unreachable: the recorded open PR still refuses.
-    std::fs::write(dir.join("pr-fail"), "").unwrap();
+    fx.forge.fail_next_on("GET", "/pulls", 502, "Bad Gateway");
     let (s, v) = json_of(
         addr,
         "GET",
@@ -636,14 +626,13 @@ async fn archive_refused_with_open_pr() {
 #[tokio::test(flavor = "multi_thread")]
 async fn archive_refused_when_github_unreachable() {
     let (addr, fx) = serve(fixture().await).await;
-    let dir = gh_dir(&fx).await;
     let id = stopped_github_task(&fx).await;
-    std::fs::write(dir.join("pr-fail"), "").unwrap();
     let name = record(&fx, &id).await.name;
     let refusal = format!(
-        "could not ask GitHub whether {name} has an open PR: gh pr list failed: HTTP 502: Bad Gateway (https://api.github.com/graphql); try again"
+        "could not ask GitHub whether {name} has an open PR: GitHub said: Bad Gateway; try again"
     );
 
+    fx.forge.fail_next_on("GET", "/pulls", 502, "Bad Gateway");
     let (s, v) = json_of(
         addr,
         "GET",
@@ -654,6 +643,7 @@ async fn archive_refused_when_github_unreachable() {
     assert_eq!(s, 409, "{v}");
     assert_eq!(v["error"], refusal);
 
+    fx.forge.fail_next_on("GET", "/pulls", 502, "Bad Gateway");
     let (s, v) = call(
         addr,
         "POST",
@@ -676,9 +666,8 @@ async fn archive_refused_when_github_unreachable() {
 #[tokio::test(flavor = "multi_thread")]
 async fn archive_allowed_when_github_unreachable_and_nothing_changed() {
     let (addr, fx) = serve(fixture().await).await;
-    let dir = gh_dir(&fx).await;
     let id = stopped_github_task_changing(&fx, false).await;
-    std::fs::write(dir.join("pr-fail"), "").unwrap();
+    fx.forge.fail_next_on("GET", "/pulls", 502, "Bad Gateway");
 
     let (s, plan) = json_of(
         addr,
@@ -702,13 +691,12 @@ async fn archive_allowed_when_github_unreachable_and_nothing_changed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn archive_allowed_after_pr_closed() {
     let (addr, fx) = serve(fixture().await).await;
-    let dir = gh_dir(&fx).await;
     let id = stopped_github_task(&fx).await;
     fx.store
         .update_task(&id, |t| t.prs = vec![pr("core", 8, PrState::Open, None)])
         .await
         .unwrap();
-    reply_for(&dir, "core", &[gh_pr("core", 8, "CLOSED")]);
+    reply_for(&fx, "core", &[rest_pr("core", 8, "CLOSED")]);
 
     let (s, plan) = json_of(
         addr,
@@ -736,11 +724,10 @@ async fn archive_allowed_after_pr_closed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn deleted_branch_with_merged_pr_finishes() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
     // A merged branch deleted by hand: no checkout can count its commits any more.
     git(&fx.repo, &["branch", "-D", "fleet/t1"]);
-    reply_merged(&dir);
+    reply_merged(&fx);
 
     fx.svc.check_merges().await;
 
@@ -753,7 +740,6 @@ async fn deleted_branch_with_merged_pr_finishes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn no_checkout_changes_nothing() {
     let fx = fixture().await;
-    let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
     // No local path and no clone: git has nowhere to look.
     fx.store
@@ -765,7 +751,7 @@ async fn no_checkout_changes_nothing() {
         })
         .await
         .unwrap();
-    reply_merged(&dir);
+    reply_merged(&fx);
 
     fx.svc.check_merges().await;
 
@@ -778,7 +764,6 @@ async fn no_checkout_changes_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn archive_of_running_task_is_not_stopped() {
     let (addr, fx) = serve(fixture().await).await;
-    let dir = gh_dir(&fx).await;
     let a = fx
         .svc
         .spawn(SpawnRequest {
@@ -796,7 +781,7 @@ async fn archive_of_running_task_is_not_stopped() {
         .await
         .unwrap();
     set_core_url(&fx, Some(GHE_URL)).await;
-    reply_for(&dir, "core", &[gh_pr("core", 8, "OPEN")]);
+    reply_for(&fx, "core", &[rest_pr("core", 8, "OPEN")]);
 
     let (s, v) = call(
         addr,
@@ -808,6 +793,84 @@ async fn archive_of_running_task_is_not_stopped() {
 
     assert_eq!(s, 409, "{v}");
     assert_eq!(v["error"], "the task is not stopped; stop it first");
-    assert!(!argv_log(&dir).contains("pr list"));
+    assert!(pr_lists(&fx).is_empty());
     fx.svc.stop(&a.id).await.unwrap();
+}
+
+/// The `forge_calls` rows of the PR lists (the fixture's persona check left its own).
+async fn watcher_calls(fx: &Fx) -> Vec<fleet_daemon::store::ForgeCallRow> {
+    let mut rows = fx.store.forge_calls(50).await.unwrap();
+    rows.retain(|r| r.op == "prs_of");
+    rows
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watch_check_records_one_call_per_repo() {
+    let fx = fixture().await;
+    two_github_repos(&fx).await;
+    let id = task_on_repos(&fx, "t1", &["core", "lib"]).await;
+    reply_for(&fx, "core", &[rest_pr("core", 7, "MERGED")]);
+    reply_for(&fx, "lib", &[rest_pr("lib", 3, "MERGED")]);
+
+    fx.svc.check_merges().await;
+
+    let mut rows = watcher_calls(&fx).await;
+    rows.sort_by(|a, b| a.repo.cmp(&b.repo));
+    let seen: Vec<_> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.repo.as_str(),
+                r.op.as_str(),
+                r.ok,
+                r.task.clone(),
+                r.agent.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            (
+                "ghe.example.com/acme/core",
+                "prs_of",
+                true,
+                Some(id.clone()),
+                None
+            ),
+            ("ghe.example.com/acme/lib", "prs_of", true, Some(id), None),
+        ]
+    );
+    assert!(rows.iter().all(|r| r.persona == PERSONA));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hung_forge_fails_the_check_after_the_timeout() {
+    let (addr, fx) = serve(
+        fixture_options(
+            |_| {},
+            |o| o.merge_check_timeout = Duration::from_millis(300),
+        )
+        .await,
+    )
+    .await;
+    let id = stopped_github_task(&fx).await;
+    fx.forge.delay_next(Duration::from_secs(3));
+
+    let started = Instant::now();
+    let (s, v) = json_of(
+        addr,
+        "GET",
+        &format!("/api/tasks/{}/archive-plan", id.0),
+        None,
+    )
+    .await;
+
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(s, 409, "{v}");
+    let error = v["error"].as_str().unwrap();
+    assert!(error.contains("timed out"), "{error}");
+    let rows = watcher_calls(&fx).await;
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].ok);
 }

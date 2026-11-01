@@ -2,62 +2,38 @@
 //! is done when every changed repo's PR has merged. Only repos with a URL are asked about; a task with none finishes
 //! through Mark done instead.
 use crate::agents::{AgentService, Clock, ServiceError};
-use crate::forge::{parse_timestamp, RepoRef};
-use crate::personas::{PersonaEnv, Personas};
+use crate::forge::log::{said, CallCtx, PrCalls};
+use crate::forge::{self, Forge, ForgeConfig, PrInfo, RepoRef};
+use crate::personas::Personas;
 use crate::repos::Repos;
 use crate::store::Store;
 use fleet_api::{
-    task_id, task_outcome, AgentId, EventKind, PrState, Status, Task, TaskOutcome, TaskPr,
-    TaskState,
+    task_id, task_outcome, AgentId, EventKind, Status, Task, TaskOutcome, TaskPr, TaskState,
 };
-use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 
 /// How often every open task is checked, besides the checks a stop, a Review or a refresh asks for.
 pub const MERGE_CHECK_EVERY: Duration = Duration::from_secs(600);
 
-/// How long one `gh pr list` may take. Archive waits on it per repo and the queue runs one check at a time, so a
+/// How long one PR list may take. Archive waits on it per repo and the queue runs one check at a time, so a
 /// hung call must give up well before git's own remote timeout.
 pub const MERGE_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Refusal of Mark done on a task GitHub can tell about.
 pub const HAS_GITHUB_REPO: &str = "this task has a GitHub repo; it is done when its PR merges";
 
-/// One entry of `gh pr list --json url,state,mergedAt`.
-#[derive(Deserialize)]
-struct GhPr {
-    url: String,
-    state: String,
-    #[serde(rename = "mergedAt")]
-    merged_at: Option<String>,
-}
-
-fn parse_reply(repo: &str, stdout: &[u8]) -> Result<Vec<TaskPr>, String> {
-    let prs: Vec<GhPr> =
-        serde_json::from_slice(stdout).map_err(|e| format!("unreadable reply: {e}"))?;
-    prs.into_iter()
-        .map(|p| {
-            let state = match p.state.to_ascii_uppercase().as_str() {
-                "OPEN" => PrState::Open,
-                "MERGED" => PrState::Merged,
-                "CLOSED" => PrState::Closed,
-                other => return Err(format!("unknown PR state {other:?}")),
-            };
-            Ok(TaskPr {
-                url: p.url,
-                repo: repo.to_string(),
-                state,
-                merged_at: p.merged_at.as_deref().and_then(parse_timestamp),
-            })
-        })
-        .collect()
+fn task_pr(repo: &str, p: PrInfo) -> TaskPr {
+    TaskPr {
+        url: p.url,
+        repo: repo.to_string(),
+        state: p.state,
+        merged_at: p.merged_at,
+    }
 }
 
 /// A task the watcher still asks about: not archived, not done.
@@ -65,8 +41,8 @@ fn watched(t: &Task) -> bool {
     t.state != TaskState::Archived && t.done_at.is_none() && !t.done_by_hand
 }
 
-/// Each persona's GitHub environment, or why there is none, asked once per pass.
-type Envs = HashMap<String, Result<PersonaEnv, String>>;
+/// Each persona's forge client, or why there is none, built once per pass.
+type Forges = HashMap<String, Result<Arc<dyn Forge>, String>>;
 
 /// One repo of a task the watcher asks about.
 struct Ask {
@@ -83,7 +59,7 @@ pub(crate) struct MergeChecker {
     store: Arc<Store>,
     personas: Arc<Personas>,
     repos: Arc<Repos>,
-    gh: String,
+    forge: Arc<ForgeConfig>,
     clock: Arc<dyn Clock>,
     timeout: Duration,
     runs: Arc<AtomicUsize>,
@@ -94,7 +70,7 @@ impl MergeChecker {
         store: Arc<Store>,
         personas: Arc<Personas>,
         repos: Arc<Repos>,
-        gh: String,
+        forge: Arc<ForgeConfig>,
         clock: Arc<dyn Clock>,
         timeout: Duration,
         runs: Arc<AtomicUsize>,
@@ -103,7 +79,7 @@ impl MergeChecker {
             store,
             personas,
             repos,
-            gh,
+            forge,
             clock,
             timeout,
             runs,
@@ -115,9 +91,9 @@ impl MergeChecker {
         match self.store.tasks().await {
             Ok(tasks) => {
                 let mut stale = Vec::new();
-                let mut envs = Envs::new();
+                let mut forges = Forges::new();
                 for t in tasks.iter().filter(|t| watched(t)) {
-                    if self.check(t, &mut envs).await == Checked::Stale {
+                    if self.check(t, &mut forges).await == Checked::Stale {
                         stale.push(t.id.clone());
                     }
                 }
@@ -132,7 +108,7 @@ impl MergeChecker {
 
     pub(crate) async fn check_one(&self, id: &AgentId) -> Checked {
         match self.store.task(id).await {
-            Ok(Some(t)) if watched(&t) => self.check(&t, &mut Envs::new()).await,
+            Ok(Some(t)) if watched(&t) => self.check(&t, &mut Forges::new()).await,
             Ok(_) => Checked::Done,
             Err(e) => {
                 warn!(task = %id.0, error = %e, "cannot read the task to check its PRs");
@@ -186,9 +162,8 @@ impl MergeChecker {
     }
 
     /// Replaces the task's `prs` with what GitHub says now and each repo's `changed` with what git says, and stamps
-    /// `done_at` once every changed repo's PR has merged. Any failure (persona logged out, gh failing or slow, a reply
-    /// it cannot read, a branch git cannot count) changes nothing: a wrong count is worse than a late one.
-    async fn check(&self, t: &Task, envs: &mut Envs) -> Checked {
+    /// `done_at` once every changed repo's PR has merged. Any failure (persona logged out, GitHub failing or slow, a branch git cannot count) changes nothing: a wrong count is worse than a late one.
+    async fn check(&self, t: &Task, forges: &mut Forges) -> Checked {
         let asks = match self.asks(t).await {
             Ok(a) => a,
             Err(e) => {
@@ -199,16 +174,12 @@ impl MergeChecker {
         if asks.is_empty() {
             return Checked::Done;
         }
-        if !envs.contains_key(&t.persona) {
-            let env = self
-                .personas
-                .gh_env(&t.persona)
-                .await
-                .map_err(|e| e.to_string());
-            envs.insert(t.persona.clone(), env);
+        if !forges.contains_key(&t.persona) {
+            let forge = self.forge_of(&t.persona).await;
+            forges.insert(t.persona.clone(), forge);
         }
-        let persona = match &envs[&t.persona] {
-            Ok(p) => p,
+        let forge = match &forges[&t.persona] {
+            Ok(f) => f,
             Err(e) => {
                 warn!(task = %t.id.0, error = %e, "cannot check the task's PRs: its persona's GitHub login is not good");
                 return Checked::Failed(e.clone());
@@ -218,7 +189,7 @@ impl MergeChecker {
         let mut changed_repos = Vec::new();
         for ask in &asks {
             let repo = &ask.repo;
-            let Some(slug) = RepoRef::from_url(&ask.url).map(|r| r.slug()) else {
+            let Some(repo_ref) = RepoRef::from_url(&ask.url) else {
                 warn!(task = %t.id.0, repo = %repo, "cannot check PRs: the repo URL names no GitHub owner and repo");
                 return Checked::Failed(format!(
                     "the URL of {repo} names no GitHub owner and repo"
@@ -231,29 +202,35 @@ impl MergeChecker {
                 }
                 c => c,
             };
-            match self.list(&slug, &ask.branch, &persona.vars).await {
-                Ok(out) => match parse_reply(repo, &out) {
-                    Ok(found) => {
-                        let changed = match counted {
-                            Count::Changed(c) => c,
-                            // The branch or its start is gone from every checkout (a merged branch deleted by hand).
-                            // GitHub refuses a PR with no commits, so a PR proves a change.
-                            _ => {
-                                let before = t.repos.iter().any(|w| w.repo == *repo && w.changed);
-                                before || !found.is_empty()
-                            }
-                        };
-                        changed_repos.push((repo.clone(), changed));
-                        prs.extend(found);
-                    }
-                    Err(e) => {
-                        warn!(task = %t.id.0, repo = %repo, error = %e, "cannot read gh pr list");
-                        return Checked::Failed(e);
-                    }
+            let calls = PrCalls {
+                store: &self.store,
+                ctx: CallCtx {
+                    persona: t.persona.clone(),
+                    task: Some(t.id.clone()),
+                    agent: None,
                 },
+                forge: forge.clone(),
+                repo: repo_ref,
+            };
+            let branch = ask.branch.clone();
+            match calls.call("prs_of", move |f, r| f.prs_of(r, &branch)).await {
+                Ok(found) => {
+                    let found: Vec<TaskPr> = found.into_iter().map(|p| task_pr(repo, p)).collect();
+                    let changed = match counted {
+                        Count::Changed(c) => c,
+                        // The branch or its start is gone from every checkout (a merged branch deleted by hand).
+                        // GitHub refuses a PR with no commits, so a PR proves a change.
+                        _ => {
+                            let before = t.repos.iter().any(|w| w.repo == *repo && w.changed);
+                            before || !found.is_empty()
+                        }
+                    };
+                    changed_repos.push((repo.clone(), changed));
+                    prs.extend(found);
+                }
                 Err(e) => {
                     warn!(task = %t.id.0, repo = %repo, error = %e, "cannot check the task's PRs");
-                    return Checked::Failed(e);
+                    return Checked::Failed(said(&e));
                 }
             }
         }
@@ -318,27 +295,25 @@ impl MergeChecker {
         Checked::Done
     }
 
-    async fn list(
-        &self,
-        slug: &str,
-        branch: &str,
-        env: &[(String, String)],
-    ) -> Result<Vec<u8>, String> {
-        let mut gh = Command::new(&self.gh);
-        crate::git::harden(gh.as_std_mut(), env);
-        gh.args(["pr", "list", "-R", slug, "--head", branch])
-            .args(["--state", "all", "--json", "url,state,mergedAt"])
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        match tokio::time::timeout(self.timeout, gh.output()).await {
-            Ok(Ok(o)) if o.status.success() => Ok(o.stdout),
-            Ok(Ok(o)) => Err(format!(
-                "gh pr list failed: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            )),
-            Ok(Err(e)) => Err(format!("gh cannot run: {e}")),
-            Err(_) => Err("gh pr list timed out".into()),
-        }
+    /// The persona's client on its own host, or why it has none: a missing token is a logged-out GitHub.
+    async fn forge_of(&self, persona: &str) -> Result<Arc<dyn Forge>, String> {
+        let token = self
+            .personas
+            .token(persona)
+            .await
+            .map_err(|e| e.to_string())?;
+        let host = self
+            .personas
+            .get(persona)
+            .await
+            .map_err(|e| e.to_string())?
+            .host;
+        Ok(Arc::from(forge::github(
+            &host,
+            token,
+            &self.forge,
+            self.timeout,
+        )))
     }
 }
 
@@ -555,7 +530,7 @@ impl AgentService {
             self.store.clone(),
             self.personas().clone(),
             self.repos.clone(),
-            self.cfg.gh_command.clone(),
+            self.opts.forge.clone(),
             self.opts.clock.clone(),
             self.opts.merge_check_timeout,
             self.merge_runs.clone(),
@@ -577,21 +552,5 @@ mod tests {
     fn a_merge_check_gives_up_after_30_seconds() {
         let opts = crate::agents::ServiceOptions::new("http://127.0.0.1:1");
         assert_eq!(opts.merge_check_timeout, Duration::from_secs(30));
-    }
-
-    #[test]
-    fn reply_parses_every_state_and_refuses_an_unknown_one() {
-        let ok = br#"[{"url":"u1","state":"OPEN","mergedAt":null},
-                      {"url":"u2","state":"MERGED","mergedAt":"1970-01-01T00:01:00Z"},
-                      {"url":"u3","state":"CLOSED","mergedAt":null}]"#;
-        let prs = parse_reply("core", ok).unwrap();
-        assert_eq!(
-            prs.iter().map(|p| p.state).collect::<Vec<_>>(),
-            [PrState::Open, PrState::Merged, PrState::Closed]
-        );
-        assert_eq!(prs[1].merged_at, Some(60));
-        assert!(prs.iter().all(|p| p.repo == "core"));
-        assert!(parse_reply("core", br#"[{"url":"u","state":"DRAFT","mergedAt":null}]"#).is_err());
-        assert!(parse_reply("core", b"not json").is_err());
     }
 }
