@@ -5,7 +5,7 @@ import type { UiSchema } from "../api/generated/UiSchema";
 import { iconOf, repoSummary, shownFields, slotOf, stateBadge, stateLine, useConfirm, type Slot } from "../board/card";
 import { canRestart, columnOfGroup, leadDown, liveFleet, rollup, specialistIcon, stuck, taskId, type FleetDisplay, type Group } from "../board/groups";
 import type { Status } from "../api/generated/Status";
-import { card as cardSize, fleet as fleetSize } from "../generated/layout";
+import { fleet as fleetSize } from "../generated/layout";
 import { Mark } from "../ui/icons";
 import { EdgeMotion } from "./EdgeMotion";
 import { Avatar } from "../ui/Avatar";
@@ -77,25 +77,28 @@ function Tally({ schema, fleet }: { schema: UiSchema; fleet: Agent[] }) {
   );
 }
 
-/** `▾ N fleet` (open) or `▸ N fleet`, Lite's `fold_toggle`; the triangle is drawn as Lite paints it. */
+/**
+ * Lite's `fold_toggle`, as a plus that turns into a minus: the count and the word are gone, since the tally beside it
+ * says what the fleet is doing.
+ */
 function FoldToggle({ n, open, onFold }: { n: number; open: boolean; onFold: () => void }) {
-  const [w, h] = [fleetSize.foldText, cardSize.rowTally];
-  const [cx, cy] = [4, h / 2];
-  const points = open ? [[-3.5, -2], [3.5, -2], [0, 2.5]] : [[-2, -3.5], [2.5, 0], [-2, 3.5]];
+  const s = fleetSize.foldText;
+  const c = s / 2;
   return (
     <button
       type="button"
       className="fold"
-      aria-label={`${open ? "▾" : "▸"} ${n} fleet`}
+      aria-label={`${n} fleet agents`}
+      aria-expanded={open}
       onClick={(e) => {
         e.stopPropagation();
         onFold();
       }}
     >
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-        <polygon points={points.map(([x, y]) => `${cx + x!},${cy + y!}`).join(" ")} fill="currentColor" />
+      <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden="true">
+        <rect x={1} y={c - 0.75} width={s - 2} height={1.5} />
+        <rect className="fold-bar" x={c - 0.75} y={1} width={1.5} height={s - 2} />
       </svg>
-      {n} fleet
     </button>
   );
 }

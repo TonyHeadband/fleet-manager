@@ -28,8 +28,10 @@
 /* The full goal behind an icon: a raised box across the panel under the title while the icon is pointed at or
    focused, over what follows, gone on leaving. */
 .detail-title h2 { min-width: 0; }
-.goal-tip { flex: none; display: inline-flex; }
-.goal-tooltip { position: absolute; top: 100%; left: var(--panel-margin); right: var(--panel-margin); z-index: 3; padding: var(--space-button-gap) var(--space-picker-gap); background: var(--raised); border: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.goal-tip { flex: none; display: inline-flex; margin-left: auto; }
+/* Its portrait glyph, not the button round it, lines up with the panel's right margin. */
+.goal-tip .icon-button { color: var(--fill); margin-right: calc((var(--card-icon-button) - 1.5 * (var(--card-icon-glyph) + 1px) - 1px) / -2); }
+.goal-tooltip { position: absolute; top: 100%; left: var(--panel-margin); right: var(--panel-margin); z-index: 3; padding: var(--space-button-gap) var(--space-picker-gap); background: var(--raised); border: 1px solid var(--border); border-top-color: var(--fill); font-size: var(--size-small); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .detail-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 /* Without a reply box under it, the pane keeps its inset from the panel's bottom line too. */
 .detail-body:last-child { padding-bottom: var(--layout-pane-inset); }

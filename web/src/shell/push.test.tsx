@@ -90,7 +90,7 @@ describe("the panel's push", () => {
       /\.detail\[data-phase="opening"\], \.detail\[data-phase="closing"\] \{[^}]*border-left-color: var\(--fill\);[^}]*overflow: hidden;/,
     );
     expect(css).toMatch(
-      /\.detail\[data-phase="opening"\] > \*, \.detail\[data-phase="closing"\] > \* \{[^}]*min-width: var\(--panel-final\);/,
+      /\.detail\[data-phase="opening"\] > \*, \.detail\[data-phase="closing"\] > \* \{[^}]*min-width: calc\(var\(--panel-final\) - 2px\);/,
     );
   });
 

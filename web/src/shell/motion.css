@@ -109,9 +109,10 @@
   overflow: hidden;
   align-items: flex-end;
 }
+/* The final width inside the panel's 1px outline, so the contents do not shift by its two lines as the motion ends. */
 .detail[data-phase="opening"] > *,
 .detail[data-phase="closing"] > * {
-  min-width: var(--panel-final);
+  min-width: calc(var(--panel-final) - 2px);
 }
 /* Going full and back, the same: its left line the accent, its contents at their final width. */
 .detail[data-resize] {
@@ -120,7 +121,7 @@
   align-items: flex-end;
 }
 .detail[data-resize] > * {
-  min-width: var(--panel-final);
+  min-width: calc(var(--panel-final) - 2px);
 }
 @media (prefers-reduced-motion: no-preference) {
   .detail[data-phase="opening"] {
@@ -223,6 +224,13 @@
       var(--card-edge) 0 0 var(--glow-attention-2),
       calc(var(--card-edge) * 1.5) 0 0 var(--glow-attention-1);
   }
+  .fold-bar {
+    transition: transform var(--motion-marker) var(--ease-push);
+  }
+  /* The goal's tooltip opens as a dialog does, from its top: a line drawn out from the icon's side, then down. */
+  .goal-tooltip {
+    animation: fui-tip var(--motion-menu) var(--ease-push) both;
+  }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
     transition: transform var(--motion-slide) var(--ease-push);
@@ -252,6 +260,17 @@
 @keyframes fui-narrow {
   to {
     width: var(--side-width);
+  }
+}
+@keyframes fui-tip {
+  from {
+    clip-path: inset(0 0 calc(100% - 1px) 100%);
+  }
+  40% {
+    clip-path: inset(0 0 calc(100% - 1px) 0);
+  }
+  to {
+    clip-path: inset(0);
   }
 }
 @keyframes fui-menu {

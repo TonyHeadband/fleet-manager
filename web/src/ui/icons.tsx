@@ -26,8 +26,9 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
       case "info":
         return (
           <>
-            <circle cx={c} cy={c} r={half + 1} fill="none" stroke="currentColor" strokeWidth={1.2} />
-            <circle cx={c} cy={c - half * 0.5} r={0.9} />
+            {/* The app's 3:4 portrait, not a circle, square-cornered as the FUI look wants. */}
+            <rect x={c - (half + 1) * 0.75} y={c - half - 1} width={(half + 1) * 1.5} height={(half + 1) * 2} fill="none" stroke="currentColor" strokeWidth={1} />
+            <rect x={c - 0.65} y={c - half * 0.6 - 0.65} width={1.3} height={1.3} />
             <line x1={c} y1={c - half * 0.1} x2={c} y2={c + half * 0.6} stroke="currentColor" strokeWidth={1.3} />
           </>
         );

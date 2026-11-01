@@ -300,8 +300,8 @@ describe("Board by tasks", () => {
     const working = [o(), f("f1", { status_since: 900, goal: "write code" }), f("f2", { status_since: 500, goal: "drop cookie" })];
     const { onOpen, rerender } = board(working);
     expect(rows(), "longest in status first").toEqual(["rust drop cookie, working", "rust write code, working"]);
-    await userEvent.click(screen.getByRole("button", { name: "▾ 2 fleet" }));
-    expect(screen.getByRole("button", { name: "▸ 2 fleet" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "2 fleet agents", expanded: true }));
+    expect(screen.getByRole("button", { name: "2 fleet agents", expanded: false })).toBeInTheDocument();
     expect(rows()).toEqual([]);
     rerender([o(), f("f1", { status_since: 900, goal: "write code", status: "needs_you", blocked_reason: "question" }), f("f2", { status_since: 500, goal: "drop cookie" })]);
     expect(rows(), "a stuck agent opens its task and comes first").toEqual(["rust write code, needs you", "rust drop cookie, working"]);
@@ -367,11 +367,11 @@ describe("Board by tasks", () => {
 
   it("the_fold_survives_a_move_between_columns", async () => {
     const { rerender } = board([o(), f("f1"), f("f2")]);
-    await userEvent.click(within(screen.getByRole("region", { name: "Working" })).getByRole("button", { name: "▾ 2 fleet" }));
+    await userEvent.click(within(screen.getByRole("region", { name: "Working" })).getByRole("button", { name: "2 fleet agents", expanded: true }));
     rerender([o({ status: "needs_you", blocked_reason: "question" }), f("f1"), f("f2")]);
-    expect(within(screen.getByRole("region", { name: "Needs you" })).getByRole("button", { name: "▸ 2 fleet" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Needs you" })).getByRole("button", { name: "2 fleet agents", expanded: false })).toBeInTheDocument();
     rerender([o(), f("f1", { status: "needs_you", blocked_reason: "question" }), f("f2")]);
-    expect(screen.getByRole("button", { name: "▾ 2 fleet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2 fleet agents", expanded: true })).toBeInTheDocument();
   });
 
   it("a_compact_row_marks_an_open_pr", () => {
@@ -438,11 +438,11 @@ describe("Task cards", () => {
   it("the_fold_toggle_reads_its_state", async () => {
     const { onFold } = lead([o(), f("f1"), f("f2")]);
     expect(screen.getByRole("img", { name: "2 Working" })).toHaveAttribute("title", "Working");
-    await userEvent.click(screen.getByRole("button", { name: "▾ 2 fleet" }));
+    await userEvent.click(screen.getByRole("button", { name: "2 fleet agents", expanded: true }));
     expect(onFold).toHaveBeenCalledTimes(1);
     cleanup();
     lead([o(), f("f1"), f("f2")], { open: false });
-    expect(screen.getByRole("button", { name: "▸ 2 fleet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2 fleet agents", expanded: false })).toBeInTheDocument();
     cleanup();
     lead([o(), f("f1"), f("f2")], { display: "hide" });
     expect(screen.queryByRole("button", { name: /fleet$/ })).toBeNull();
