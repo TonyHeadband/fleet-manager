@@ -1077,125 +1077,6 @@ async fn add_event(
         .unwrap();
 }
 
-fn event_body(kind: TaskEventKind, text: &str) -> ChatBody {
-    ChatBody::Event {
-        task: AgentId("t1".into()),
-        task_title: "t1".into(),
-        kind,
-        text: text.into(),
-    }
-}
-
-#[tokio::test]
-async fn a_supervisor_chat_interleaves_events_by_time() {
-    let srv = start().await;
-    let (id, path) = supervisor(&srv, "what is going on?").await;
-    append(
-        &path,
-        &[owner_line(PROMPT_POINTER, 0), reply_line("all quiet", 100)],
-    );
-    add_event(&srv, &id, TaskEventKind::ChecksFailed, "checks failed", 50).await;
-    add_event(&srv, &id, TaskEventKind::PrMerged, "PR merged", 200).await;
-
-    let mut sse = SseClient::connect(srv.addr, &chat_path(&id), &[]).await;
-    let page = page_of(&mut sse).await;
-    let bodies: Vec<&ChatBody> = page.items.iter().map(|i| &i.body).collect();
-    assert_eq!(
-        bodies,
-        [
-            &ChatBody::Prompt {
-                text: "what is going on?\n".into(),
-                from: PromptFrom::Owner
-            },
-            &event_body(TaskEventKind::ChecksFailed, "checks failed"),
-            &ChatBody::Reply {
-                text: "all quiet".into()
-            },
-            &event_body(TaskEventKind::PrMerged, "PR merged"),
-        ]
-    );
-    assert_eq!(page.items[1].at, T0 + 50);
-    let seqs: Vec<u64> = page.items.iter().map(|i| i.seq).collect();
-    assert_eq!(seqs, [0, 1, 2, 3]);
-
-    // History builds the same chat.
-    let history = format!("/api/agents/{}/chat/history", id.0);
-    let (_, v) = json_of(srv.addr, "GET", &history, None).await;
-    assert_eq!(serde_json::from_value::<ChatPage>(v).unwrap(), page);
-}
-
-#[tokio::test]
-async fn a_new_event_streams_as_an_item() {
-    let srv = start().await;
-    let (id, path) = supervisor(&srv, "watch the fleet").await;
-    append(&path, &[owner_line(PROMPT_POINTER, 0)]);
-    let mut sse = SseClient::connect(srv.addr, &chat_path(&id), &[]).await;
-    let page = page_of(&mut sse).await;
-    assert_eq!(page.items.len(), 1);
-
-    add_event(
-        &srv,
-        &id,
-        TaskEventKind::NeedsYou,
-        "needs you · approve",
-        30,
-    )
-    .await;
-    let items = items_soon(&mut sse).await;
-    assert_eq!(items.len(), 1, "{items:?}");
-    assert_eq!(items[0].seq, 1);
-    assert_eq!(items[0].at, T0 + 30);
-    assert_eq!(
-        items[0].body,
-        event_body(TaskEventKind::NeedsYou, "needs you · approve")
-    );
-
-    // Lines and events read together go in time order, and an event is never sent twice.
-    add_event(&srv, &id, TaskEventKind::PrOpened, "PR opened", 90).await;
-    append(&path, &[reply_line("on it", 60)]);
-    let mut fresh = Vec::new();
-    while fresh.len() < 2 {
-        fresh.extend(items_soon(&mut sse).await);
-    }
-    let bodies: Vec<&ChatBody> = fresh.iter().map(|i| &i.body).collect();
-    assert!(
-        bodies == [&ChatBody::Reply { text: "on it".into() }, &event_body(TaskEventKind::PrOpened, "PR opened")]
-            // The poke may land before the line is written: the event then comes first, on its own.
-            || bodies == [&event_body(TaskEventKind::PrOpened, "PR opened"), &ChatBody::Reply { text: "on it".into() }],
-        "{bodies:?}"
-    );
-    assert_eq!(fresh.iter().map(|i| i.seq).collect::<Vec<_>>(), [2, 3]);
-}
-
-#[tokio::test]
-async fn other_agents_never_get_event_items() {
-    let srv = start().await;
-    let a = spawn_ready(&srv.fx).await;
-    let s1 = own(&srv, &a.id).await;
-    session(&srv, &a.id, &s1, 10, &[owner_line("hello", 0)]).await;
-    add_event(
-        &srv,
-        &a.id,
-        TaskEventKind::ChecksPassed,
-        "checks passed",
-        50,
-    )
-    .await;
-    let mut sse = SseClient::connect(srv.addr, &chat_path(&a.id), &[]).await;
-    let page = page_of(&mut sse).await;
-    assert_eq!(page.items.len(), 1, "{:?}", page.items);
-    assert!(matches!(page.items[0].body, ChatBody::Prompt { .. }));
-    add_event(&srv, &a.id, TaskEventKind::PrMerged, "PR merged", 60).await;
-    append(&transcript(&srv, &s1), &[reply_line("hi", 70)]);
-    let items = items_soon(&mut sse).await;
-    assert!(
-        items
-            .iter()
-            .all(|i| !matches!(i.body, ChatBody::Event { .. })),
-        "{items:?}"
-    );
-}
-
 #[tokio::test]
 async fn two_conversations_keep_their_own_first_prompt() {
     let srv = start().await;
@@ -1221,7 +1102,7 @@ async fn two_conversations_keep_their_own_first_prompt() {
 }
 
 #[tokio::test]
-async fn a_stopped_supervisors_chat_stays_open_for_events_and_the_resume() {
+async fn a_stopped_supervisors_chat_stays_open_for_the_resume() {
     let srv = start().await;
     let (id, path) = supervisor(&srv, "watch the fleet").await;
     append(&path, &[owner_line(PROMPT_POINTER, 0)]);
@@ -1233,14 +1114,6 @@ async fn a_stopped_supervisors_chat_stays_open_for_events_and_the_resume() {
     let page = page_of(&mut sse).await;
     assert_eq!(page.items.len(), 1, "{:?}", page.items);
     assert!(matches!(page.items[0].body, ChatBody::Prompt { .. }));
-
-    // Stored while stopped: `items_of` fails on an `ended`.
-    add_event(&srv, &id, TaskEventKind::PrMerged, "PR merged", 30).await;
-    let items = items_soon(&mut sse).await;
-    assert_eq!(
-        items.iter().map(|i| &i.body).collect::<Vec<_>>(),
-        [&event_body(TaskEventKind::PrMerged, "PR merged")]
-    );
 
     Supervisor::new(srv.fx.svc.clone())
         .message(&id, "still there?")
@@ -1271,4 +1144,47 @@ async fn a_stopped_supervisors_chat_stays_open_for_events_and_the_resume() {
             .all(|i| !is_marker(i, MarkerKind::SessionEnded)),
         "{fresh:?}"
     );
+}
+
+fn event_rows(items: &[ChatItem]) -> Vec<&ChatItem> {
+    items
+        .iter()
+        .filter(|i| serde_json::to_value(&i.body).unwrap()["type"] == "event")
+        .collect()
+}
+
+#[tokio::test]
+async fn a_supervisor_chat_shows_no_task_events() {
+    let srv = start().await;
+    let (id, path) = supervisor(&srv, "what is going on?").await;
+    append(
+        &path,
+        &[owner_line(PROMPT_POINTER, 0), reply_line("all quiet", 100)],
+    );
+    add_event(&srv, &id, TaskEventKind::ChecksFailed, "checks failed", 50).await;
+    add_event(
+        &srv,
+        &id,
+        TaskEventKind::NeedsYou,
+        "needs you · approve",
+        60,
+    )
+    .await;
+
+    let mut sse = SseClient::connect(srv.addr, &chat_path(&id), &[]).await;
+    let page = page_of(&mut sse).await;
+    assert_eq!(page.items.len(), 2, "{:?}", page.items);
+    assert!(event_rows(&page.items).is_empty());
+
+    // History builds the same chat.
+    let history = format!("/api/agents/{}/chat/history", id.0);
+    let (_, v) = json_of(srv.addr, "GET", &history, None).await;
+    assert_eq!(serde_json::from_value::<ChatPage>(v).unwrap(), page);
+
+    // Nor does a later event stream into it.
+    add_event(&srv, &id, TaskEventKind::PrMerged, "PR merged", 200).await;
+    append(&path, &[reply_line("still quiet", 300)]);
+    let items = items_soon(&mut sse).await;
+    assert!(event_rows(&items).is_empty(), "{items:?}");
+    assert_eq!(items.len(), 1, "{items:?}");
 }
