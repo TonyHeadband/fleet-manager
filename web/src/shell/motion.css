@@ -238,6 +238,10 @@
   .pane-track[data-jump] {
     transition: none;
   }
+  /* A tab that widens the panel (Diff) or narrows it back moves once: the panel's edge, never the track as well. */
+  .detail[data-resize] .pane-track {
+    transition: none;
+  }
 }
 @keyframes fui-push {
   from {
