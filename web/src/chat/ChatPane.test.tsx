@@ -337,7 +337,8 @@ describe("ChatPane", () => {
       unmount();
       return out;
     };
-    expect(html(prompt("Resumed", "system"))).toBe('<p class="chat-line" data-from="system">Resumed</p>');
+    // A system prompt is a plain line, folded like any message (it wraps its fold box, which a short one never shows).
+    expect(html(prompt("Resumed", "system"))).toContain('<p class="chat-line" data-from="system">Resumed</p>');
     expect(html(marker("compacted"))).toBe('<p class="chat-line" data-marker="compacted">Context compacted</p>');
     const named = render(<Entry item={reply("Done.")} speaker={{ id: "x", name: "Fix login" }} />);
     expect(named.container.querySelector(".chat-reply .chat-speaker")).toHaveTextContent("Fix login");
@@ -413,12 +414,23 @@ describe("the Chat in the app", () => {
   it("a_long_failed_call_line_wraps_inside_the_chat", () => {
     const long = 'set title failed: this task already has a title: Definitions say "No active persona" instead of loading forever (#478)';
     start();
-    page([call("Bash", "set_title", "failed", long, `${"x".repeat(300)}\n${long}`), reply("y".repeat(300))]);
+    page([call("Bash", "set_title", "failed", long, `${"x".repeat(300)}\n${long}`), reply("y".repeat(300)), reply("| a | b |\n|---|---|\n| 1 | 2 |")]);
+    expect(document.querySelector(".markdown table")).toHaveTextContent("a b 1 2");
     const result = screen.getByText(long, { selector: ".chat-call-result" });
     expect(result).toBeInTheDocument();
     expect(document.querySelector(".chat-call-output")).toHaveTextContent("x".repeat(300));
     const css = readFileSync("src/chat/chat.css", "utf8");
     const rule = (sel: string) => css.match(new RegExp(`(?:^|\\n|\\})\\s*${sel.replace(/[.[\]="]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
+    // The target is never squeezed to nothing beside a long result: the row wraps, so the result takes its own line.
+    expect(rule(".chat-call")).toMatch(/flex-wrap: wrap/);
+    expect(rule(".chat-call-target")).toMatch(/flex: 1 1 auto/);
+    expect(rule(".chat-call-result")).toMatch(/max-width: 100%/);
+    // A table in a report scrolls inside its own box.
+    expect(rule(".markdown table")).toMatch(/display: block/);
+    expect(rule(".markdown table")).toMatch(/max-width: 100%/);
+    expect(rule(".markdown table")).toMatch(/overflow-x: auto/);
+    expect(rule(".markdown th, .markdown td")).toMatch(/border: 1px solid var\(--border\)/);
+    expect(rule(".markdown th, .markdown td")).toMatch(/padding: var\(--/);
     // The result shrinks and wraps (not flex: none), and every box in a call row can shrink below its content.
     expect(rule(".chat-call-result")).not.toMatch(/flex: none/);
     expect(rule(".chat-call-result")).toMatch(/min-width: 0/);
@@ -454,6 +466,48 @@ describe("long messages fold", () => {
     expect(screen.getByText("TALL report").closest("[data-folded]")).toBeNull();
     await userEvent.click(less);
     expect(screen.getByRole("button", { name: "Read more" })).toBeInTheDocument();
+  });
+
+  it("a_long_system_prompt_folds_too", async () => {
+    heights("TALL");
+    start();
+    page([prompt("TALL PROMPT.md", "system")]);
+    expect(screen.getByText("TALL PROMPT.md")).toHaveClass("chat-line");
+    expect(screen.getByText("TALL PROMPT.md").closest("[data-folded]")).toHaveAttribute("data-folded", "");
+    await userEvent.click(screen.getByRole("button", { name: "Read more" }));
+    expect(screen.getByText("TALL PROMPT.md").closest("[data-folded]")).toBeNull();
+  });
+
+  it("a_message_is_measured_again_when_the_panel_is_resized", async () => {
+    let height = 20;
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(() => height);
+    const observers: { cb: ResizeObserverCallback; el: Element }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private cb: ResizeObserverCallback) {}
+        observe(el: Element) {
+          observers.push({ cb: this.cb, el });
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    start();
+    page([reply("wraps when narrow")]);
+    expect(screen.queryByRole("button", { name: "Read more" })).toBeNull();
+    // The panel narrows: the text wraps onto more lines than fit.
+    height = 900;
+    const text = screen.getByText("wraps when narrow").closest(".chat-fold-text")!;
+    const o = observers.find((x) => x.el === text)!;
+    expect(o, "the fold text is observed").toBeTruthy();
+    act(() => o.cb([{ contentRect: { width: 200, height: 900 } } as ResizeObserverEntry], {} as ResizeObserver));
+    expect(await screen.findByRole("button", { name: "Read more" })).toBeInTheDocument();
+    // …and widens again: it fits, the button goes.
+    height = 20;
+    act(() => o.cb([{ contentRect: { width: 600, height: 20 } } as ResizeObserverEntry], {} as ResizeObserver));
+    expect(screen.queryByRole("button", { name: "Read more" })).toBeNull();
+    vi.unstubAllGlobals();
   });
 
   it("a_short_message_has_no_control", () => {
