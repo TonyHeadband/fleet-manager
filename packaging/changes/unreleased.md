@@ -11,5 +11,10 @@
 - **Follow-up steps update the open PR.** When an orchestrator calls `open_pr` again on a task whose pull request is already open, the PR's title and description are updated and the task keeps its link, instead of a "push failed" refusal.
 - **Resumes say why they stop.** When Fleet Manager restarts and an agent's Claude session left no transcript, the agent now stops with "could not resume: nothing to resume: the Claude session left no transcript" instead of exiting with no reason, and an agent whose resume exits at once keeps its last screen for you to read.
 - **Commits follow the repo's convention, and steps land without merge commits.** A PR style can set a `commits:` pattern for commit subjects; the `conventional` styles use the same form as their title. Specialists are told the pattern, and `open_pr` refuses a branch whose commit subjects miss it, naming each commit for the orchestrator to reword. An orchestrator now lands each finished step by fast-forward or cherry-pick, so its pull request no longer carries `Merge branch` commits.
+- **Answered asks drop the accent.** In a room chat, an ask turns to the normal text colour once it is answered; only open asks keep the accent.
+- **The agents' bars grow.** On the Supervisor page, the Agents by status bars grow from zero when they first show and move between values as they change, unless reduced motion or Settings → animations off says otherwise.
+- **Long chat messages fold.** A message past eight lines, such as an orchestrator's report, folds with **Read more**, and **Show less** folds it back, in every chat.
+- **Task notices go to the product room.** A task's needs-you, checks and pull request notices are posted in its product room instead of filling the supervisor conversation, which now keeps only what you and the supervisor say.
+- **Chats never scroll sideways.** Long tool errors, call output and code wrap or scroll inside their own box, and long unbroken words wrap.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.
