@@ -19,6 +19,10 @@ interface Props {
   title?: string;
   /** The rows are a single choice of actions (`menuitem`s), not toggles. */
   actions?: boolean;
+  /** Drawn before the label, such as the persona's avatar. */
+  lead?: ReactNode;
+  /** The label over the summary, on two lines, rather than beside it. */
+  stacked?: boolean;
   /** The menu's rows; `close` closes it, for a single-choice menu that closes on a pick. */
   children: (close: () => void) => ReactNode;
 }
@@ -27,7 +31,7 @@ interface Props {
  * Lite's filter combo: the label and summary on a button, and a menu under it that closes on a click outside or
  * Escape. A pick inside leaves it open unless the rows close it, so several repos are picked in one go.
  */
-export function FilterMenu({ label, summary, name, id, listbox, width, disabled, title, actions, children }: Props) {
+export function FilterMenu({ label, summary, name, id, listbox, width, disabled, title, actions, lead, stacked, children }: Props) {
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
   const [open, setOpen] = useState<{ top: number; left: number; width?: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -68,12 +72,21 @@ export function FilterMenu({ label, summary, name, id, listbox, width, disabled,
           setOpen((o) => (o ? null : { top: r.bottom, left: r.left, width: width === "fill" ? r.width : undefined }));
         }}
       >
-        {label && (
+        {lead}
+        {stacked ? (
+          <span className="filter-lines">
+            <span className="mono-label">{label}</span> <span className="filter-summary">{summary}</span>
+          </span>
+        ) : (
           <>
-            <span className="mono-label">{label}</span>{" "}
+            {label && (
+              <>
+                <span className="mono-label">{label}</span>{" "}
+              </>
+            )}
+            {summary}
           </>
         )}
-        {summary}
       </button>
       {open &&
         // On the window, not in place: a sliding pane's transform would become the fixed menu's frame and its overflow

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Persona } from "../api/generated/Persona";
 import type { Product } from "../api/generated/Product";
+import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { ChoiceMenu } from "../ui/ChoiceMenu";
 import type { Load } from "./choices";
@@ -57,7 +58,16 @@ export function Drawer({
       <div className="drawer-middle">
         <RadarMark className="watermark" spin turnMs={WATERMARK_TURN_MS} dotSize={WATERMARK_DOT_SIZE} />
         {ready.length > 0 && (
-          <Picker label="Persona" name="Active persona" items={ready} value={persona} placeholder="Pick a persona" onPick={onPersona} />
+          <Picker
+            label="Persona"
+            name="Active persona"
+            items={ready}
+            value={persona}
+            placeholder="Pick a persona"
+            onPick={onPersona}
+            lead={<Avatar title={ready.find((p) => p.id === persona)?.name} />}
+            stacked
+          />
         )}
         {listed.length > 0 && (
           <Picker label="Product" name="Active product" items={listed} value={product} placeholder="Pick a product" onPick={onProduct} />
@@ -110,6 +120,8 @@ function Picker(props: {
   value: string | null;
   placeholder: string;
   onPick: (id: string) => void;
+  lead?: ReactNode;
+  stacked?: boolean;
 }) {
   return (
     <div className="drawer-picker">

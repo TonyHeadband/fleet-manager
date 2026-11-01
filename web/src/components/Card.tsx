@@ -8,6 +8,7 @@ import type { Status } from "../api/generated/Status";
 import { card as cardSize, fleet as fleetSize } from "../generated/layout";
 import { Mark } from "../ui/icons";
 import { EdgeMotion } from "./EdgeMotion";
+import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
@@ -166,7 +167,7 @@ export function Card({ schema, agent, now, selected = false, tag, repos: showRep
     >
       <EdgeMotion agent={agent} tone={tone} />
       <div className="card-in">
-        <span className="avatar" title={tag} aria-hidden="true" />
+        <Avatar title={tag} />
         <div className="card-row" data-row="title">
           <span className="card-left">
             {lead && <Mark name="orchestrator" label="Orchestrator" />}

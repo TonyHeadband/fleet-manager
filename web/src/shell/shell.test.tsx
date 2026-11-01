@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -173,6 +174,19 @@ describe("Shell", () => {
     }
     // egui's New product is always there to press.
     expect(within(drawer).getByRole("button", { name: "New product" })).toBeEnabled();
+  });
+
+  it("the_persona_picker_shows_its_avatar_beside_two_lines", async () => {
+    start();
+    const picker = await screen.findByRole("button", { name: "Active persona" });
+    // The persona's portrait slot, then its label over its name.
+    expect(picker.querySelector(".avatar")).not.toBeNull();
+    const lines = picker.querySelector(".filter-lines")!;
+    expect([...lines.children].map((c) => c.textContent)).toEqual(["Persona", "me"]);
+    // The product picker stays one line.
+    expect(screen.getByRole("button", { name: "Active product" }).querySelector(".filter-lines")).toBeNull();
+    const css = readFileSync("src/shell/shell.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.drawer-picker \.avatar \{[^}]*height: var\(--drawer-avatar-h\);/);
   });
 
   it("the_first_ready_persona_becomes_the_active_one", async () => {

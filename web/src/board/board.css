@@ -57,8 +57,7 @@
 .card-in > .card-row:is([data-row="state"], [data-row="tally"]) { grid-column: 1 / -1; }
 /* The web's badge is a pixel taller than Lite's row: its frame shows whole, its text still clipped by .card-left. */
 .card-row[data-row="state"] { overflow: visible; }
-/* Empty until the avatar generator fills it: a sunken 1px frame. */
-.avatar { grid-column: 1; grid-row: 1 / span 2; align-self: start; width: var(--avatar-w); height: var(--avatar-h); border: 1px solid var(--border); background: var(--sunken); }
+.card-in > .avatar { grid-column: 1; grid-row: 1 / span 2; align-self: start; width: var(--avatar-w); height: var(--avatar-h); }
 .card[data-tone="active"], .fleet-row[data-tone="active"] { --card-tone: var(--tone-active); }
 .card[data-tone="attention"], .fleet-row[data-tone="attention"] { --card-tone: var(--tone-attention); }
 .card[data-tone="done"], .fleet-row[data-tone="done"] { --card-tone: var(--tone-done); }
