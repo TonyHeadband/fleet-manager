@@ -1,5 +1,7 @@
 export type Format = (n: number) => string;
 
+export const finite = (n: number) => (Number.isFinite(n) ? n : 0);
+
 export function plainFormat(n: number): string {
   if (!Number.isFinite(n)) return "0";
   return n.toLocaleString(undefined, { maximumFractionDigits: Number.isInteger(n) ? 0 : 1 });

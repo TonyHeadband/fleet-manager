@@ -4,15 +4,13 @@ import { ChartTooltip } from "./ChartTooltip";
 import { HiddenTable } from "./HiddenTable";
 import { NoData } from "./NoData";
 import { paintVar, type Paint } from "./paint";
-import { linear, plainFormat, type Format } from "./scale";
+import { finite, linear, plainFormat, type Format } from "./scale";
 import { useChartEntry } from "./useChartEntry";
 import { useSize } from "./useSize";
 import "./charts.css";
 
 /** The 1px line a zero (or negative) bar leaves on the baseline: half the data line's width. */
 const SLIVER = layout.chartLine / 2;
-
-const finite = (n: number) => (Number.isFinite(n) ? n : 0);
 
 export function ColumnBars({ label, bars, format = plainFormat }: {
   label: string;
@@ -39,7 +37,8 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
         <>
           <svg width={width} height={plot + column.tickLen} aria-hidden="true">
             {bars.map((b, i) => {
-              const h = max > 0 && b.value > 0 ? height(b.value) : SLIVER;
+              const v = finite(b.value);
+              const h = max > 0 && v > 0 ? height(v) : SLIVER;
               const x = i * band + (band - barW) / 2;
               const cx = i * band + band / 2;
               return (
@@ -56,7 +55,7 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
                   />
                   {showValues && (
                     <text className="chart-col-value" x={cx} y={plot - h - layout.captionGap} textAnchor="middle">
-                      {format(finite(b.value))}
+                      {format(v)}
                     </text>
                   )}
                   <line className="chart-tick" x1={cx} x2={cx} y1={plot} y2={plot + column.tickLen} />

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { layout, motion } from "../generated/layout";
+import { layout, motion, space } from "../generated/layout";
 import { ColumnBars } from "./ColumnBars";
 import { RankedBars } from "./RankedBars";
 
@@ -259,11 +259,12 @@ describe("RankedBars", () => {
   it("value_labels_go_when_tiny_in_ranked_bars", () => {
     motionOff();
     const { container } = render(<RankedBars label="A" rows={rows} />);
-    size(layout.chartTiny - 1);
+    const chrome = layout.chartLabelW + layout.chartValueW + 2 * space.buttonGap;
+    size(chrome + layout.chartTiny - 1);
     expect(container.querySelectorAll(".chart-rank-bar")).toHaveLength(3);
     expect(container.querySelector(".chart-baseline")).toBeTruthy();
     expect(container.querySelectorAll(".chart-tick-label")).toHaveLength(0);
-    size(layout.chartTiny);
+    size(chrome + layout.chartTiny);
     expect(container.querySelectorAll(".chart-tick-label").length).toBeGreaterThan(0);
   });
 
@@ -294,5 +295,37 @@ describe("RankedBars", () => {
     expect(entering()).toEqual([null, null, null]);
     rerender(<RankedBars label="A" rows={rows.map((r) => ({ ...r, value: r.value + 1 }))} />);
     expect(entering()).toEqual([null, null, null]);
+  });
+});
+
+describe("late data and non-finite values", () => {
+  it("column_bars_draw_when_data_arrives_after_mount", () => {
+    motionOff();
+    const { container, rerender } = render(<ColumnBars label="A" bars={[]} />);
+    rerender(<ColumnBars label="A" bars={bars} />);
+    size(300);
+    expect(container.querySelectorAll(".chart-col-bar")).toHaveLength(3);
+  });
+
+  it("ranked_bars_draw_when_data_arrives_after_mount", () => {
+    motionOff();
+    const { container, rerender } = render(<RankedBars label="A" rows={[]} />);
+    rerender(<RankedBars label="A" rows={rows} />);
+    size(300);
+    expect(container.querySelectorAll(".chart-rank-bar")).toHaveLength(3);
+    expect(container.querySelector(".chart-scale")).toBeTruthy();
+  });
+
+  it("infinite_values_never_reach_an_attribute_or_style", () => {
+    motionOff();
+    const c = render(
+      <ColumnBars label="A" bars={[{ label: "x", value: Infinity, paint: { series: 0 } }, { label: "y", value: 3, paint: { series: 1 } }]} />,
+    );
+    size(300);
+    noNaN(c.container);
+    c.unmount();
+    const r = render(<RankedBars label="A" rows={[{ label: "x", value: Infinity }, { label: "y", value: 3 }]} />);
+    size(300);
+    noNaN(r.container);
   });
 });
