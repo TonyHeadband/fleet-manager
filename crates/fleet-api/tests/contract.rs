@@ -847,6 +847,9 @@ fn ts_bindings_export() {
     ToolList::export_all(&cfg).unwrap();
     fleet_api::VersionInfo::export_all(&cfg).unwrap();
     PrRules::export_all(&cfg).unwrap();
+    fleet_api::Conversation::export_all(&cfg).unwrap();
+    fleet_api::NewConversation::export_all(&cfg).unwrap();
+    fleet_api::ConversationMessage::export_all(&cfg).unwrap();
     Versioning::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
@@ -866,6 +869,10 @@ fn ts_bindings_export() {
         "ArchiveRequest.ts",
         "ArchiveOrphanRequest.ts",
         "default-ui-schema.json",
+        "Conversation.ts",
+        "TaskMark.ts",
+        "NewConversation.ts",
+        "ConversationMessage.ts",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }
@@ -1068,6 +1075,14 @@ fn fleet_wire_names() {
     assert_eq!(
         serde_json::to_value(AgentKind::Orchestrator).unwrap(),
         json!("orchestrator")
+    );
+    assert_eq!(
+        serde_json::to_value(AgentKind::Supervisor).unwrap(),
+        json!("supervisor")
+    );
+    assert_eq!(
+        serde_json::from_value::<AgentKind>(json!("supervisor")).unwrap(),
+        AgentKind::Supervisor
     );
     assert_eq!(
         serde_json::to_value(BlockedReason::Breakdown).unwrap(),

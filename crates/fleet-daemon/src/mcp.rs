@@ -159,6 +159,8 @@ pub fn tools(kind: AgentKind) -> Value {
                 &["title", "body"],
             ),
         ]),
+        // Its tools arrive with the supervisor's launch path.
+        AgentKind::Supervisor => list.clear(),
         AgentKind::Specialist => list.push(tool(
             "finish_step",
             "Report your step as done once everything is committed. Your session ends right after.",

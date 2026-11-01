@@ -195,6 +195,7 @@ mod tests {
             created_at: None,
             stopped_at: None,
             archived_at: None,
+            origin: None,
             agents_used: 1,
             times: StatusTimes::default(),
             log: vec![],

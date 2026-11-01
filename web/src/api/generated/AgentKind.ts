@@ -3,4 +3,4 @@
 /**
  * What an agent is in a fleet; `Solo` is every agent that predates fleets.
  */
-export type AgentKind = "solo" | "orchestrator" | "specialist";
+export type AgentKind = "solo" | "orchestrator" | "specialist" | "supervisor";

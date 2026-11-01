@@ -478,6 +478,7 @@ impl From<SpawnError> for ApiError {
             SpawnError::OneRepo
             | SpawnError::Workflow { .. }
             | SpawnError::SpecialistSpawn
+            | SpawnError::SupervisorSpawn
             | SpawnError::NoSpecialists
             | SpawnError::PrStyle { .. }
             | SpawnError::ReleaseNotInProduct { .. } => StatusCode::BAD_REQUEST,

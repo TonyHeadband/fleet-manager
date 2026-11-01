@@ -69,6 +69,15 @@ pub struct ForgeCallRow {
     pub ms: i64,
 }
 
+/// A supervisor conversation's own record; its title, process and tasks come from the agent and task records.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConversationRow {
+    pub id: AgentId,
+    pub persona: String,
+    pub created_at: i64,
+    pub last_used_at: i64,
+}
+
 /// A version of a product. Dates are `YYYY-MM-DD`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseRow {
@@ -255,7 +264,7 @@ impl Store {
         }
         // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 11] = [
+        let steps: [(i64, &'static str, &'static str); 12] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -310,6 +319,11 @@ impl Store {
                 14,
                 include_str!("../migrations/014_forge_calls.sql"),
                 "PRAGMA user_version = 14",
+            ),
+            (
+                15,
+                include_str!("../migrations/015_supervisor.sql"),
+                "PRAGMA user_version = 15",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -1449,6 +1463,59 @@ impl Store {
             .collect())
     }
 
+    pub async fn insert_conversation(&self, id: &AgentId, persona: &str, at: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "INSERT INTO supervisor_conversations (id, persona, created_at, last_used_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind(&id.0)
+        .bind(persona)
+        .bind(at)
+        .bind(at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn touch_conversation(&self, id: &AgentId, at: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("UPDATE supervisor_conversations SET last_used_at = ? WHERE id = ?")
+            .bind(at)
+            .bind(&id.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The persona's conversations, most recently used first.
+    pub async fn conversations(&self, persona: &str) -> Result<Vec<ConversationRow>> {
+        let rows = sqlx::query(
+            "SELECT id, persona, created_at, last_used_at FROM supervisor_conversations WHERE persona = ? \
+             ORDER BY last_used_at DESC, rowid DESC",
+        )
+        .bind(persona)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| ConversationRow {
+                id: AgentId(r.get("id")),
+                persona: r.get("persona"),
+                created_at: r.get("created_at"),
+                last_used_at: r.get("last_used_at"),
+            })
+            .collect())
+    }
+
+    pub async fn latest_conversation(&self, persona: &str) -> Result<Option<AgentId>> {
+        Ok(self
+            .conversations(persona)
+            .await?
+            .into_iter()
+            .next()
+            .map(|c| c.id))
+    }
+
     /// Makes the next `n` snapshots fail as a busy database would.
     #[doc(hidden)]
     pub fn fail_snapshots_for_test(&self, n: u32) {
@@ -1591,6 +1658,7 @@ fn task_of(a: &Agent, state: TaskState, created_at: Option<i64>) -> Task {
         created_at,
         stopped_at: None,
         archived_at: None,
+        origin: None,
         agents_used: 1,
         times: StatusTimes::default(),
         log: vec![],

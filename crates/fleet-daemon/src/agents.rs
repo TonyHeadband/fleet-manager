@@ -267,6 +267,8 @@ pub enum SpawnError {
     Fleet(#[from] FleetError),
     #[error("a specialist is started by its orchestrator, not on its own")]
     SpecialistSpawn,
+    #[error("a supervisor conversation is started from the Supervisor page, not as a task")]
+    SupervisorSpawn,
     #[error("every specialist is hidden or does not load: unhide one in Management → Products")]
     NoSpecialists,
     #[error("release {release} is not a release of {product}")]

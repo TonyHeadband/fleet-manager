@@ -14,6 +14,8 @@ pub enum AgentKind {
     Solo,
     Orchestrator,
     Specialist,
+    /// A persona's supervisor conversation: no task, no product.
+    Supervisor,
 }
 
 /// The id of the task record this agent belongs to: its own id unless a fleet owns it.

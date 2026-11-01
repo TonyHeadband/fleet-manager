@@ -1990,6 +1990,7 @@ fn task(
         created_at: Some(NOW - 600),
         stopped_at: None,
         archived_at: None,
+        origin: None,
         agents_used: 1,
         times: fleet_api::StatusTimes::default(),
         log: vec![],

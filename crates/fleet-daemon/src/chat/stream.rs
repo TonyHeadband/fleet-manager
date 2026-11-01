@@ -87,7 +87,7 @@ impl Chat {
             .ok();
         let from = match agent.kind {
             AgentKind::Specialist => PromptFrom::System,
-            AgentKind::Solo | AgentKind::Orchestrator => PromptFrom::Owner,
+            AgentKind::Solo | AgentKind::Orchestrator | AgentKind::Supervisor => PromptFrom::Owner,
         };
         Chat::new(env, prompt, from)
     }

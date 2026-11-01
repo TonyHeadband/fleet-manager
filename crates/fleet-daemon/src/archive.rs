@@ -661,6 +661,7 @@ impl AgentService {
             created_at: None,
             stopped_at: None,
             archived_at: Some(now),
+            origin: None,
             agents_used: 0,
             times: StatusTimes::default(),
             log: vec![

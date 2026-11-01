@@ -13,6 +13,7 @@ mod progress;
 mod requests;
 pub mod routes;
 mod status;
+mod supervisor;
 mod task;
 mod tool;
 mod ui;
@@ -57,6 +58,7 @@ pub use requests::{
     WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
+pub use supervisor::{Conversation, ConversationMessage, NewConversation, TaskMark};
 pub use task::{
     format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
     OrphanKind, PlanItem, PrState, StatusTimes, Task, TaskList, TaskOutcome, TaskPr, TaskState,

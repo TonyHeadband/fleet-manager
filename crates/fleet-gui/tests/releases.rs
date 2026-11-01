@@ -35,6 +35,7 @@ fn task(id: &str, state: TaskState, release: Option<i64>) -> Task {
         created_at: Some(1),
         stopped_at: None,
         archived_at: (state == TaskState::Archived).then_some(2),
+        origin: None,
         agents_used: 1,
         times: StatusTimes::default(),
         log: vec![LogEntry {

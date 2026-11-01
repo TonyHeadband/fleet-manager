@@ -44,7 +44,7 @@ pub(super) fn panel<'a>(
 ) -> Option<FleetPanel<'a>> {
     let task = &task_id(a).0;
     match a.kind {
-        AgentKind::Solo => None,
+        AgentKind::Solo | AgentKind::Supervisor => None,
         AgentKind::Orchestrator => Some(FleetPanel::Task(TaskPanel {
             view: views.get(task),
             agents: agents.iter().filter(|m| task_id(m).0 == *task).collect(),

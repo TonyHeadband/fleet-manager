@@ -616,6 +616,7 @@ impl AgentService {
         match req.kind {
             AgentKind::Solo => return Ok(None),
             AgentKind::Specialist => return Err(SpawnError::SpecialistSpawn),
+            AgentKind::Supervisor => return Err(SpawnError::SupervisorSpawn),
             AgentKind::Orchestrator => {}
         }
         let role = req.role.as_deref().unwrap_or_default();

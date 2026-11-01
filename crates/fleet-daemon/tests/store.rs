@@ -981,7 +981,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 14);
+        assert_eq!(user_version(&path).await, 15);
     }
 }
 
@@ -996,7 +996,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 14);
+    assert_eq!(user_version(&fresh).await, 15);
 }
 
 #[tokio::test]
@@ -1177,6 +1177,8 @@ async fn a_repo_roster_is_dropped_and_nothing_is_hidden_after_the_upgrade() {
     for sql in [
         "DROP TABLE claude_sessions",
         "DROP TABLE forge_calls",
+        "DROP TABLE supervisor_conversations",
+        "DROP TABLE supervisor_events",
         "ALTER TABLE products DROP COLUMN internal_url",
         "ALTER TABLE products DROP COLUMN hidden_specialists",
         "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
@@ -1223,6 +1225,8 @@ async fn stored_agents_from_before_the_rename_still_load() {
         "ALTER TABLE products DROP COLUMN internal_url",
         "DROP TABLE claude_sessions",
         "DROP TABLE forge_calls",
+        "DROP TABLE supervisor_conversations",
+        "DROP TABLE supervisor_events",
     ] {
         sqlx::query(old).execute(&pool).await.unwrap();
     }
@@ -1262,6 +1266,8 @@ async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() 
         "ALTER TABLE products DROP COLUMN internal_url",
         "DROP TABLE claude_sessions",
         "DROP TABLE forge_calls",
+        "DROP TABLE supervisor_conversations",
+        "DROP TABLE supervisor_events",
         "PRAGMA user_version = 9",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
@@ -1318,6 +1324,8 @@ async fn the_migration_keeps_existing_sessions() {
     for sql in [
         "DROP TABLE claude_sessions",
         "DROP TABLE forge_calls",
+        "DROP TABLE supervisor_conversations",
+        "DROP TABLE supervisor_events",
         "PRAGMA user_version = 12",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
@@ -1343,4 +1351,85 @@ async fn an_agents_sessions_go_with_it() {
     s.add_claude_session(&id2, "u-2", 1).await.unwrap();
     s.archive_task(&id2, |_| {}).await.unwrap();
     assert!(s.claude_sessions(&id2).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn conversations_list_newest_used_first() {
+    let s = mem().await;
+    for (id, at) in [("c1", 10), ("c2", 30), ("c3", 20)] {
+        s.insert_conversation(&AgentId(id.into()), "p", at)
+            .await
+            .unwrap();
+    }
+    let ids: Vec<_> = s
+        .conversations("p")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id.0)
+        .collect();
+    assert_eq!(ids, ["c2", "c3", "c1"]);
+}
+
+#[tokio::test]
+async fn touch_moves_a_conversation_to_the_top() {
+    let s = mem().await;
+    s.insert_conversation(&AgentId("c1".into()), "p", 10)
+        .await
+        .unwrap();
+    s.insert_conversation(&AgentId("c2".into()), "p", 20)
+        .await
+        .unwrap();
+    s.touch_conversation(&AgentId("c1".into()), 30)
+        .await
+        .unwrap();
+    let rows = s.conversations("p").await.unwrap();
+    assert_eq!(rows[0].id.0, "c1");
+    assert_eq!((rows[0].created_at, rows[0].last_used_at), (10, 30));
+}
+
+#[tokio::test]
+async fn latest_conversation_is_per_persona() {
+    let s = mem().await;
+    s.insert_conversation(&AgentId("a".into()), "p", 10)
+        .await
+        .unwrap();
+    s.insert_conversation(&AgentId("b".into()), "q", 20)
+        .await
+        .unwrap();
+    assert_eq!(
+        s.latest_conversation("p").await.unwrap(),
+        Some(AgentId("a".into()))
+    );
+    assert_eq!(
+        s.latest_conversation("q").await.unwrap(),
+        Some(AgentId("b".into()))
+    );
+    assert_eq!(s.latest_conversation("none").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_task_without_origin_still_loads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("fleet.db");
+    let s = Store::open(&db).await.unwrap();
+    s.insert_agent(&agent_at("a1", Status::Queued, 100), "t")
+        .await
+        .unwrap();
+    let mut json =
+        serde_json::to_value(s.task(&AgentId("a1".into())).await.unwrap().unwrap()).unwrap();
+    json.as_object_mut().unwrap().remove("origin");
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tasks SET data = ? WHERE id = 'a1'")
+        .bind(json.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    assert_eq!(
+        s.task(&AgentId("a1".into())).await.unwrap().unwrap().origin,
+        None
+    );
 }

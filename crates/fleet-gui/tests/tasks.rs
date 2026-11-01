@@ -42,6 +42,7 @@ fn task(id: &str, name: &str, state: TaskState, cause: Option<StopCause>) -> Tas
         created_at: Some(NOW - 7200),
         stopped_at: (state != TaskState::Running).then_some(NOW - 600),
         archived_at: (state == TaskState::Archived).then_some(NOW - 60),
+        origin: None,
         agents_used: 1,
         times: StatusTimes {
             queued: 5,

@@ -183,6 +183,10 @@ pub struct Task {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub archived_at: Option<i64>,
+    /// The supervisor conversation that started the task, if one did.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub origin: Option<AgentId>,
     pub agents_used: u32,
     pub times: StatusTimes,
     pub log: Vec<LogEntry>,
