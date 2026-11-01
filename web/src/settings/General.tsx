@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Native, ShortcutsReply, UpdateCheck } from "../native/native";
 import type { Notice } from "../shell/messages";
-import { MONO_FONTS, UI_FONTS, choosePreference, type CloseChoice, type Preferences, type Theme } from "../shell/preferences";
+import { MONO_FONTS, MONO_WEIGHTS, UI_FONTS, choosePreference, type CloseChoice, type Preferences, type Theme } from "../shell/preferences";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Check } from "../ui/Check";
@@ -82,6 +82,12 @@ export function General({ native, preferences, onPreferences, update, version, s
         {chips(
           "monoFont",
           MONO_FONTS.map((f) => [f.id, <span style={{ fontFamily: `"${f.family}"` }}>{f.label}</span>]),
+        )}
+      </Section>
+      <Section title="Mono weight">
+        {chips(
+          "monoWeight",
+          MONO_WEIGHTS.map((w) => [w.id, w.label]),
         )}
       </Section>
       <Section title="Closing the window">{chips("closeChoice", CLOSE, !native)}</Section>

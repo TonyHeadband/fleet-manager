@@ -108,6 +108,7 @@ export interface SavedChoices {
   theme: string;
   uiFont: string;
   monoFont: string;
+  monoWeight: string;
   animations: boolean;
   stickyAlerts: boolean;
   closeChoice: string | null;
@@ -167,6 +168,7 @@ export const DEFAULT_CHOICES: SavedChoices = {
   theme: "system",
   uiFont: "plex",
   monoFont: "plex",
+  monoWeight: "medium",
   animations: true,
   stickyAlerts: true,
   closeChoice: null,

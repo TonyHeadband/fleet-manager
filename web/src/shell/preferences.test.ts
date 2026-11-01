@@ -28,6 +28,17 @@ describe("preferences", () => {
     expect(root.style.getPropertyValue("--font-mono")).toContain('"Atkinson Hyperlegible Mono"');
   });
 
+  it("the_mono_weight_sets_both_weights_one_step_apart", () => {
+    const weights = () => [root.style.getPropertyValue("--weight-mono"), root.style.getPropertyValue("--weight-mono-strong")];
+    applyPreferences(DEFAULT_PREFERENCES);
+    expect(DEFAULT_PREFERENCES.monoWeight).toBe("medium");
+    expect(weights()).toEqual(["500", "600"]);
+    applyPreferences({ ...DEFAULT_PREFERENCES, monoWeight: "regular" });
+    expect(weights()).toEqual(["400", "500"]);
+    applyPreferences({ ...DEFAULT_PREFERENCES, monoWeight: "semibold" });
+    expect(weights()).toEqual(["600", "700"]);
+  });
+
   it("system_theme_sets_no_data_theme", () => {
     applyPreferences({ ...DEFAULT_PREFERENCES, theme: "dark" });
     expect(root.dataset.theme).toBe("dark");
@@ -45,7 +56,7 @@ describe("preferences", () => {
   it("unknown_saved_values_read_as_the_defaults", () => {
     setChoiceStore({
       native: fakeNative(),
-      saved: { ...DEFAULT_CHOICES, theme: "sepia", uiFont: "comic", monoFont: "courier", closeChoice: "explode" },
+      saved: { ...DEFAULT_CHOICES, theme: "sepia", uiFont: "comic", monoFont: "courier", monoWeight: "heavy", closeChoice: "explode" },
     });
     expect(readPreferences()).toEqual(DEFAULT_PREFERENCES);
     setChoiceStore(null);

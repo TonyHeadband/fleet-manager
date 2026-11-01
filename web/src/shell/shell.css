@@ -9,7 +9,7 @@
 .theme-switch { flex: none; display: flex; gap: var(--space-chip-gap); margin-left: auto; }
 .theme-switch .icon-button[aria-pressed="true"] { background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent); color: var(--accent-text); }
 /* One row: the header is a fixed height, so a long filter scrolls in place rather than wrapping out of sight. */
-.view-title { font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); margin: 0; white-space: nowrap; }
+.view-title { font-family: var(--font-mono); font-size: var(--size-small); font-weight: var(--weight-mono-strong); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); margin: 0; white-space: nowrap; }
 .low { color: var(--text-low); }
 .body { --side-width: var(--layout-panel); grid-area: body; position: relative; display: flex; gap: var(--layout-canvas-gap); min-width: 0; min-height: 0; }
 .view-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
@@ -21,7 +21,7 @@
 .body:has(> .detail[data-layout="full"]) > .view-body { flex: none; width: calc(100% - var(--side-width) - var(--layout-canvas-gap)); }
 .detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin); border-bottom: 1px solid var(--border); min-width: 0; }
 /* Lite's preview header: the path, then its icon buttons; the title block under it. */
-.detail-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: var(--weight-mono); }
 .detail-title { flex: none; position: relative; display: flex; align-items: center; gap: var(--space-button-gap); padding: var(--panel-title-top) var(--panel-margin) var(--panel-title-bottom); }
 .detail-title .avatar { width: calc(var(--drawer-avatar-h) * 3 / 4); height: var(--drawer-avatar-h); --drawer-avatar-h: calc(2 * var(--size-meta) * 1.5); }
 .detail-title h2 { margin: 0; font-size: var(--size-body); font-weight: 500; color: var(--text-high); overflow-wrap: anywhere; }
@@ -42,9 +42,9 @@
    content's. */
 .drawer { display: grid; grid-template-rows: var(--layout-header) minmax(0, 1fr) var(--layout-footer); background: var(--sunken); border-right: 1px solid var(--border); min-height: 0; }
 .drawer-header, .drawer-footer { display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--space-row-x); min-width: 0; }
-.drawer-footer { gap: var(--space-item); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); text-transform: uppercase; color: var(--text); white-space: nowrap; }
+.drawer-footer { gap: var(--space-item); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); text-transform: uppercase; color: var(--text); white-space: nowrap; font-weight: var(--weight-mono); }
 /* At the meta size, a step under the view title, so the theme switch fits beside it in the drawer. */
-.app-name { font-family: var(--font-mono); font-size: var(--size-meta); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); white-space: nowrap; }
+.app-name { font-family: var(--font-mono); font-size: var(--size-meta); font-weight: var(--weight-mono-strong); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); white-space: nowrap; }
 .drawer-middle { position: relative; overflow: hidden; padding: var(--space-panel-margin); display: flex; flex-direction: column; min-height: 0; }
 .drawer-middle > :not(.watermark) { position: relative; }
 .drawer-picker { margin-bottom: var(--space-picker-gap); }
@@ -56,7 +56,7 @@
 .drawer-buttons { display: grid; gap: var(--space-button-gap); margin-bottom: var(--space-nav-gap); }
 .drawer-nav { list-style: none; margin: 0; padding: 0; display: grid; }
 /* A marker rail: each view a mono-caps label with a dash at its left; the current view's dash is the accent bar. */
-.drawer-nav a { position: relative; display: flex; align-items: center; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; padding-left: var(--layout-nav-pad); padding-block: var(--layout-control-y); text-decoration: none; color: var(--text); cursor: pointer; }
+.drawer-nav a { position: relative; display: flex; align-items: center; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; padding-left: var(--layout-nav-pad); padding-block: var(--layout-control-y); text-decoration: none; color: var(--text); cursor: pointer; font-weight: var(--weight-mono); }
 .drawer-nav a[aria-current="page"] { color: var(--accent-text); }
 .drawer-nav a[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .marker { position: absolute; left: 0; top: 50%; translate: 0 -50%; width: var(--layout-dash); height: 1px; background: var(--dashed); }
@@ -101,7 +101,7 @@ button.ghost, a.button.ghost { border-color: transparent; background: none; }
 .dialog { width: min(var(--layout-dialog), 100% - 2 * var(--space-row-x)); background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius-dialog); padding: var(--space-row-x); display: grid; gap: var(--space-picker-gap); }
 /* A dialog's title in the view title's voice, behind the drawer's accent marker; hairlines part the title and the
    actions from what is between. */
-.dialog h2 { display: flex; align-items: center; gap: var(--space-item); margin: 0; padding-bottom: var(--space-item); font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); border-bottom: 1px solid var(--border); }
+.dialog h2 { display: flex; align-items: center; gap: var(--space-item); margin: 0; padding-bottom: var(--space-item); font-family: var(--font-mono); font-size: var(--size-small); font-weight: var(--weight-mono-strong); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); border-bottom: 1px solid var(--border); }
 .dialog h2::before { content: ""; flex: none; width: var(--layout-marker-w); height: var(--layout-marker-h); background: var(--fill); }
 .dialog > .form-actions { padding-top: var(--space-item); border-top: 1px solid var(--border); }
 .dialog-body { margin: 0; color: var(--text); }

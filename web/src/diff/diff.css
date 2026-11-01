@@ -1,7 +1,7 @@
 /* The Diff pane: the changed files' tree beside the picked file's hunks (DiffView.tsx). */
 .diff-view { flex: 1; display: flex; gap: var(--layout-canvas-gap); min-height: 0; min-width: 0; }
 .diff-failed { color: var(--danger); }
-.diff-tree { flex: none; width: var(--layout-diff-tree); overflow: auto; border: 1px solid var(--border); padding: var(--panel-gap-s) 0; font-family: var(--font-mono); font-size: var(--size-code); }
+.diff-tree { flex: none; width: var(--layout-diff-tree); overflow: auto; border: 1px solid var(--border); padding: var(--panel-gap-s) 0; font-family: var(--font-mono); font-size: var(--size-code); font-weight: var(--weight-mono); }
 .diff-repo-group + .diff-repo-group { margin-top: var(--panel-band-gap); }
 .diff-repo { display: flex; align-items: center; gap: var(--space-button-gap); padding: var(--layout-list-row-y) var(--layout-list-row-x); color: var(--text-high); }
 .diff-repo .diff-counts { margin-left: auto; }
@@ -22,11 +22,11 @@
 .diff-counts [data-kind="del"] { color: var(--danger); }
 
 .diff-file { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); }
-.diff-file-head { flex: none; display: flex; align-items: center; gap: var(--space-item); padding: var(--layout-list-row-y) var(--layout-list-row-x); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-high); min-width: 0; }
+.diff-file-head { flex: none; display: flex; align-items: center; gap: var(--space-item); padding: var(--layout-list-row-y) var(--layout-list-row-x); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-high); min-width: 0; font-weight: var(--weight-mono); }
 .diff-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .diff-from { color: var(--text-low); white-space: nowrap; }
 .diff-modes { margin-left: auto; display: flex; gap: var(--space-chip-gap); }
-.diff-body { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--size-code); }
+.diff-body { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--size-code); font-weight: var(--weight-mono); }
 .diff-body > .note { padding: var(--layout-list-row-y) var(--layout-list-row-x); margin: 0; }
 .diff-hunk-head { padding: var(--panel-gap-xs) var(--layout-list-row-x); background: var(--raised); color: var(--text-low); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 /* Long lines wrap inside their column, so the two sides stay aligned row by row. */

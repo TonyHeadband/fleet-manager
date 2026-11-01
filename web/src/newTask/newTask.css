@@ -2,7 +2,7 @@
 .dialog.new-task { width: min(var(--new-task-width), 100% - 2 * var(--space-row-x)); padding: var(--new-task-margin); gap: 0; max-height: calc(100% - 2 * var(--space-row-x)); overflow-y: auto; }
 .new-task-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--new-task-head-gap); padding-bottom: var(--space-item); border-bottom: 1px solid var(--border); }
 .new-task-head h2 { padding-bottom: 0; border-bottom: none; }
-.new-task .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); }
+.new-task .caption { display: block; margin-bottom: var(--new-task-caption-gap); font-family: var(--font-mono); font-size: var(--size-meta); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-low); font-weight: var(--weight-mono); }
 .new-task textarea, .new-task input[type="text"] { width: 100%; margin-bottom: var(--new-task-field-gap); }
 .new-task textarea { resize: vertical; }
 .new-task .select { width: calc(100% - var(--new-task-control-inset)); margin-bottom: var(--new-task-field-gap); }
@@ -13,11 +13,11 @@
 .new-task-repos { margin-bottom: var(--new-task-head-gap); }
 .new-task-start { display: grid; gap: var(--new-task-caption-gap); margin-bottom: var(--new-task-start-gap); }
 .new-task-fleet { display: grid; justify-items: start; gap: var(--new-task-caption-gap); margin-bottom: var(--new-task-head-gap); }
-.new-task-checks { margin: 0 0 var(--new-task-head-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.new-task-checks { margin: 0 0 var(--new-task-head-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); font-weight: var(--weight-mono); }
 .new-task-refusal { display: grid; justify-items: start; gap: var(--new-task-caption-gap); margin-bottom: var(--new-task-note-gap); }
 .new-task-refusal p { margin: 0; color: var(--text); }
 .new-task-command { display: flex; align-items: center; gap: var(--space-button-gap); width: 100%; }
-.new-task-command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); }
+.new-task-command code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--size-code); font-weight: var(--weight-mono); }
 .new-task-actions { display: flex; align-items: center; gap: var(--space-button-gap); padding-top: var(--space-item); border-top: 1px solid var(--border); }
 .new-task-actions .reply-hint { margin-right: auto; }
 .new-task .link { padding: 0; border: none; background: none; color: var(--accent-text); text-decoration: underline; cursor: pointer; font: inherit; }

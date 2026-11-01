@@ -1064,3 +1064,35 @@ fn a_fixed_port_ignores_the_addr_file() {
     std::fs::write(e.home.join("state/daemon.addr"), "127.0.0.1:43123\n").unwrap();
     assert_eq!(cfg.base_url(), "http://127.0.0.1:9000");
 }
+
+#[test]
+fn mono_weight_defaults_to_medium_and_reads_leniently() {
+    use fleet_client::config::MonoWeight;
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, "theme = \"dark\"\n").unwrap();
+    assert_eq!(GuiSettings::load(&p).mono_weight, MonoWeight::Medium);
+    for bad in ["\"heavy\"", "3"] {
+        std::fs::write(&p, format!("mono_weight = {bad}\ntheme = \"dark\"\n")).unwrap();
+        let s = GuiSettings::load(&p);
+        assert_eq!(
+            (s.mono_weight, s.theme),
+            (MonoWeight::Medium, ThemeChoice::Dark),
+            "mono_weight = {bad}"
+        );
+    }
+}
+
+#[test]
+fn mono_weight_round_trips() {
+    use fleet_client::config::MonoWeight;
+    let e = env();
+    let p = gui_settings_path(&e.home);
+    for weight in MonoWeight::ALL {
+        GuiSettings::update(&p, |s| s.mono_weight = weight).unwrap();
+        assert_eq!(GuiSettings::load(&p).mono_weight, weight);
+    }
+    let on_disk = std::fs::read_to_string(&p).unwrap();
+    assert!(on_disk.contains("mono_weight = \"semibold\""), "{on_disk}");
+}

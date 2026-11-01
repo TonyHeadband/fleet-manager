@@ -5,7 +5,7 @@
 .chart-legend li { display: inline-flex; align-items: center; gap: var(--space-summary-gap); }
 .chart-swatch { flex: none; width: var(--size-meta); height: var(--size-meta); }
 .chart-baseline, .chart-tick { stroke: var(--fill); stroke-width: 1px; fill: none; }
-.chart-tick-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-tick-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); font-weight: var(--weight-mono); }
 .chart-tooltip { position: absolute; width: max-content; max-width: 100%; z-index: 3; pointer-events: none; }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -22,8 +22,8 @@
 
 .chart-stat { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); height: 100%; }
 .chart-stat-head { display: flex; align-items: flex-end; gap: var(--space-picker-gap); }
-.chart-stat-value { font-family: var(--font-mono); font-size: var(--size-stat); line-height: 1; color: var(--text-high); }
-.chart-stat-delta { font-family: var(--font-mono); font-size: var(--size-small); }
+.chart-stat-value { font-family: var(--font-mono); font-size: var(--size-stat); line-height: 1; color: var(--text-high); font-weight: var(--weight-mono); }
+.chart-stat-delta { font-family: var(--font-mono); font-size: var(--size-small); font-weight: var(--weight-mono); }
 /* A block takes the height its container gives; with none, its region's min-height (the token plot) is its size. */
 .chart-plot { position: relative; flex: 1 1 auto; min-width: 0; }
 .chart-plot > svg { position: absolute; top: 0; left: 0; display: block; overflow: visible; }
@@ -33,13 +33,13 @@
 
 .chart-bars, .chart-rank { position: relative; }
 .chart-bars { display: flex; flex-direction: column; height: 100%; }
-.chart-col-value { fill: var(--text-high); font-family: var(--font-mono); font-size: var(--size-meta); text-anchor: middle; }
+.chart-col-value { fill: var(--text-high); font-family: var(--font-mono); font-size: var(--size-meta); text-anchor: middle; font-weight: var(--weight-mono); }
 .chart-col-hit { fill: transparent; pointer-events: all; }
-.chart-col-labels { display: grid; margin-top: var(--space-summary-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text); }
+.chart-col-labels { display: grid; margin-top: var(--space-summary-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text); font-weight: var(--weight-mono); }
 /* Two lines at most, ellipsis on the second: five bars in a 2×2 cell leave a label about six characters a line. */
 .chart-col-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; text-overflow: ellipsis; text-align: center; padding: 0 var(--space-chip-gap); }
 
-.chart-rank { display: flex; flex-direction: column; gap: var(--space-header-gap); font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-rank { display: flex; flex-direction: column; gap: var(--space-header-gap); font-family: var(--font-mono); font-size: var(--size-meta); font-weight: var(--weight-mono); }
 .chart-rank-row { display: grid; grid-template-columns: var(--layout-chart-label-w) minmax(0, 1fr) var(--layout-chart-value-w); gap: var(--space-button-gap); align-items: center; }
 .chart-rank-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .chart-rank-value { text-align: right; color: var(--text-high); white-space: nowrap; }
@@ -60,11 +60,11 @@
 .chart-parts svg { display: block; overflow: visible; }
 .chart-outline { fill: none; stroke: var(--border); stroke-width: 1px; }
 .chart-seg-hit { fill: transparent; pointer-events: all; }
-.chart-mark-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-mark-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); font-weight: var(--weight-mono); }
 .chart-donut { height: 100%; flex-direction: row; align-items: center; gap: var(--space-item); }
 .chart-donut[data-layout="stacked"] { flex-direction: column; justify-content: center; }
 .chart-donut-arc { fill: none; }
-.chart-donut-center { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-small); }
+.chart-donut-center { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-small); font-weight: var(--weight-mono); }
 
 @media (prefers-reduced-motion: no-preference) {
   /* The donut's arcs sweep round from 12 o'clock; each path is normalised to a pathLength of 100. */
@@ -83,7 +83,7 @@
 .chart-ts-hit { fill: transparent; pointer-events: all; }
 .chart-ts-line { stroke-linejoin: round; }
 
-.chart-tl { position: relative; display: flex; flex-direction: column; font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-tl { position: relative; display: flex; flex-direction: column; font-family: var(--font-mono); font-size: var(--size-meta); font-weight: var(--weight-mono); }
 .chart-tl-row { display: grid; grid-template-columns: var(--layout-chart-label-w) minmax(0, 1fr); gap: var(--space-button-gap); align-items: center; }
 .chart-tl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .chart-tl-lane { position: relative; height: calc(var(--layout-bar-h) + 2 * var(--layout-caption-gap)); }
@@ -94,7 +94,7 @@
 
 .chart-catalog { display: flex; flex-direction: column; gap: var(--layout-section-gap); padding: var(--layout-page-y) var(--layout-page-x); }
 .chart-catalog-entry { display: flex; flex-direction: column; gap: var(--space-header-gap); padding: var(--layout-card-padding); align-self: flex-start; max-width: 100%; }
-.chart-catalog-name { display: flex; align-items: baseline; gap: var(--space-item); margin: 0; font-family: var(--font-mono); font-size: var(--size-small); font-weight: 500; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); }
+.chart-catalog-name { display: flex; align-items: baseline; gap: var(--space-item); margin: 0; font-family: var(--font-mono); font-size: var(--size-small); font-weight: var(--weight-mono-strong); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-high); }
 .chart-catalog-min { font-size: var(--size-meta); color: var(--text-low); }
 .chart-catalog-purpose { margin: 0; font-size: var(--size-small); color: var(--text); }
 .chart-catalog-preview { max-width: 100%; }

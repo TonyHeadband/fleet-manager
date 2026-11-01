@@ -15,7 +15,7 @@
 .column[data-rail] .ticks { display: none; }
 .column:first-child { border-left: none; }
 /* Lite's fui::mono_label: column titles, counts, persona tags. The DOM keeps the original case for assistive tech. */
-.mono-label { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; }
+.mono-label { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; font-weight: var(--weight-mono); }
 .column-header { position: relative; flex: none; height: var(--layout-column-header); display: flex; align-items: center; gap: var(--column-gap); padding: 0 var(--column-pad-x); margin: 0; border-bottom: 1px solid var(--border); font-weight: 400; color: var(--text-high); }
 /* Quiet tones, and tones too faint on the surface for small text, count in text-low: theme::count_color. */
 .count { color: var(--count-neutral); font-variant-numeric: tabular-nums; }
@@ -82,7 +82,7 @@
 .card-row .duration, .card-row .mono, .card-row .badge { flex: none; }
 .card-left > .card-activity { flex: 0 1 auto; min-width: 0; }
 .changes-dot { background: var(--text); }
-.repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); font-weight: var(--weight-mono); }
 .repo { min-width: var(--card-min-name); overflow: hidden; text-overflow: ellipsis; }
 .repo-more { flex: none; }
 /* The actions show where the person is: on hover, keyboard focus, selection, or a Stop waiting for its second press. */
@@ -93,7 +93,7 @@
 .reply { flex: none; display: grid; gap: var(--space-picker-gap); padding: var(--panel-margin); }
 .reply textarea { width: 100%; resize: vertical; background: var(--sunken); }
 .reply-row { display: flex; align-items: center; justify-content: space-between; }
-.reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); }
+.reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); font-weight: var(--weight-mono); }
 /* A task's lead adds the fleet's tally row (Lite's card.rs). */
 .card[data-kind="lead"] .card-in { grid-template-rows: var(--card-row-title) var(--card-row-actions) var(--card-row-state) var(--card-row-tally); }
 .card-left > .card-title { flex: 0 1 auto; min-width: 0; }
@@ -140,7 +140,7 @@
 .menu hr { width: 100%; margin: var(--space-button-gap) 0; border: none; border-top: 1px solid var(--border); }
 .menu-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-item); padding: 0 var(--space-picker-gap); }
 .menu-row label { display: flex; align-items: center; gap: var(--space-button-gap); color: var(--text-high); }
-.menu-count { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.menu-count { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); font-weight: var(--weight-mono); }
 .menu-item { border: none; border-radius: 0; background: transparent; text-align: left; color: var(--text-high); padding: var(--space-button-gap) var(--space-picker-gap); }
 .menu-item:hover { background: var(--surface); }
 

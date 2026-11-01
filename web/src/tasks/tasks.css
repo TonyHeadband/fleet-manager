@@ -98,6 +98,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  font-weight: var(--weight-mono);
 }
 .passport-title {
   display: flex;
@@ -194,6 +195,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: var(--weight-mono);
 }
 .archive-item[data-stays] > :not(:last-child) {
   color: var(--text-low);

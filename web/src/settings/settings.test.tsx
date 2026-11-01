@@ -114,6 +114,21 @@ describe("Settings: preferences", () => {
     expect(root.style.getPropertyValue("--font-mono")).toContain("JetBrains Mono");
   });
 
+  it("mono_weight_saves_and_applies", async () => {
+    const native = inApp();
+    await settings({ native });
+    expect(screen.getByText("Mono weight")).toBeInTheDocument();
+    expect(pressed("Medium")).toBe(true);
+    await userEvent.click(chip("SemiBold"));
+    expect(native.writeChoice).toHaveBeenLastCalledWith("fleet.monoWeight", "semibold");
+    expect(root.style.getPropertyValue("--weight-mono")).toBe("600");
+    expect(root.style.getPropertyValue("--weight-mono-strong")).toBe("700");
+    expect(pressed("SemiBold")).toBe(true);
+    await userEvent.click(chip("Regular"));
+    expect(native.writeChoice).toHaveBeenLastCalledWith("fleet.monoWeight", "regular");
+    expect(root.style.getPropertyValue("--weight-mono")).toBe("400");
+  });
+
   it("a_click_on_the_chosen_chip_saves_nothing", async () => {
     const native = inApp();
     await settings({ native });

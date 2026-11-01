@@ -8,7 +8,7 @@
 .details-column { display: inline-flex; align-items: center; gap: var(--space-button-gap); color: var(--text-high); }
 .details-field { display: flex; align-items: baseline; gap: var(--space-item); min-width: 0; }
 .details-field .mono-label { color: var(--text-low); }
-.details-meta { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.details-meta { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); font-weight: var(--weight-mono); }
 /* The tabs and their body (preview.rs): a row of tabs on the surface, then the body on the page colour. */
 .preview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .preview header { display: flex; justify-content: space-between; align-items: center; padding: 0 var(--panel-margin); }
@@ -21,7 +21,7 @@
 .pane-frame { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; margin: 0 var(--layout-pane-inset); border: 1px solid var(--border); background: var(--surface); }
 .pane-frame .pane-slot { padding: var(--panel-body-y) var(--panel-margin); }
 /* Lite's rows: one line each, never wrapped over their neighbours. */
-.pane { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre; overflow: auto; color: var(--text); }
+.pane { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre; overflow: auto; color: var(--text); font-weight: var(--weight-mono); }
 .note { margin: 0 0 var(--panel-gap-s); font-size: var(--size-small); color: var(--text-low); }
 /* A fleet agent's link to its task's lead, under the title (preview.rs's `↳` band). */
 .task-link-row { flex: none; display: flex; padding: 0 var(--panel-margin) var(--panel-band-gap); }
@@ -46,7 +46,7 @@
 .decide-comment { display: grid; gap: var(--panel-gap-xs); width: 100%; margin-top: var(--panel-band-gap); }
 .breakdown-rule { width: 100%; margin: var(--panel-section-gap) 0 var(--panel-band-gap); border: none; border-top: 1px solid var(--border); }
 .gate-head { margin: 0; font-size: var(--size-small); font-weight: 500; color: var(--text-high); }
-.gate-step { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
+.gate-step { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); font-weight: var(--weight-mono); }
 .gate-output .pane { max-height: var(--panel-output-max); }
 .gate-pr { margin: var(--panel-gap-s) 0 0; font-size: var(--size-small); }
 .gate-pr .mono-label { color: var(--text-low); }

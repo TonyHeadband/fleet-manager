@@ -141,6 +141,7 @@
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--size-code);
+  font-weight: var(--weight-mono);
 }
 
 /* A page card: a release, a product on Overview. */
@@ -175,6 +176,7 @@
   font-size: var(--size-meta);
   letter-spacing: 0.13em;
   text-transform: uppercase;
+  font-weight: var(--weight-mono);
 }
 .tabbed-body {
   flex: 1;
@@ -233,6 +235,7 @@
   color: var(--text-high);
   letter-spacing: var(--track-value);
   font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-mono);
 }
 /* The fold's plus (PlusMinus.tsx), in the accent: open, its upright turns flat onto its bar, a minus. */
 .plus-minus { flex: none; fill: var(--fill); }

@@ -70,6 +70,7 @@ these settings write:
 | Theme | `theme` | `system`, `light`, `dark` | `system` |
 | Font | `ui_font` | `plex` (IBM Plex Sans), `space_grotesk`, `atkinson` (Atkinson Hyperlegible Next) | `plex` |
 | Mono font | `mono_font` | `plex` (IBM Plex Mono), `jetbrains` (JetBrains Mono), `atkinson` (Atkinson Hyperlegible Mono) | `plex` |
+| Mono weight | `mono_weight` | `regular`, `medium`, `semibold` (web UI only) | `medium` |
 | Motion → Animations | `animations` | `true`, `false` | `true` |
 
 A missing or unreadable file is the defaults. An unknown theme or font name, from a hand edit, reads as the

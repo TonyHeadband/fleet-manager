@@ -521,16 +521,20 @@ fn css() -> String {
 @font-face {{ font-family: "IBM Plex Sans"; font-weight: 400; src: url("{fonts}/IBMPlexSans-Regular.ttf") format("truetype"); }}
 @font-face {{ font-family: "IBM Plex Sans"; font-weight: 500; src: url("{fonts}/IBMPlexSans-Medium.ttf") format("truetype"); }}
 @font-face {{ font-family: "IBM Plex Mono"; font-weight: 400; src: url("{fonts}/IBMPlexMono-Regular.ttf") format("truetype"); }}
+@font-face {{ font-family: "IBM Plex Mono"; font-weight: 500; src: url("{fonts}/IBMPlexMono-Medium.ttf") format("truetype"); }}
+@font-face {{ font-family: "IBM Plex Mono"; font-weight: 600; src: url("{fonts}/IBMPlexMono-SemiBold.ttf") format("truetype"); }}
 @font-face {{ font-family: "Space Grotesk"; font-weight: 400; src: url("{fonts}/SpaceGrotesk-Regular.ttf") format("truetype"); }}
 @font-face {{ font-family: "Space Grotesk"; font-weight: 500; src: url("{fonts}/SpaceGrotesk-Medium.ttf") format("truetype"); }}
 @font-face {{ font-family: "Atkinson Hyperlegible Next"; font-weight: 400; src: url("{fonts}/AtkinsonHyperlegibleNext-Regular.ttf") format("truetype"); }}
 @font-face {{ font-family: "Atkinson Hyperlegible Next"; font-weight: 500; src: url("{fonts}/AtkinsonHyperlegibleNext-Medium.ttf") format("truetype"); }}
-@font-face {{ font-family: "JetBrains Mono"; font-weight: 400; src: url("{fonts}/JetBrainsMono-Regular.ttf") format("truetype"); }}
-@font-face {{ font-family: "Atkinson Hyperlegible Mono"; font-weight: 400; src: url("{fonts}/AtkinsonHyperlegibleMono-Regular.ttf") format("truetype"); }}
+@font-face {{ font-family: "JetBrains Mono"; font-weight: 100 800; src: url("{fonts}/JetBrainsMono-Variable.ttf") format("truetype"); }}
+@font-face {{ font-family: "Atkinson Hyperlegible Mono"; font-weight: 200 800; src: url("{fonts}/AtkinsonHyperlegibleMono-Variable.ttf") format("truetype"); }}
 :root {{
   color-scheme: light dark;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --weight-mono: 500;
+  --weight-mono-strong: 600;
 {sizes}{layouts}{radii}{light}}}
 @media (prefers-color-scheme: dark) {{
   :root:not([data-theme="light"]) {{
@@ -554,6 +558,19 @@ fn theme_css_export() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, css()).unwrap();
     std::fs::write(path.with_file_name("layout.ts"), layout_ts()).unwrap();
+}
+
+#[test]
+fn the_mono_faces_cover_the_weights_the_setting_offers() {
+    let css = css();
+    for want in [
+        r#"font-family: "IBM Plex Mono"; font-weight: 500;"#,
+        r#"font-family: "IBM Plex Mono"; font-weight: 600;"#,
+        r#"font-family: "JetBrains Mono"; font-weight: 100 800;"#,
+        r#"font-family: "Atkinson Hyperlegible Mono"; font-weight: 200 800;"#,
+    ] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
 }
 
 #[test]

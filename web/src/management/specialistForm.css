@@ -77,6 +77,7 @@
   font-family: var(--font-mono);
   font-size: var(--size-code);
   color: var(--text-high);
+  font-weight: var(--weight-mono);
 }
 .form-field input[readonly],
 .form-field textarea[readonly] {
@@ -104,6 +105,7 @@
   padding: var(--layout-control-y) var(--layout-control-x);
   border: 1px solid var(--border);
   background: var(--surface);
+  font-weight: var(--weight-mono);
 }
 /* Bigger than the tag's caps text, so the one control in the tag is easy to see and hit. */
 .skill-chip-remove {

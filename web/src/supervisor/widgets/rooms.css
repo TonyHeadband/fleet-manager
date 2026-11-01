@@ -7,7 +7,7 @@
 .rooms-kind { flex: none; margin-left: auto; color: var(--accent-text); }
 /* Unread: a status bar in the accent, then the count as a readout, two digits at least. */
 .rooms-mark { flex: none; width: var(--layout-bar-w); height: var(--layout-bar-h); background: var(--fill); }
-.rooms-unread { flex: none; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); font-variant-numeric: tabular-nums; color: var(--text-high); }
+.rooms-unread { flex: none; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); font-variant-numeric: tabular-nums; color: var(--text-high); font-weight: var(--weight-mono); }
 .rooms-empty { margin: 0; padding: var(--layout-list-row-y) var(--layout-list-row-x); font-size: var(--size-small); color: var(--text-low); }
 .room-post { flex: none; display: flex; flex-direction: column; gap: var(--space-item); }
 .room-post-pickers { display: flex; flex-wrap: wrap; gap: var(--space-item); }

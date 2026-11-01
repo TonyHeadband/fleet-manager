@@ -17,6 +17,7 @@ export type ChoiceKey =
   | "fleet.theme"
   | "fleet.uiFont"
   | "fleet.monoFont"
+  | "fleet.monoWeight"
   | "fleet.animations"
   | "fleet.stickyAlerts"
   | "fleet.closeChoice";
@@ -28,6 +29,7 @@ const KEYS: Record<ChoiceKey, keyof SavedChoices> = {
   "fleet.theme": "theme",
   "fleet.uiFont": "uiFont",
   "fleet.monoFont": "monoFont",
+  "fleet.monoWeight": "monoWeight",
   "fleet.animations": "animations",
   "fleet.stickyAlerts": "stickyAlerts",
   "fleet.closeChoice": "closeChoice",

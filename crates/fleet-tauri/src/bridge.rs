@@ -2,7 +2,7 @@
 //! calls `fleet-client`, which holds the decisions the egui app made, so the two apps decide alike.
 use fleet_api::{Effort, PermissionMode, PersonaList, ToolId, ToolList};
 use fleet_client::config::{self, ClientConfig, GuiSettings, SettingsWriter};
-use fleet_client::config::{CloseChoice, FleetDisplay, MonoFont, ThemeChoice, UiFont};
+use fleet_client::config::{CloseChoice, FleetDisplay, MonoFont, MonoWeight, ThemeChoice, UiFont};
 use fleet_client::daemon_control::{
     connect_or_start, find_daemon_binary, stop_daemon, Started, StopError,
 };
@@ -866,6 +866,7 @@ pub struct Choices {
     pub theme: String,
     pub ui_font: String,
     pub mono_font: String,
+    pub mono_weight: String,
     pub animations: bool,
     pub sticky_alerts: bool,
     pub close_choice: Option<String>,
@@ -914,6 +915,7 @@ pub fn choices_of(s: &GuiSettings) -> Choices {
         theme: toml_name(s.theme),
         ui_font: toml_name(s.ui_font),
         mono_font: toml_name(s.mono_font),
+        mono_weight: toml_name(s.mono_weight),
         animations: s.animations,
         sticky_alerts: s.sticky_alerts,
         close_choice: s.close_choice.map(toml_name),
@@ -934,6 +936,7 @@ pub fn apply_choice(s: &mut GuiSettings, key: &str, value: Option<&str>) -> Resu
         "fleet.theme" => s.theme = named(&THEMES, key, value)?,
         "fleet.uiFont" => s.ui_font = named(&UiFont::ALL, key, value)?,
         "fleet.monoFont" => s.mono_font = named(&MonoFont::ALL, key, value)?,
+        "fleet.monoWeight" => s.mono_weight = named(&MonoWeight::ALL, key, value)?,
         "fleet.animations" => s.animations = flag(key, value)?,
         "fleet.stickyAlerts" => s.sticky_alerts = flag(key, value)?,
         // None is Ask: the close dialog asks again.
@@ -1751,16 +1754,18 @@ mod tests {
                 defaults.theme.as_str(),
                 defaults.ui_font.as_str(),
                 defaults.mono_font.as_str(),
+                defaults.mono_weight.as_str(),
                 defaults.animations,
                 defaults.sticky_alerts,
                 defaults.close_choice
             ),
-            ("system", "plex", "plex", true, true, None)
+            ("system", "plex", "plex", "medium", true, true, None)
         );
         for (key, value) in [
             ("fleet.theme", "dark"),
             ("fleet.uiFont", "space_grotesk"),
             ("fleet.monoFont", "jetbrains"),
+            ("fleet.monoWeight", "semibold"),
             ("fleet.animations", "false"),
             ("fleet.stickyAlerts", "false"),
             ("fleet.closeChoice", "stop_daemon"),
@@ -1773,6 +1778,7 @@ mod tests {
                 c.theme.as_str(),
                 c.ui_font.as_str(),
                 c.mono_font.as_str(),
+                c.mono_weight.as_str(),
                 c.animations,
                 c.sticky_alerts,
                 c.close_choice.as_deref()
@@ -1781,6 +1787,7 @@ mod tests {
                 "dark",
                 "space_grotesk",
                 "jetbrains",
+                "semibold",
                 false,
                 false,
                 Some("stop_daemon")

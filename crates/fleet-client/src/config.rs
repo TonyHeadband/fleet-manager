@@ -707,6 +707,34 @@ impl MonoFont {
     }
 }
 
+/// How heavy the mono face draws; the web UI's `--weight-mono` (the egui app only has the Regular files).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonoWeight {
+    Regular,
+    #[serde(rename = "semibold")]
+    SemiBold,
+    #[default]
+    #[serde(other)]
+    Medium,
+}
+
+impl MonoWeight {
+    pub const ALL: [MonoWeight; 3] = [
+        MonoWeight::Regular,
+        MonoWeight::Medium,
+        MonoWeight::SemiBold,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MonoWeight::Regular => "Regular",
+            MonoWeight::Medium => "Medium",
+            MonoWeight::SemiBold => "SemiBold",
+        }
+    }
+}
+
 /// Any value that is not one of the names, even a number from a hand edit, reads as the default; the rest of
 /// the file is kept.
 fn lenient<'de, D, T>(d: D) -> Result<T, D::Error>
@@ -778,6 +806,8 @@ pub struct GuiSettings {
     pub ui_font: UiFont,
     #[serde(default, deserialize_with = "lenient")]
     pub mono_font: MonoFont,
+    #[serde(default, deserialize_with = "lenient")]
+    pub mono_weight: MonoWeight,
     /// Card edges, the radar and other motion; off keeps the window idle.
     #[serde(default = "yes")]
     pub animations: bool,
@@ -803,6 +833,7 @@ impl Default for GuiSettings {
             fleet_display: FleetDisplay::default(),
             ui_font: UiFont::default(),
             mono_font: MonoFont::default(),
+            mono_weight: MonoWeight::default(),
             animations: true,
             skipped_version: None,
         }

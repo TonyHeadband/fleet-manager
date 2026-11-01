@@ -47,6 +47,7 @@
 .daemon-rows dd.mono {
   font-family: var(--font-mono);
   font-size: var(--size-code);
+  font-weight: var(--weight-mono);
 }
 .settings-page .daemon-restart {
   margin-top: var(--settings-daemon-gap);
@@ -122,6 +123,7 @@
   font-family: var(--font-mono);
   font-size: var(--size-code);
   white-space: nowrap;
+  font-weight: var(--weight-mono);
 }
 .log-time,
 .log-low {

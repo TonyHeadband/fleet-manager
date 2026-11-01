@@ -69,6 +69,7 @@
   font-family: var(--font-mono);
   font-size: var(--size-code);
   white-space: pre-wrap;
+  font-weight: var(--weight-mono);
 }
 
 /* egui's `config_pane`: the config tabs scroll at their own width, the load error first. */
@@ -138,6 +139,7 @@
   resize: vertical;
   font-family: var(--font-mono);
   font-size: var(--size-code);
+  font-weight: var(--weight-mono);
 }
 .definition-actions {
   margin-top: var(--space-item);
@@ -220,6 +222,7 @@
   font-size: var(--size-meta);
   color: var(--text-low);
   overflow-wrap: anywhere;
+  font-weight: var(--weight-mono);
 }
 
 /* egui's New product modal: the product form at the dialog's width, Save then Cancel at the end. */
@@ -307,6 +310,7 @@
   font-family: var(--font-mono);
   font-size: var(--size-meta);
   color: var(--text-low);
+  font-weight: var(--weight-mono);
 }
 
 /* egui's internal_section: a collapsing header, then the branches, the files in their own box and the text in its own,
@@ -350,6 +354,7 @@
 .internal-path {
   font-family: var(--font-mono);
   font-size: var(--size-meta);
+  font-weight: var(--weight-mono);
 }
 .internal-text {
   align-self: stretch;
@@ -360,4 +365,5 @@
   font-size: var(--size-meta);
   color: var(--text-high);
   user-select: text;
+  font-weight: var(--weight-mono);
 }

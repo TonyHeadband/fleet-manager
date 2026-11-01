@@ -8,6 +8,7 @@ import type { Notice } from "./messages";
 export type Theme = "system" | "dark" | "light";
 export type UiFont = "plex" | "space_grotesk" | "atkinson";
 export type MonoFont = "plex" | "jetbrains" | "atkinson";
+export type MonoWeight = "regular" | "medium" | "semibold";
 /** null is Ask: the close dialog asks each time. */
 export type CloseChoice = "keep_running" | "stop_daemon" | null;
 
@@ -15,6 +16,7 @@ export interface Preferences {
   theme: Theme;
   uiFont: UiFont;
   monoFont: MonoFont;
+  monoWeight: MonoWeight;
   animations: boolean;
   stickyAlerts: boolean;
   closeChoice: CloseChoice;
@@ -24,6 +26,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   theme: "system",
   uiFont: "plex",
   monoFont: "plex",
+  monoWeight: "medium",
   animations: true,
   stickyAlerts: true,
   closeChoice: null,
@@ -42,10 +45,19 @@ export const MONO_FONTS: { id: MonoFont; label: string; family: string }[] = [
   { id: "atkinson", label: "Atkinson Hyperlegible Mono", family: "Atkinson Hyperlegible Mono" },
 ];
 
+/** `weight` is `--weight-mono`; `strong` is the step heavier, for titles and labels. IBM Plex Mono has no Bold file, so
+ * SemiBold's strong 700 draws as its 600. */
+export const MONO_WEIGHTS: { id: MonoWeight; label: string; weight: number; strong: number }[] = [
+  { id: "regular", label: "Regular", weight: 400, strong: 500 },
+  { id: "medium", label: "Medium", weight: 500, strong: 600 },
+  { id: "semibold", label: "SemiBold", weight: 600, strong: 700 },
+];
+
 const KEY: Record<keyof Preferences, ChoiceKey> = {
   theme: "fleet.theme",
   uiFont: "fleet.uiFont",
   monoFont: "fleet.monoFont",
+  monoWeight: "fleet.monoWeight",
   animations: "fleet.animations",
   stickyAlerts: "fleet.stickyAlerts",
   closeChoice: "fleet.closeChoice",
@@ -73,6 +85,11 @@ export function readPreferences(): Preferences {
       MONO_FONTS.map((f) => f.id),
       d.monoFont,
     ),
+    monoWeight: one(
+      readChoice(KEY.monoWeight),
+      MONO_WEIGHTS.map((w) => w.id),
+      d.monoWeight,
+    ),
     animations: flag(readChoice(KEY.animations), d.animations),
     stickyAlerts: flag(readChoice(KEY.stickyAlerts), d.stickyAlerts),
     closeChoice: one<CloseChoice>(readChoice(KEY.closeChoice), ["keep_running", "stop_daemon"], d.closeChoice),
@@ -82,7 +99,7 @@ export function readPreferences(): Preferences {
 const stack = (family: string, fallback: string) => `"${family}", ${fallback}`;
 
 /** Sets the window's look: `data-theme` (none for System, so the desktop's own switch shows at once), the two font
- * stacks, and `data-animations="off"`, which stops every animation and transition. */
+ * stacks, the mono weights, and `data-animations="off"`, which stops every animation and transition. */
 export function applyPreferences(p: Preferences) {
   const root = document.documentElement;
   if (p.theme === "system") root.removeAttribute("data-theme");
@@ -91,6 +108,9 @@ export function applyPreferences(p: Preferences) {
   const mono = MONO_FONTS.find((f) => f.id === p.monoFont)!;
   root.style.setProperty("--font-sans", stack(ui.family, "system-ui, sans-serif"));
   root.style.setProperty("--font-mono", stack(mono.family, "ui-monospace, monospace"));
+  const weight = MONO_WEIGHTS.find((w) => w.id === p.monoWeight)!;
+  root.style.setProperty("--weight-mono", String(weight.weight));
+  root.style.setProperty("--weight-mono-strong", String(weight.strong));
   if (p.animations) root.removeAttribute("data-animations");
   else root.dataset.animations = "off";
 }
@@ -140,6 +160,7 @@ const WHAT: Record<keyof Preferences, string> = {
   theme: "the theme",
   uiFont: "the font",
   monoFont: "the mono font",
+  monoWeight: "the mono weight",
   animations: "the animations setting",
   stickyAlerts: "the footer setting",
   closeChoice: "the close choice",
