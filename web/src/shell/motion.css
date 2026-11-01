@@ -231,8 +231,8 @@
   .chat-calls {
     animation: fui-menu var(--motion-menu) var(--ease-push) both;
   }
-  /* The goal's tooltip opens as a dialog does, from its top: a line drawn out from the icon's side, then down. */
-  .goal-tooltip {
+  /* A tooltip (the goal's, a chart's) opens as a dialog does, from its top: a line drawn out from its side, then down. */
+  .fui-tooltip {
     animation: fui-tip var(--motion-menu) var(--ease-push) both;
   }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */

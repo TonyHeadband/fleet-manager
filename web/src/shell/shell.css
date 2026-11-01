@@ -31,7 +31,9 @@
 .goal-tip { flex: none; display: inline-flex; margin-left: auto; }
 /* Its portrait glyph, not the button round it, lines up with the panel's right margin. */
 .goal-tip .icon-button { color: var(--fill); margin-right: calc((var(--card-icon-button) - 1.5 * (var(--card-icon-glyph) + 1px) - 1px) / -2); }
-.goal-tooltip { position: absolute; top: 100%; left: var(--panel-margin); right: var(--panel-margin); z-index: 3; padding: var(--space-button-gap) var(--space-picker-gap); background: var(--raised); border: 1px solid var(--border); border-top-color: var(--fill); font-size: var(--size-small); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+/* The look shared by the goal tooltip and the chart blocks' tooltip: square, an accent top line. */
+.fui-tooltip { padding: var(--space-button-gap) var(--space-picker-gap); background: var(--raised); border: 1px solid var(--border); border-top-color: var(--fill); font-size: var(--size-small); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.goal-tooltip { position: absolute; top: 100%; left: var(--panel-margin); right: var(--panel-margin); z-index: 3; }
 .detail-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 /* Without a reply box under it, the pane keeps its inset from the panel's bottom line too. */
 .detail-body:last-child { padding-bottom: var(--layout-pane-inset); }

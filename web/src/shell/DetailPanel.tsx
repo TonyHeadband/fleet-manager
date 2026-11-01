@@ -214,7 +214,7 @@ function GoalTip({ goal }: { goal: string }) {
         <Glyph name="info" />
       </button>
       {shown && (
-        <span id={id} role="tooltip" className="goal-tooltip">
+        <span id={id} role="tooltip" className="fui-tooltip goal-tooltip">
           {goal}
         </span>
       )}
