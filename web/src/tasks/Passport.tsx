@@ -7,7 +7,8 @@ import type { Product } from "../api/generated/Product";
 import type { Task } from "../api/generated/Task";
 import type { Tone } from "../api/generated/Tone";
 import { ago, formatDuration } from "../api/schema";
-import { DiffContent, screenText, type Diff } from "../components/PreviewPane";
+import { screenText, type Diff } from "../components/PreviewPane";
+import { DiffView } from "../diff/DiffView";
 import { formatBytes } from "../shell/counts";
 import type { Notice } from "../shell/messages";
 import { Badge } from "../ui/Badge";
@@ -255,7 +256,7 @@ function TaskPassport({
               Refresh
             </Button>
             <div className="passport-box">
-              <DiffContent diff={diff.state} />
+              <DiffView diff={diff.state} />
             </div>
           </Section>
           <Section title="Last screen">

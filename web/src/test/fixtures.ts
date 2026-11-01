@@ -374,3 +374,10 @@ export async function optionsOf(name: string | RegExp) {
   await userEvent.click(combo);
   return texts;
 }
+
+/** A one-file `git diff` as the daemon sends it: `lines` start with `+`, `-` or ` `. */
+export function fileDiff(path: string, ...lines: string[]): string {
+  const old = lines.filter((l) => !l.startsWith("+")).length;
+  const now = lines.filter((l) => !l.startsWith("-")).length;
+  return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, `@@ -1,${old} +1,${now} @@`, ...lines].join("\n");
+}

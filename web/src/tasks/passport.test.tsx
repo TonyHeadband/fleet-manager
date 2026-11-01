@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "../api/generated/Task";
 import type { TaskList } from "../api/generated/TaskList";
-import { FakeEventSource, NOW, agent, fullTask, product, repoInfo, tasksList } from "../test/fixtures";
+import { FakeEventSource, NOW, agent, fileDiff, fullTask, product, repoInfo, tasksList } from "../test/fixtures";
 import { tasksHref } from "../shell/routes";
 import { go, productP, products, snapshot, tasks, totals, withProducts } from "./harness";
 
@@ -97,9 +97,9 @@ describe("Passport", () => {
   });
 
   it("a_stopped_tasks_diff_shows_in_its_passport", async () => {
-    const diff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: "+added line", truncated: false }] });
+    const diff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("added.txt", "+added line"), truncated: false }] });
     await tasks("s1", undefined, { diff });
-    expect(await passport().findByText("+added line")).toBeInTheDocument();
+    expect(await passport().findByText("added line")).toBeInTheDocument();
     expect(diff).toHaveBeenCalledWith("s1");
     await userEvent.click(passport().getByRole("button", { name: "Refresh the diff" }));
     expect(diff).toHaveBeenCalledTimes(2);
@@ -110,12 +110,12 @@ describe("Passport", () => {
     const diff = vi
       .fn()
       .mockImplementationOnce(() => new Promise((r) => (answer = r)))
-      .mockResolvedValue({ workspaces: [{ repo: "core", diff: "+charlie line", truncated: false }] });
+      .mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("charlie.txt", "+charlie line"), truncated: false }] });
     await tasks("s1", undefined, { diff });
     go(tasksHref("all", "c1"));
-    expect(await passport().findByText("+charlie line")).toBeInTheDocument();
-    await act(async () => answer({ workspaces: [{ repo: "core", diff: "+bravo line", truncated: false }] }));
-    expect(passport().queryByText("+bravo line")).toBeNull();
+    expect(await passport().findByText("charlie line")).toBeInTheDocument();
+    await act(async () => answer({ workspaces: [{ repo: "core", diff: fileDiff("bravo.txt", "+bravo line"), truncated: false }] }));
+    expect(passport().queryByText("bravo line")).toBeNull();
   });
 
   it("refresh_waits_for_a_fetch_in_flight", async () => {

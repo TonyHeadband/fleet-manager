@@ -23,14 +23,6 @@
 /* Lite's rows: one line each, never wrapped over their neighbours. */
 .pane { margin: 0; font-family: var(--font-mono); font-size: var(--size-code); white-space: pre; overflow: auto; color: var(--text); }
 .note { margin: 0 0 var(--panel-gap-s); font-size: var(--size-small); color: var(--text-low); }
-.diff h3 { margin: var(--panel-band-gap) 0 var(--panel-gap-xs); font-family: var(--font-mono); font-size: var(--size-code); font-weight: 500; color: var(--text-high); }
-.diff h3:first-child { margin-top: 0; }
-.diff .line { display: block; }
-.line[data-line="file"] { color: var(--text-low); }
-.line[data-line="add"] { color: var(--tone-done); }
-.line[data-line="del"] { color: var(--danger); }
-.line[data-line="hunk"] { color: var(--tone-active); }
-.diff [role="alert"] { color: var(--danger); }
 /* A fleet agent's link to its task's lead, under the title (preview.rs's `↳` band). */
 .task-link-row { flex: none; display: flex; padding: 0 var(--panel-margin) var(--panel-band-gap); }
 .task-link { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; padding: 0; border: none; background: none; font-size: var(--size-small); color: var(--accent-text); text-decoration: underline; cursor: pointer; }

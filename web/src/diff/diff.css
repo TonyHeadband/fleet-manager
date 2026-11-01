@@ -6,8 +6,8 @@
 .diff-repo { display: flex; align-items: center; gap: var(--space-button-gap); padding: var(--layout-list-row-y) var(--layout-list-row-x); color: var(--text-high); }
 .diff-repo .diff-counts { margin-left: auto; }
 .diff-tree .note { padding: 0 var(--layout-list-row-x); }
-.diff-dir { padding: var(--layout-list-row-y) var(--layout-list-row-x); color: var(--text-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.diff-tree .list-row { display: flex; align-items: center; gap: var(--space-button-gap); width: 100%; padding-left: calc(var(--layout-list-row-x) * 2); font: inherit; }
+.diff-dir { padding: var(--layout-list-row-y) var(--layout-list-row-x); color: var(--text-low); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-tree .list-row { display: flex; align-items: center; gap: var(--space-button-gap); width: 100%; padding-left: calc(var(--layout-list-row-x) * 2); font: inherit; text-transform: none; letter-spacing: normal; }
 /* The picked file: raised, with the accent's inner edge, as the drawer's marker. */
 .diff-tree .list-row[aria-pressed="true"] { background: var(--raised); color: var(--text-high); box-shadow: inset var(--layout-marker-w) 0 var(--fill); }
 .diff-mark { flex: none; width: 1ch; }

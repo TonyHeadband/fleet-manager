@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DiffReport } from "../api/generated/DiffReport";
+import { DiffView } from "../diff/DiffView";
 import { browserEventSource, subscribePane, type EventSourceFactory } from "../api/events";
 import { Button } from "../ui/Button";
 import { Carousel } from "../ui/Carousel";
@@ -35,43 +36,6 @@ const MAX_LINE_CHARS = 2000;
 
 export type Diff =
   { state: "none" } | { state: "loading" } | { state: "loaded"; report: DiffReport } | { state: "failed"; message: string };
-
-/** One diff line's look, by its prefix, as Lite colours it. */
-function lineKind(line: string): string {
-  if (line.startsWith("+++") || line.startsWith("---")) return "file";
-  if (line.startsWith("+")) return "add";
-  if (line.startsWith("-")) return "del";
-  if (line.startsWith("@@")) return "hunk";
-  return "ctx";
-}
-
-/** A diff as it loads, each repo's lines coloured as Lite colours them; the Tasks passport shows one too. */
-export function DiffContent({ diff }: { diff: Diff }) {
-  return (
-    <div className="diff" aria-label="Changes">
-      {(diff.state === "none" || diff.state === "loading") && <p className="note">Loading…</p>}
-      {diff.state === "failed" && <p role="alert">{diff.message}</p>}
-      {diff.state === "loaded" &&
-        diff.report.workspaces.map((w) => (
-          <section key={w.repo}>
-            <h3>{w.repo}</h3>
-            {w.diff === "" ? (
-              <p className="note">No changes</p>
-            ) : (
-              <pre className="pane">
-                {w.diff.split("\n").map((line, i) => (
-                  <span key={i} className="line" data-line={lineKind(line)}>
-                    {line}
-                  </span>
-                ))}
-              </pre>
-            )}
-            {w.truncated && <p className="note">The diff was cut at the size limit.</p>}
-          </section>
-        ))}
-    </div>
-  );
-}
 
 /** The daemon sends the whole screen, empty rows under short output included: kept, they would push the text out of
  * the bottom-stuck view. */
@@ -138,7 +102,7 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
   const pane = (id: string) => {
     const extra = extraTabs.find((t) => t.id === id);
     if (extra) return extra.node;
-    if (id === "diff") return <DiffContent diff={diff} />;
+    if (id === "diff") return <DiffView diff={diff} />;
     return (
       <>
         {closed && <p className="note ended">Session ended</p>}

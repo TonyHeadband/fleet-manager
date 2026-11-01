@@ -15,7 +15,7 @@ import { ReleaseFilter } from "./ReleaseFilter";
 import { FormsPage } from "./FormsPage";
 import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
-import { FakeEventSource, agent, agentIn, persona, schema, workspace } from "../test/fixtures";
+import { FakeEventSource, agent, agentIn, fileDiff, persona, schema, workspace } from "../test/fixtures";
 import { title } from "../api/schema";
 import { personaRows, personaTags } from "../board/filters";
 
@@ -634,9 +634,9 @@ describe("PreviewPane diff tab", () => {
   const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
   const report = {
     workspaces: [
-      { repo: "core", diff: "+++ b/new.txt\n+hello\n", truncated: false },
+      { repo: "core", diff: fileDiff("new.txt", "+hello"), truncated: false },
       { repo: "portal", diff: "", truncated: false },
-      { repo: "big", diff: "+cut here", truncated: true },
+      { repo: "big", diff: fileDiff("big.txt", "+cut here"), truncated: true },
     ],
   };
 
@@ -645,9 +645,10 @@ describe("PreviewPane diff tab", () => {
     render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
     expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(await screen.findByText("+hello", { exact: false })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "core" })).toBeInTheDocument();
+    expect(await screen.findByText("hello")).toBeInTheDocument();
+    expect(screen.getByText("core")).toBeInTheDocument();
     expect(screen.getByText("No changes")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "big.txt" }));
     expect(screen.getByText(/cut at the size limit/)).toBeInTheDocument();
     expect(loadDiff).toHaveBeenCalledTimes(1);
   });
@@ -658,14 +659,14 @@ describe("PreviewPane diff tab", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no such agent");
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(await screen.findByText("+hello", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("hello")).toBeInTheDocument();
     expect(loadDiff).toHaveBeenCalledTimes(2);
   });
 
   it("stays read-only on both tabs", async () => {
     const { container } = render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    await screen.findByText("+hello", { exact: false });
+    await screen.findByText("hello");
     expect(container.querySelector("input, textarea, [contenteditable='true'], select")).toBeNull();
   });
 
@@ -677,7 +678,7 @@ describe("PreviewPane diff tab", () => {
 
 describe("PreviewPane as a carousel", () => {
   const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-  const report = { workspaces: [{ repo: "core", diff: "+hello", truncated: false }] };
+  const report = { workspaces: [{ repo: "core", diff: fileDiff("hello.txt", "+hello"), truncated: false }] };
   const track = () => document.querySelector<HTMLElement>(".pane-frame .pane-track")!;
   const slots = () => [...track().querySelectorAll<HTMLElement>(":scope > .pane-slot")];
 
@@ -710,7 +711,7 @@ describe("PreviewPane as a carousel", () => {
     expect(loadDiff).not.toHaveBeenCalled();
     expect(slots()[1]).toBeEmptyDOMElement();
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    await screen.findByText("+hello");
+    await screen.findByText("hello");
     await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(loadDiff).toHaveBeenCalledTimes(1);
@@ -741,20 +742,20 @@ describe("PreviewPane as Lite draws it", () => {
   it("a_diff_that_lands_after_another_agent_opened_is_dropped", async () => {
     const answers: Array<(r: { workspaces: { repo: string; diff: string; truncated: boolean }[] }) => void> = [];
     const loadDiff = vi.fn(() => new Promise<never>((resolve) => answers.push(resolve as never)));
-    const report = (repo: string) => ({ workspaces: [{ repo, diff: `+ ${repo} change`, truncated: false }] });
+    const report = (repo: string) => ({ workspaces: [{ repo, diff: fileDiff(`${repo}.txt`, `+${repo} change`), truncated: false }] });
     const { rerender } = render(<PreviewPane baseUrl="" agentId="a" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     rerender(<PreviewPane baseUrl="" agentId="b" factory={factory} loadDiff={loadDiff} />);
     await act(async () => answers[0]!(report("from-a")));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(loadDiff, "b's own diff is asked for").toHaveBeenCalledTimes(2);
-    expect(screen.queryByText("+ from-a change")).toBeNull();
+    expect(screen.queryByText("from-a change")).toBeNull();
     // Two Refreshes: only the latest answer shows, whichever lands last.
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await act(async () => answers[2]!(report("newest")));
     await act(async () => answers[1]!(report("older")));
-    expect(screen.getByText("+ newest change")).toBeInTheDocument();
-    expect(screen.queryByText("+ older change")).toBeNull();
+    expect(screen.getByText("newest change")).toBeInTheDocument();
+    expect(screen.queryByText("older change")).toBeNull();
   });
 
   it("another_agent_never_draws_the_previous_agents_tab", async () => {
@@ -792,23 +793,23 @@ describe("PreviewPane as Lite draws it", () => {
     expect(screen.getByLabelText("Terminal preview").textContent, "a line is cut at 2000 characters").toHaveLength(2000);
   });
 
-  it("diff_lines_are_coloured_by_their_prefix", async () => {
-    const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n same", truncated: false }] });
+  it("diff_lines_are_coloured_by_their_kind", async () => {
+    const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("x", "-old", "+new", " same"), truncated: false }] });
     render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    await screen.findByText("+new");
-    const kinds = [...screen.getByLabelText("Changes").querySelectorAll("[data-line]")].map((l) => l.getAttribute("data-line"));
-    expect(kinds).toEqual(["file", "file", "hunk", "del", "add", "ctx"]);
+    await screen.findByText("new");
+    const kinds = [...screen.getByLabelText("Changes").querySelectorAll(".diff-cell")].map((l) => l.getAttribute("data-kind"));
+    expect(kinds).toEqual(["del", "add", "ctx", "ctx"]);
   });
 
   it("switching_back_to_the_terminal_keeps_the_loaded_diff", async () => {
-    const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: "+x", truncated: false }] });
+    const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("x.txt", "+x"), truncated: false }] });
     render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    await screen.findByText("+x");
+    await screen.findByText("x");
     await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    expect(screen.getByText("+x")).toBeInTheDocument();
+    expect(screen.getByText("x")).toBeInTheDocument();
     expect(loadDiff).toHaveBeenCalledTimes(1);
   });
 

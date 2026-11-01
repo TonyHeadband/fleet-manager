@@ -101,4 +101,11 @@ describe("DiffView", () => {
     expect(css).not.toMatch(/aspect-ratio/);
     expect(css).toMatch(/var\(--layout-diff-tree\)/);
   });
+
+  it("file_and_folder_names_keep_their_case_and_order", () => {
+    const css = readFileSync("src/diff/diff.css", "utf8");
+    // A right-to-left folder row moves its trailing slash to the front; the list row's caps would upcase the names.
+    expect(css).not.toMatch(/direction: rtl/);
+    expect(css).toMatch(/\.diff-tree \.list-row \{[^}]*text-transform: none;/);
+  });
 });
