@@ -928,3 +928,49 @@ fn move_role_moves_the_file_or_changes_nothing() {
     assert!(root.join("specialists/direct.md").is_file());
     assert!(!root.join("orchestrators/direct.md").exists());
 }
+
+#[test]
+fn move_role_refuses_a_builtin_even_when_overridden() {
+    let t = tempfile::tempdir().unwrap();
+    let d = persona(t.path(), "a");
+    let root = t.path().join("a/fleet");
+    let swap = |d: &Defs, from, to, name| d.move_role(from, to, name);
+
+    // Built-in only: nothing is created.
+    assert!(swap(&d, DefKind::Specialist, DefKind::Orchestrator, "rust").is_err());
+    assert!(files_under(t.path()).is_empty());
+
+    // Override of a built-in: both the override and the absence of a target stay.
+    let text = specialist_text("rust", "Mine");
+    d.write(DefKind::Specialist, "rust", &text).unwrap();
+    let err = swap(&d, DefKind::Specialist, DefKind::Orchestrator, "rust").unwrap_err();
+    assert!(err.to_string().contains("built in"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("specialists/rust.md")).unwrap(),
+        text
+    );
+    assert!(!root.join("orchestrators/rust.md").exists());
+}
+
+#[test]
+fn move_role_refuses_the_same_kind_and_non_roles() {
+    let t = tempfile::tempdir().unwrap();
+    let d = persona(t.path(), "a");
+    let root = t.path().join("a/fleet");
+    let text = specialist_text("poet", "Verse");
+    d.write(DefKind::Specialist, "poet", &text).unwrap();
+    for (from, to) in [
+        (DefKind::Specialist, DefKind::Specialist),
+        (DefKind::Specialist, DefKind::Skill),
+        (DefKind::Skill, DefKind::Specialist),
+        (DefKind::PrStyle, DefKind::Orchestrator),
+        (DefKind::Specialist, DefKind::PrStyle),
+    ] {
+        assert!(d.move_role(from, to, "poet").is_err(), "{from:?}->{to:?}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.join("specialists/poet.md")).unwrap(),
+        text
+    );
+    assert_eq!(files_under(t.path()).len(), 1);
+}

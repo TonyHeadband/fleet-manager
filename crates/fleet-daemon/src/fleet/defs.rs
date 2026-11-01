@@ -406,11 +406,17 @@ impl Defs {
             .own_file(from, name)
             .ok_or_else(|| self.needs_persona(from, name))?;
         let (text, user) = self.text(from, name)?;
-        if !user {
+        if Builtin::get(&rel_path(from, name)).is_some() {
             return Err(FleetError::Builtin(format!(
-                "{} is built in; override it before changing its role",
+                "{} is built in, so it keeps its role; reset it or choose a new name",
                 rel_path(from, name)
             )));
+        }
+        if !user {
+            return Err(FleetError::NotFound {
+                kind: from,
+                name: name.to_string(),
+            });
         }
         if Builtin::get(&rel_path(to, name)).is_some()
             || self.own_file(to, name).is_some_and(|p| p.exists())
