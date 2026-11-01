@@ -67,6 +67,7 @@ import type { PanelPhase } from "./shell/DetailPanel";
 import { Shell } from "./shell/Shell";
 import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
+import { SupervisorPage } from "./supervisor/SupervisorPage";
 import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
@@ -189,7 +190,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // their state).
   const hash = useHash();
   const lastHref = useRef<Partial<Record<Route, string>>>({});
-  if (route === "tasks" || route === "fleet" || route === "settings") lastHref.current[route] = hash || `#${route}`;
+  if (route === "supervisor" || route === "tasks" || route === "fleet" || route === "settings") lastHref.current[route] = hash || `#${route}`;
   const lastTasks = tasksRouteFromHash(lastHref.current.tasks ?? "");
   // Kept while the view is left, as egui's TasksState.
   const [showArchived, setShowArchived] = useState(false);
@@ -286,8 +287,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const productInfo = products.state === "ready" ? products.value.find((p) => p.id === product) : undefined;
   const personaList = personas.state === "ready" ? personas.value : [];
   const newTask = useNewTask(client, say, product, productInfo, reloadRepos);
-  const repoCounts = useMemo(() => repoRows(repoInfos, snapshot.agents), [repoInfos, snapshot.agents]);
-  const personaCounts = personaRows(personaList, snapshot.agents);
+  // The supervisor's conversations are agents but not work: they stay off the board and out of Tasks.
+  const workAgents = useMemo(() => snapshot.agents.filter((a) => a.kind !== "supervisor"), [snapshot.agents]);
+  const repoCounts = useMemo(() => repoRows(repoInfos, workAgents), [repoInfos, workAgents]);
+  const personaCounts = personaRows(personaList, workAgents);
   const releases = (products.state === "ready" && products.value.find((p) => p.id === product)?.releases) || [];
   // A persona or release no longer offered (deleted, released) must not keep hiding cards out of sight, as in Lite.
   const personaPicks = personaFilter.filter((id) => personaCounts.some((r) => r.id === id));
@@ -299,7 +302,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (release !== releaseFilter) setReleaseFilter(release);
   }, [release, releaseFilter]);
   // With no product selected there is nothing to narrow by, and the whole board shows, as in Lite.
-  const shown = shownAgents(snapshot.agents, { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
+  const shown = shownAgents(workAgents, { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
   const tags = personaTags(shown, personaCounts);
   const open = snapshot.agents.find((a) => a.id === openId);
   const fleet = useFleetViews(client, say);
@@ -698,6 +701,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     </>
   );
 
+  if (route === "supervisor") {
+    return (
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Supervisor</h1>} footer={footer} dialog={appDialogs(dialog)}>
+        <SupervisorPage baseUrl={client.baseUrl} client={client} persona={persona} agents={snapshot.agents} factory={streams} />
+      </Shell>
+    );
+  }
+
   if (route === "settings") {
     return (
       <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Settings</h1>} footer={footer} dialog={appDialogs(dialog)}>
@@ -815,7 +826,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           product={product}
           releases={releases}
           tasks={tasks?.tasks ?? []}
-          live={liveTasks(schema, snapshot.agents)}
+          live={liveTasks(schema, workAgents)}
           schema={schema}
           now={now}
           state={releasesState}
@@ -829,7 +840,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   }
 
   if (route === "tasks") {
-    const live = liveTasks(schema, snapshot.agents);
+    const live = liveTasks(schema, workAgents);
     return (
       <Shell
         entry={entry}

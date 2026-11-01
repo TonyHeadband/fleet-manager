@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-export type Route = "kanban" | "tasks" | "releases" | "fleet" | "settings" | "gallery";
+export type Route = "supervisor" | "kanban" | "tasks" | "releases" | "fleet" | "settings" | "gallery";
 
 /** The drawer's views, as Lite lists them: the work, then a separator, then the app's own pages. */
 export const VIEWS: { route: Route; label: string }[][] = [
   [
+    { route: "supervisor", label: "Supervisor" },
     { route: "kanban", label: "Kanban" },
     { route: "tasks", label: "Tasks" },
     { route: "releases", label: "Releases" },
@@ -16,7 +17,7 @@ export const VIEWS: { route: Route; label: string }[][] = [
 ];
 
 /** The views the web draws so far; the others show greyed in the drawer until their step lands. */
-export const ON_WEB: Route[] = ["kanban", "tasks", "releases", "fleet", "settings"];
+export const ON_WEB: Route[] = ["supervisor", "kanban", "tasks", "releases", "fleet", "settings"];
 
 /** A view not on the web yet, or anything else, is the board. */
 export function routeFromHash(hash: string): Route {
@@ -26,6 +27,16 @@ export function routeFromHash(hash: string): Route {
   // The chart catalog is a development aid until the grid editor shows it: a shipped build routes it to the board.
   if (name === "gallery" && import.meta.env.DEV) return "gallery";
   return ON_WEB.find((r) => r === name) ?? "kanban";
+}
+
+/** The Supervisor page on a conversation (an agent id): `#supervisor?c=a1`. */
+export function supervisorHref(conversation?: string | null): string {
+  return conversation ? `#supervisor?c=${encodeURIComponent(conversation)}` : "#supervisor";
+}
+
+/** The conversation the address names, or null for the persona's latest (or the empty page). */
+export function useSupervisorConversation(): string | null {
+  return new URLSearchParams(useHash().split("?")[1] ?? "").get("c");
 }
 
 /** The address's hash, kept in step with it: the view, and the view's own place in it (a filter, a tab). */
