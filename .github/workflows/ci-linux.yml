@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # Formatting is the same on every OS: checked here only.
       - run: cargo fmt --all --check
@@ -46,6 +46,8 @@ jobs:
           pnpm --dir web test
           pnpm --dir web typecheck
           pnpm --dir web build
+      # After the web build, so the daemon embeds the real UI as it does in the tests below.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked -j2
       # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
       - name: No files changed by the build or tests

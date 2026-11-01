@@ -1,7 +1,7 @@
 mod common;
 use common::{git, make_repo};
 use fleet_daemon::fleet::workflow::{
-    fetch, fetch_within, select, Workflow, WorkflowError, WorkflowStep,
+    fetch, fetch_within, parse, select, Workflow, WorkflowError, WorkflowStep,
 };
 use std::path::{Path, PathBuf};
 
@@ -303,4 +303,17 @@ async fn no_paths_and_no_ignore_means_nothing_fell_back() {
     assert_eq!(names(&s), ["fmt", "lint"]);
     assert!(s.unmatched.is_empty());
     assert_eq!(s.changed, 1);
+}
+
+/// This repo's own gate: a mistake in it would only surface when a fleet task first ran it.
+#[test]
+fn this_repos_workflow_parses_with_the_steps_ci_runs() {
+    let wf = parse(include_str!("../../../.fleet/workflow.yml")).unwrap();
+    let names: Vec<_> = wf.steps.iter().map(|s| s.name.as_str()).collect();
+    for step in ["fmt", "clippy", "daemon", "gui", "tauri", "web"] {
+        assert!(
+            names.contains(&step),
+            "{step} is missing from .fleet/workflow.yml: {names:?}"
+        );
+    }
 }

@@ -2,6 +2,9 @@ ignore: [docs/**, "**/*.md", mkdocs.yml, .github/**]
 steps:
   fmt:
     run: cargo fmt --all --check
+  clippy:
+    run: cargo clippy --workspace --all-targets --locked -- -D warnings
+    paths: [crates/**, Cargo.toml, Cargo.lock]
   daemon:
     run: cargo test -p fleet-daemon
     paths: [crates/fleet-daemon/**, crates/fleet-client/**]
@@ -11,6 +14,12 @@ steps:
   shared:
     run: cargo test --workspace
     paths: [crates/fleet-api/**, crates/fleet-log/**, crates/fleet-fs/**, Cargo.toml, Cargo.lock]
+  tauri:
+    run: cargo test -p fleet-tauri
+    paths: [crates/fleet-tauri/**, crates/fleet-client/**]
+  web:
+    run: pnpm --dir web install --frozen-lockfile && pnpm --dir web test && pnpm --dir web typecheck
+    paths: [web/**, crates/fleet-api/**]
   bundle:
     run: bash scripts/test-bundle.sh
     paths: [scripts/bundle.sh, scripts/test-bundle.sh, scripts/lib.sh, packaging/**]
