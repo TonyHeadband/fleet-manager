@@ -109,6 +109,21 @@ pub struct ForgeConfig {
     pub api_override: Option<String>,
 }
 
+/// Whether `url` is a plain-http loopback address (`http://127.0.0.1:<port>` or `http://localhost:<port>`, with an
+/// optional path). The only kind of API override the daemon accepts: a token is sent to it.
+pub fn is_loopback_api(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let (authority, _path) = rest.split_once('/').unwrap_or((rest, ""));
+    let Some((host, port)) = authority.split_once(':') else {
+        return false;
+    };
+    matches!(host, "127.0.0.1" | "localhost")
+        && !port.is_empty()
+        && port.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// `2026-10-26T10:00:00Z` as Unix seconds. Forges print UTC; anything else is None.
 pub(crate) fn parse_timestamp(s: &str) -> Option<i64> {
     let (date, time) = s.split_once('T')?;
@@ -125,6 +140,31 @@ pub(crate) fn parse_timestamp(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_loopback_http_is_an_api_override() {
+        for ok in [
+            "http://127.0.0.1:8080",
+            "http://localhost:1",
+            "http://127.0.0.1:8080/api/v3",
+        ] {
+            assert!(is_loopback_api(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "https://127.0.0.1:8080",
+            "http://127.0.0.1",
+            "http://127.0.0.1:",
+            "http://example.com:80",
+            "http://localhost@evil.test:80",
+            "http://127.0.0.1.evil.test:80",
+            "http://127.0.0.1:80@evil.test",
+            "http://localhost:80x",
+            "ftp://localhost:80",
+        ] {
+            assert!(!is_loopback_api(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn timestamps_are_utc_seconds() {

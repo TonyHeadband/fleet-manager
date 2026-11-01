@@ -840,3 +840,16 @@ async fn the_login_check_is_a_recorded_call_without_the_token() {
     );
     assert!(calls.iter().all(|c| !format!("{c:?}").contains("ghp_fake")));
 }
+
+#[test]
+fn a_migrated_token_never_replaces_one_that_is_there() {
+    use fleet_daemon::forge::token::{read_token, write_token, write_token_if_absent};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("forge/token");
+    assert!(write_token_if_absent(&path, "from_gh").unwrap());
+    write_token(&path, "set_by_user").unwrap();
+    assert!(!write_token_if_absent(&path, "from_gh").unwrap());
+    assert_eq!(read_token(&path).as_deref(), Some("set_by_user"));
+    let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
+    assert_eq!(leftovers.len(), 1, "temp files were left behind");
+}

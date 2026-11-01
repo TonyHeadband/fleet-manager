@@ -3,7 +3,9 @@
 //! whether the forge accepts its token.
 use crate::config::is_safe_dir_name;
 use crate::forge::log::{recorded, CallCtx};
-use crate::forge::token::{read_token, token_from_gh, token_path, write_token};
+use crate::forge::token::{
+    read_token, token_from_gh, token_path, write_token, write_token_if_absent,
+};
 use crate::forge::{self, ForgeConfig, ForgeError, RepoRef};
 use crate::git::REMOTE_TIMEOUT;
 use crate::store::{PersonaRow, Store, StoreError};
@@ -682,8 +684,11 @@ impl Personas {
         let token = token_from_gh(&self.gh, &gh_dir, &row.host, &self.tools.path())
             .await
             .ok_or(PersonaError::NoToken)?;
-        write_token(&path, &token)?;
-        Ok(token)
+        // A token set meanwhile wins over the one gh held.
+        if write_token_if_absent(&path, &token)? {
+            return Ok(token);
+        }
+        read_token(&path).ok_or(PersonaError::NoToken)
     }
 
     /// Asks the forge who `token` belongs to, as a recorded call of the persona.

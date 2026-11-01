@@ -3,6 +3,7 @@ use crate::personas::check_command;
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 const GH_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -18,33 +19,66 @@ pub fn read_token(path: &Path) -> Option<String> {
     (!token.is_empty()).then(|| token.to_string())
 }
 
-/// Replaces the file through a sibling, so a reader never sees half of it. The folder is 0700 and the file 0600 on
-/// Unix; the sibling is made private before the token goes into it.
-pub fn write_token(path: &Path, token: &str) -> io::Result<()> {
+/// A private folder for the token, and a uniquely named sibling holding it: concurrent writers never share a temp
+/// file. The folder is 0700 and the file 0600 on Unix, also when either existed with looser permissions.
+fn stage(path: &Path, token: &str) -> io::Result<PathBuf> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let dir = path.parent().expect("a token path has a folder");
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
         b.mode(0o700);
+        b.create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
+    #[cfg(not(unix))]
     b.create(dir)?;
-    let tmp = dir.join("token.tmp");
+    let tmp = dir.join(format!(
+        "token.{}.{}.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    {
+    let written = (|| {
         use std::io::Write;
         let mut f = opts.open(&tmp)?;
         f.write_all(token.as_bytes())?;
-        f.sync_all()?;
+        f.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    std::fs::rename(&tmp, path)
+    Ok(tmp)
+}
+
+/// Replaces the file through a sibling, so a reader never sees half of it.
+pub fn write_token(path: &Path, token: &str) -> io::Result<()> {
+    let tmp = stage(path, token)?;
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Writes the file only if there is none; `Ok(false)` when one is already there, which then stays as it is.
+pub fn write_token_if_absent(path: &Path, token: &str) -> io::Result<bool> {
+    let tmp = stage(path, token)?;
+    // A hard link fails when the name exists, so unlike a rename it never replaces a token set meanwhile.
+    let linked = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 /// What `gh auth token --hostname <host>` prints with `gh_dir` as its config dir and the ambient tokens stripped; none when gh is missing, fails or
