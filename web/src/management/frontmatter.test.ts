@@ -118,6 +118,68 @@ describe("writeDef", () => {
   });
 });
 
+describe("block extent and quoting", () => {
+  const wrap = (front: string) => `---\n${front}---\nbody\n`;
+
+  it("a_block_scalar_with_a_blank_line_is_read_and_replaced_whole", () => {
+    const t = wrap("name: x\nsummary: |\n  p1\n\n  p2\nmodel: opus\n");
+    const d = parseDef(t);
+    expect(d.fields.summary).toBe("p1\n\np2");
+    d.fields.summary = "short";
+    expect(writeDef(t, d)).toBe(wrap("name: x\nsummary: short\nmodel: opus\n"));
+  });
+
+  it("a_block_list_with_a_blank_or_comment_between_items_is_read_and_replaced_whole", () => {
+    const t = wrap("name: x\nskills:\n  - a\n\n# c\n  - b\nmodel: opus\n");
+    const d = parseDef(t);
+    expect(d.fields.skills).toEqual(["a", "b"]);
+    d.fields.skills = ["z"];
+    expect(writeDef(t, d)).toBe(wrap("name: x\nskills:\n  - z\nmodel: opus\n"));
+  });
+
+  it("trailing_blanks_and_comments_stay_outside_a_rewritten_block", () => {
+    const t = wrap("name: x\nmodel: opus\n\n# about mode\nmode: auto\n");
+    const d = parseDef(t);
+    d.fields.model = "sonnet";
+    expect(writeDef(t, d)).toBe(wrap("name: x\nmodel: sonnet\n\n# about mode\nmode: auto\n"));
+    d.fields.model = null;
+    expect(writeDef(t, d)).toBe(wrap("name: x\n\n# about mode\nmode: auto\n"));
+  });
+
+  it("a_multi_line_flow_list_is_read_and_replaced_whole", () => {
+    const t = wrap("name: x\nskills: [a,\n  b]\nmodel: opus\n");
+    const d = parseDef(t);
+    expect(d.fields.skills).toEqual(["a", "b"]);
+    d.fields.skills = ["a", "b", "c"];
+    expect(writeDef(t, d)).toBe(wrap("name: x\nskills: [a, b, c]\nmodel: opus\n"));
+  });
+
+  it("reserved_leading_characters_are_quoted", () => {
+    for (const v of ["@reviewer-style checks", "`code` first", ".inf", ".nan", "0x1f", "0o7"]) {
+      const d = parseDef(wrap("name: x\n"));
+      d.fields.summary = v;
+      const out = writeDef(wrap("name: x\n"), d);
+      expect(out).toContain(`summary: "`);
+      expect(parseDef(out).fields.summary).toBe(v);
+    }
+  });
+
+  it("flow_list_items_with_separators_are_quoted", () => {
+    const d = parseDef(wrap("name: x\nskills: [a]\n"));
+    d.fields.skills = ["a,b", "c]", "{d"];
+    const out = writeDef(wrap("name: x\nskills: [a]\n"), d);
+    expect(parseDef(out).fields.skills).toEqual(["a,b", "c]", "{d"]);
+  });
+
+  it("a_duplicate_key_is_read_and_edited_at_its_first_occurrence", () => {
+    const t = wrap("name: x\nmodel: a\nmodel: b\n");
+    const d = parseDef(t);
+    expect(d.fields.model).toBe("a");
+    d.fields.model = "c";
+    expect(writeDef(t, d)).toBe(wrap("name: x\nmodel: c\nmodel: b\n"));
+  });
+});
+
 describe("fieldOfError", () => {
   it("field_of_error_maps_the_daemons_messages", () => {
     expect(fieldOfError("specialists/x.md: skill `x` not found")).toBe("skills");

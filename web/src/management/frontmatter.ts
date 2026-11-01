@@ -59,7 +59,9 @@ function blocks(lines: string[]): Block[] {
     const m = KEY.exec(lines[i] ?? "");
     if (!m) continue;
     let end = i + 1;
-    while (end < lines.length && /^([ \t]+\S|-([ \t]|[\r\n]*$))/.test(lines[end] ?? "")) end++;
+    while (end < lines.length && !KEY.test(lines[end] ?? "")) end++;
+    // Blank lines and column-0 comments right before the next key belong to the file, not to this key.
+    while (end > i + 1 && /^(#.*)?[\r\n]*$/.test(lines[end - 1] ?? "")) end--;
     out.push({ key: m[1] ?? "", start: i, end, rest: m[2] ?? "", block: lines.slice(i + 1, end) });
     i = end - 1;
   }
@@ -111,8 +113,9 @@ function splitFlow(inner: string): string[] {
 
 function scalar(b: Block): string {
   const head = b.rest.trim();
-  const cont = b.block.map((l) => l.trim()).filter((l) => l !== "");
-  if (/^[|>]/.test(head)) return cont.join(head.startsWith("|") ? "\n" : " ");
+  const all = b.block.map((l) => l.trim());
+  const cont = all.filter((l) => l !== "" && !l.startsWith("#"));
+  if (/^[|>]/.test(head)) return (head.startsWith("|") ? all : cont).join(head.startsWith("|") ? "\n" : " ");
   if (head === "" || head.startsWith("#")) return "";
   return [unquote(head), ...cont].join(" ").trim();
 }
@@ -120,8 +123,9 @@ function scalar(b: Block): string {
 function list(b: Block): string[] {
   const head = b.rest.trim();
   if (head.startsWith("[")) {
-    const close = head.lastIndexOf("]");
-    return splitFlow(head.slice(1, close < 0 ? undefined : close));
+    const whole = [head, ...b.block.map((l) => l.trim()).filter((l) => !l.startsWith("#"))].join(" ");
+    const close = whole.lastIndexOf("]");
+    return splitFlow(whole.slice(1, close < 0 ? undefined : close));
   }
   return b.block
     .map((l) => /^[ \t]*-(?:[ \t]+(.*?))?[\r\n]*$/.exec(l))
@@ -131,7 +135,8 @@ function list(b: Block): string[] {
 }
 
 function fieldsOf(lines: string[]): DefFields {
-  const by = new Map(blocks(lines).map((b) => [b.key, b]));
+  const by = new Map<string, Block>();
+  for (const b of blocks(lines)) if (!by.has(b.key)) by.set(b.key, b);
   const str = (k: string) => (by.has(k) ? scalar(by.get(k)!) : "");
   const opt = (k: string) => str(k) || null;
   return {
@@ -155,16 +160,20 @@ export function parseDef(text: string): DefDraft {
 
 const RESERVED = /^(true|false|null|yes|no|on|off|y|n|~|[-+.\d][\d.eE+-]*)$/i;
 
-function quoteIfNeeded(v: string): string {
+function quoteIfNeeded(v: string, flow = false): string {
   const plain =
-    /^[A-Za-z0-9_./@][^\n]*$/.test(v) && !/:([ \t]|$)|[ \t]#|[ \t]$/.test(v) && !RESERVED.test(v) && !/^[|>]/.test(v);
+    /^[A-Za-z0-9_/][^\n]*$/.test(v) &&
+    !/:([ \t]|$)|[ \t]#|[ \t]$/.test(v) &&
+    !RESERVED.test(v) &&
+    !/^0[A-Za-z]/.test(v) &&
+    !(flow && /[,[\]{}]/.test(v));
   return plain ? v : JSON.stringify(v);
 }
 
 function render(key: (typeof ORDER)[number], value: string | string[], eol: string, asBlock: boolean): string[] {
   if (Array.isArray(value)) {
     if (asBlock) return [`${key}:${eol}`, ...value.map((v) => `  - ${quoteIfNeeded(v)}${eol}`)];
-    return [`${key}: [${value.map(quoteIfNeeded).join(", ")}]${eol}`];
+    return [`${key}: [${value.map((v) => quoteIfNeeded(v, true)).join(", ")}]${eol}`];
   }
   return [`${key}: ${quoteIfNeeded(value)}${eol}`];
 }
