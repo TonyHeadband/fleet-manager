@@ -214,9 +214,10 @@ export class FleetClient {
   /** Starts a conversation; the daemon checks the persona first. */
   newConversation = (persona: string, text: string) =>
     this.call<Conversation>("POST", "/api/supervisor/conversations", { persona, text }, CHECK_TIMEOUT_MS);
-  /** The daemon may resume the conversation's process first and waits for it to be ready. */
+  /** The daemon may resume the conversation's process first and waits for it to be ready. It delivers the message
+   * whether or not the client waits, so giving up at the check timeout would only invite a duplicate resend. */
   sendToConversation = (id: string, text: string) =>
-    this.call<void>("POST", `/api/supervisor/conversations/${encodeURIComponent(id)}/message`, { text }, CHECK_TIMEOUT_MS);
+    this.call<void>("POST", `/api/supervisor/conversations/${encodeURIComponent(id)}/message`, { text }, LONG_TIMEOUT_MS);
 
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);

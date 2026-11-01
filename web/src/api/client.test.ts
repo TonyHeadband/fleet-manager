@@ -287,6 +287,14 @@ describe("request timeouts, as fleet-client's", () => {
     expect((await settledAfter((c) => c.recheckTools(), 45_000)).settled).toBe(true);
   });
 
+  it("a_supervisor_message_outwaits_a_resume", async () => {
+    // A resume (persona check, readiness wait, typing) can pass the 25 s check timeout while the daemon still
+    // delivers; failing then would invite a resend that duplicates the message.
+    const send = (c: FleetClient) => c.sendToConversation("c1", "hi");
+    expect((await settledAfter(send, 30 * 60_000 - 1)).settled).toBe(false);
+    expect((await settledAfter(send, 30 * 60_000)).settled).toBe(true);
+  });
+
   it("calls_that_may_clone_or_weigh_folders_wait_fleet_client_s_30_minutes", async () => {
     const plan = { items: [], total: 0 };
     const long: Array<(c: FleetClient) => Promise<unknown>> = [
