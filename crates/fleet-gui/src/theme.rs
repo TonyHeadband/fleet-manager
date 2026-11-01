@@ -314,6 +314,12 @@ pub mod layout {
     pub const CHART_TINY: f32 = 120.0;
     /// A stat block's sparkline height.
     pub const CHART_SPARK: f32 = 56.0;
+    /// The column bars' plot height, above the baseline.
+    pub const CHART_PLOT: f32 = 80.0;
+    /// The ranked bars' label column.
+    pub const CHART_LABEL_W: f32 = 96.0;
+    /// The ranked bars' value column.
+    pub const CHART_VALUE_W: f32 = 44.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.

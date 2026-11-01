@@ -26,3 +26,27 @@
 .chart-stat-delta { font-family: var(--font-mono); font-size: var(--size-small); }
 .chart-spark { width: 100%; }
 .chart-spark svg { display: block; overflow: visible; }
+
+.chart-bars, .chart-rank { position: relative; }
+.chart-bars svg { display: block; overflow: visible; }
+.chart-col-value { fill: var(--text-high); font-family: var(--font-mono); font-size: var(--size-meta); text-anchor: middle; }
+.chart-col-hit { fill: transparent; pointer-events: all; }
+.chart-col-labels { display: grid; margin-top: var(--space-summary-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text); }
+.chart-col-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; padding: 0 var(--space-chip-gap); }
+
+.chart-rank { display: flex; flex-direction: column; gap: var(--space-header-gap); font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-rank-row { display: grid; grid-template-columns: var(--layout-chart-label-w) minmax(0, 1fr) var(--layout-chart-value-w); gap: var(--space-button-gap); align-items: center; }
+.chart-rank-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.chart-rank-value { text-align: right; color: var(--text-high); white-space: nowrap; }
+.chart-rank-track { display: block; min-width: 0; }
+.chart-rank-bar { display: block; height: var(--layout-bar-h); }
+.chart-rank-scale svg { display: block; overflow: visible; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Column bars grow up from the baseline; the shared entry wipes in from the left. */
+  :root:not([data-animations="off"]) [data-enter="grow"] { animation-name: chart-grow; }
+}
+@keyframes chart-grow {
+  from { clip-path: inset(100% 0 0 0); }
+  to { clip-path: inset(0); }
+}

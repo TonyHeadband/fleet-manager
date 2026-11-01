@@ -53,6 +53,9 @@
   --layout-chart-compact: 180px;
   --layout-chart-tiny: 120px;
   --layout-chart-spark: 56px;
+  --layout-chart-plot: 80px;
+  --layout-chart-label-w: 96px;
+  --layout-chart-value-w: 44px;
   --layout-canvas-pad: 10px;
   --layout-canvas-gap: 8px;
   --layout-grid: 20px;
