@@ -69,3 +69,11 @@
   to { stroke-dashoffset: 0; }
 }
 .chart-meter-mark { stroke-width: 1px; fill: none; }
+
+.chart-ts { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); }
+.chart-ts svg { display: block; overflow: visible; }
+.chart-ts .chart-ytick { text-anchor: end; }
+.chart-grid { stroke: var(--border); stroke-width: 1px; fill: none; }
+.chart-cross { stroke: var(--fill); stroke-width: 1px; fill: none; pointer-events: none; }
+.chart-ts-hit { fill: transparent; pointer-events: all; }
+.chart-ts-line { stroke-linejoin: round; }
