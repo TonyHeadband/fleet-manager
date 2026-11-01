@@ -408,11 +408,11 @@ impl AgentService {
         let mut p = self.new_post(&room, me, PostKind::Ask, text)?;
         p.to = self.recipient(&who, &room, to).await?;
         // Detached, so a client that hangs up cannot stop it between storing the ask and registering its call.
-        let svc = self.clone();
+        let (svc, caller) = (self.clone(), caller.clone());
         let (id, mut rx) = detached(async move {
             let _ask = svc.asks.lock.lock().await;
             let p = svc.publish(&room, p).await?;
-            Ok((p.id, svc.asks.hold(p.id)))
+            Ok((p.id, svc.asks.hold(p.id, &caller)))
         })
         .await?;
         if let Ok(Ok(answer)) = tokio::time::timeout(self.opts.repo_request_hold, &mut rx).await {

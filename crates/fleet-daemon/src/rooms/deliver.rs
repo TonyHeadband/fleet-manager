@@ -1,9 +1,9 @@
 //! Waking a post's recipients, and putting what is for the owner in front of them.
 //!
-//! A notice is never typed into a running turn. An orchestrator hears of a post from `wait_for_fleet` (its task's
-//! inbox) and from one line typed when it is at its input box; a supervisor conversation from a message, which
-//! resumes it if it has exited. An agent that cannot take the line now keeps it in its pending queue until it next
-//! reaches Review, when everything queued is typed as one line.
+//! A notice is never typed into a running turn, and a held tool call counts as one. An orchestrator hears of a post
+//! from `wait_for_fleet` (its task's inbox) and from one line typed when it is at its input box; a supervisor
+//! conversation from a message, which resumes it if it has exited. An agent that cannot take the line now keeps it in
+//! its pending queue until it next reaches Review, when everything queued is typed as one line.
 //!
 //! The queue is in memory. A daemon restart ends every session, so a queued line has nobody to be typed into; what it
 //! said is not lost: the post stays in the room for `room_read`, an orchestrator's inbox is stored with its task, and
@@ -231,7 +231,10 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
         });
         return;
     }
-    if a.status == Status::Working {
+    // Only its input box at Review takes a line. A held tool call is a running turn: a waiting `room_ask`, a pending
+    // `propose_breakdown` or a permission prompt (both NeedsYou) would get the line in the held turn or as a dialog's
+    // answer.
+    if a.status != Status::Review || svc.asks.holding(&a.id) {
         return;
     }
     let lines = svc.notices.take(id);

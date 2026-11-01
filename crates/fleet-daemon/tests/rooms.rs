@@ -1700,6 +1700,84 @@ async fn proposing_a_breakdown_posts_an_ask_to_the_supervisor() {
     assert_eq!(ask.breakdown_version, Some(1));
 }
 
+/// The supervisor's message to `a` in its operation room; returns the notice `a` is typed for it.
+async fn message_to(fx: &Fx, sup: &AgentId, a: &AgentId) -> String {
+    let room = op_room(sup);
+    posted_id(
+        &tool(
+            &fx.svc,
+            sup,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase when free", "to": a.0, "room": room }),
+        )
+        .await,
+    );
+    format!("{NOTICE} new message from supervisor in {room}; call room_read.")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_an_orchestrator_held_in_room_ask_waits_for_review() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    // Whatever its status says, a held call is a running turn.
+    set_status(&fx, &a, Status::Review).await;
+    let held = ask_in_background(&fx.svc, &a, "owner", "which port?");
+    let ask = wait_ask(&fx, &op_room(&sup)).await;
+
+    let line = message_to(&fx, &sup, &a).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(NOTICE),
+        "typed into the held turn"
+    );
+
+    assert!(fx
+        .svc
+        .room_answer(&MemberRef::Owner, ask, "port 7070")
+        .await
+        .unwrap());
+    let reply = tokio::time::timeout(Duration::from_secs(10), held)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply, ("port 7070".to_string(), false));
+    set_status(&fx, &a, Status::Working).await;
+    set_status(&fx, &a, Status::Review).await;
+    assert!(pane_contains(&fx, &a, &line).await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_an_orchestrator_held_in_propose_breakdown_waits_for_review() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let (held, _) = propose(&fx, &a, &op_room(&sup)).await;
+    let card = agent(&fx, &a).await;
+    assert_eq!(
+        (card.status, card.blocked_reason),
+        (Status::NeedsYou, Some(fleet_api::BlockedReason::Breakdown))
+    );
+
+    let line = message_to(&fx, &sup, &a).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(NOTICE),
+        "typed into the held turn"
+    );
+
+    fx.svc
+        .decide_breakdown(&a, decision(true, None))
+        .await
+        .unwrap();
+    assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
+    set_status(&fx, &a, Status::Working).await;
+    set_status(&fx, &a, Status::Review).await;
+    assert!(pane_contains(&fx, &a, &line).await);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn approving_in_the_panel_answers_the_ask() {
     let fx = fixture().await;
