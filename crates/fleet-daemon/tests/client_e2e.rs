@@ -131,6 +131,18 @@ async fn errors_carry_the_daemons_message() {
     assert!(err.message.contains("no such agent"), "{err}");
 }
 
+/// A direct task needs its one repo: the client shows the daemon's 400 as it said it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spawn_with_no_repo_carries_the_daemons_refusal() {
+    let (url, fx) = start().await;
+    let c = Arc::new(FleetClient::new(&url));
+    let mut req = direct(&fx, "core", "x");
+    req.repos.clear();
+    let err = blocking!(c, c.spawn(&req)).unwrap_err();
+    assert_eq!(err.message, "an orchestrated task has exactly one repo");
+    assert!(blocking!(c, c.snapshot()).unwrap().agents.is_empty());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unreachable_daemon_is_an_error_not_a_panic_or_a_hang() {
     let c = Arc::new(FleetClient::new("http://127.0.0.1:1"));
