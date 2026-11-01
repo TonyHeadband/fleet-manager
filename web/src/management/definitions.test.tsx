@@ -63,6 +63,20 @@ const refuse = async <T,>(p: ReturnType<typeof pending<T>>, message: string) => 
 beforeEach(() => localStorage.clear());
 
 describe("Definitions", () => {
+  it("says no active persona on Specialists and Skills without one, and still lists PR styles", async () => {
+    const personaDefinitions = vi.fn().mockResolvedValue([]);
+    const definitions = vi.fn().mockResolvedValue([def("pr_style", "plain")]);
+    await management("Specialists", { personas: [], over: { definitions, personaDefinitions } });
+    expect(await screen.findByText("No active persona")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    await fleetTab("Skills");
+    expect(await screen.findByText("No active persona")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    await fleetTab("PR styles");
+    expect(await row("plain built-in")).toBeInTheDocument();
+    expect(personaDefinitions).not.toHaveBeenCalled();
+  });
+
   it("definitions_tabs", async () => {
     const h = await defsTab("Instructions", [
       def("orchestrator", "bug-fix"),

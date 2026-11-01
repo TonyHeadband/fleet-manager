@@ -85,9 +85,11 @@ export function Definitions({
   const [creating, setCreating] = useState(false);
   const all = kinds.includes("pr_style") ? st.styles : st.list;
   if (all === null) {
+    // `defs.persona` is "" with no active persona (unset, or one no longer listed): no list is ever asked for then.
+    const noPersona = !kinds.includes("pr_style") && defs.persona === "";
     return (
       <div className="tabbed-page">
-        <p className="note">Loading…</p>
+        <p className="note">{noPersona ? "No active persona" : "Loading…"}</p>
       </div>
     );
   }
