@@ -1,5 +1,5 @@
-//! Logging a persona in: a terminal running the real `claude` / `gh` CLI. fleet never reads the token the CLI
-//! stores; it only starts the CLI against the persona's own config folder.
+//! Logging a persona in: a terminal running the real `claude` / `gh` CLI against the persona's own config folder.
+//! The client never reads the token the CLI stores; the daemon reads gh's to hold the persona's GitHub token.
 use fleet_api::{ambient_vars, Persona};
 use std::io;
 use std::path::Path;

@@ -306,7 +306,8 @@ impl Store {
                 include_str!("../migrations/013_claude_sessions.sql"),
                 "PRAGMA user_version = 13",
             ),
-            // 014 belongs to another branch; the runner only compares versions, so a gap is harmless.
+            // 014 belongs to another branch. The gap is harmless only if that branch lands first: a database at 15
+            // would skip a later 014. If this one lands first, 015 is renumbered to 014.
             (
                 15,
                 include_str!("../migrations/015_forge_calls.sql"),
