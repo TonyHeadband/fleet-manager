@@ -54,7 +54,7 @@ export function AskMessage({ agentId, ask, client, onAnswered }: Props) {
     body = <p className="chat-ask-answered">{ask.answered ? `Answered · ${ask.answered}` : "Answered"}</p>;
   } else if (kind.type === "permission") {
     body = (
-      <div className="chat-ask-options">
+      <div className="chat-ask-options" data-row>
         {kind.options.map((o, i) => (
           <Button key={o.id} variant={i === 0 ? "primary" : "default"} disabled={sending} onClick={() => send({ choice: o.id, text: null }, o.label)}>
             {o.label}

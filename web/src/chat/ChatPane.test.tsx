@@ -273,6 +273,50 @@ describe("ChatPane", () => {
     expect(ask).toHaveTextContent("Answer it in the reply box");
   });
 
+  it("an_empty_chat_says_so", () => {
+    start();
+    expect(feed(), "nothing said before the page comes").toBeEmptyDOMElement();
+    page([]);
+    expect(screen.getByText("Nothing yet: the chat starts with the agent's first message.")).toHaveClass("chat-empty");
+    more([reply("hello")]);
+    expect(screen.queryByText(/Nothing yet/)).toBeNull();
+  });
+
+  it("an_empty_chat_with_an_ask_or_an_end_says_nothing_more", () => {
+    start();
+    page([]);
+    asks(permission());
+    expect(screen.queryByText(/Nothing yet/)).toBeNull();
+    asks(null);
+    act(() => chat().emit("ended", AT));
+    expect(screen.queryByText(/Nothing yet/)).toBeNull();
+  });
+
+  it("a_session_end_clears_waiting_prompts", async () => {
+    start();
+    page([reply("pushing")]);
+    asks(permission("k1"));
+    await userEvent.click(within(screen.getByRole("group", { name: "Wants to run" })).getByRole("button", { name: "Allow once" }));
+    asks(permission("k2"));
+    expect(screen.getAllByRole("group", { name: "Wants to run" })).toHaveLength(2);
+    act(() => chat().emit("ended", AT));
+    const left = screen.getAllByRole("group", { name: "Wants to run" });
+    expect(left).toHaveLength(1);
+    expect(left[0]).toHaveTextContent("Answered · Allow once");
+    expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+  });
+
+  it("the_permission_buttons_stay_on_one_row", () => {
+    start();
+    page([]);
+    asks(permission());
+    const row = within(screen.getByRole("group", { name: "Wants to run" })).getByRole("button", { name: "Deny" }).parentElement!;
+    expect(row).toHaveAttribute("data-row");
+    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.chat-ask-options\[data-row\] \{[^}]*flex-wrap: nowrap;/);
+    expect(css).toMatch(/\.chat-ask-options\[data-row\] button \{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis;/);
+  });
+
   it("chat_css_uses_tokens_only", () => {
     const css = readFileSync("src/chat/chat.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();

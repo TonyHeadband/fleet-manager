@@ -49,6 +49,8 @@ export function ChatPane(props: Props) {
 
 function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props) {
   const [items, setItems] = useState<ChatItem[]>([]);
+  // The first page came: an empty chat is then really empty, not still loading.
+  const [loaded, setLoaded] = useState(false);
   const [earlier, setEarlier] = useState(0);
   const [asks, setAsks] = useState<Shown[]>([]);
   const [endedAt, setEndedAt] = useState<number | null>(null);
@@ -71,6 +73,7 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
           page: (p) => {
             setItems(p.items);
             setEarlier(p.earlier);
+            setLoaded(true);
           },
           items: (next) => setItems((prev) => mergeItems(prev, next)),
           ask: (a) =>
@@ -82,7 +85,11 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
               const answered = a.answered ?? known?.ask.answered ?? null;
               return [...kept, { ask: { ...a, answered }, after: answered !== null && known ? known.after : lastSeq.current }];
             }),
-          ended: setEndedAt,
+          ended: (at) => {
+            setEndedAt(at);
+            // The stream need not clear an ask before it ends: nothing is left to answer.
+            setAsks((list) => list.filter((s) => s.ask.answered !== null));
+          },
         },
         factory,
       ),
@@ -154,6 +161,7 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
           </button>
         )}
         {historyError && <ErrorLine text={historyError} />}
+        {loaded && rows.length === 0 && <p className="chat-empty">Nothing yet: the chat starts with the agent's first message.</p>}
         {rows}
       </div>
     </div>
