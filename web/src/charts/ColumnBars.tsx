@@ -20,14 +20,14 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
   const [ref, { width, height: measured }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const drawn = width > 0 && bars.length > 0;
-  const entering = useChartEntry(drawn);
-
   // The measured region holds the plot and its tick; whatever it is given beyond the minimum goes to the plot.
   const minRegion = layout.chartPlot + column.tickLen;
   const plot = Math.max(layout.chartPlot, measured - column.tickLen);
   const band = bars.length ? width / bars.length : 0;
   const barW = Math.max(band - column.gap, SLIVER);
   const max = Math.max(0, ...bars.map((b) => finite(b.value)));
+  // Bars of zeros (a widget not yet loaded) have nothing to grow, so they must not spend the entry.
+  const entering = useChartEntry(drawn && max > 0);
   const height = linear(0, max, 0, plot - layout.cardPadding);
   const showValues = width >= layout.chartTiny;
   const rows: [string, string][] = bars.map((b) => [b.label, format(finite(b.value))]);
@@ -48,7 +48,7 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
                   <rect
                     className="chart-col-bar"
                     data-enter={entering ? "grow" : undefined}
-                    style={{ "--i": Math.min(i, motion.staggerCap) } as React.CSSProperties}
+                    style={{ "--i": Math.min(i, motion.staggerCap), y: `${plot - h}px`, height: `${h}px` } as React.CSSProperties}
                     x={x}
                     y={plot - h}
                     width={barW}
