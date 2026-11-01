@@ -196,6 +196,18 @@ describe("Rooms widget", () => {
     expect(screen.getByPlaceholderText("Post…")).toHaveValue("");
   });
 
+  it("an_answered_ask_leaves_the_accent_and_an_open_one_keeps_it", async () => {
+    const open = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which port?" });
+    const done = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which host?", answered_at: 1767225600 });
+    show(clientWith({ r1: [open, done] }));
+    const feed = await log();
+    expect(within(feed).getByText("Which port?").closest(".chat-ask")).not.toHaveAttribute("data-answered");
+    expect(within(feed).getByText("Which host?").closest(".chat-ask")).toHaveAttribute("data-answered");
+    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.chat-ask\[data-answered\] \{[^}]*border-color: var\(--text-high\);/);
+    expect(css).toMatch(/\.chat-ask\[data-answered\] \.chat-ask-caption \{[^}]*color: var\(--text-high\);/);
+  });
+
   it("an_owner_ask_answers_inline", async () => {
     const ask = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which port?" });
     const toSomeoneElse = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: { agent: "t9" }, text: "Ready?" });

@@ -11,10 +11,10 @@ interface Props {
   children: ReactNode;
 }
 
-/** An ask in a chat, in the accent outline: its caption, what is asked, then its answer once it has one. */
+/** An ask in a chat, in the accent outline while open, the text colour once answered: its caption, what is asked, then its answer once it has one. */
 export function AskFrame({ caption, answered, error, children }: Props) {
   return (
-    <div role="group" aria-label={caption} className="chat-ask">
+    <div role="group" aria-label={caption} className="chat-ask" data-answered={answered !== null ? "" : undefined}>
       <p className="chat-ask-caption">{caption}</p>
       {children}
       {answered !== null && <p className="chat-ask-answered">{answered ? `Answered · ${answered}` : "Answered"}</p>}
