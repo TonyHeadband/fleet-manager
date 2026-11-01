@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AVATAR_H, AVATAR_W, avatar, type AvatarArt, type AvatarKind, type AvatarShape } from "./avatar";
+import { AVATAR_H, AVATAR_W, avatar, type AvatarArt, type AvatarKind, type AvatarShape } from "./avatarArt";
 
 // The generator behind every persona and specialist picture. The same seed must draw the same picture forever, in
 // both themes and on every machine, so these tests pin both its invariants and, for a few seeds, its exact output.
