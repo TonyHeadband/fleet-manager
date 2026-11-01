@@ -87,6 +87,28 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
     writeln!(out, "  --selection-alpha-strong: {strong};").unwrap();
     writeln!(out, "  --selection-alpha-soft: {soft};").unwrap();
     writeln!(out, "  --chip-alpha: {:.3};", theme::chip_alpha(dark)).unwrap();
+    // A status edge's motion: the visor's band, and the hard-edged glow strips beside the edge, faintest (widest)
+    // first; the visor casts its glow only in dark, as Lite does.
+    writeln!(out, "  --visor-band: {};", hex(theme::visor_band(dark))).unwrap();
+    // The tone's own colour at the glow's alpha: egui keeps them premultiplied, which would shift the hue.
+    for (name, tone, on) in [
+        ("attention", Tone::Attention, true),
+        ("active", Tone::Active, dark),
+    ] {
+        let c = theme::tone_color(tone, dark);
+        for (i, layer) in theme::glow(c, dark).into_iter().enumerate() {
+            let alpha = if on { layer.a() as f32 / 255.0 } else { 0.0 };
+            writeln!(
+                out,
+                "  --glow-{name}-{}: rgb({} {} {} / {alpha:.3});",
+                i + 1,
+                c.r(),
+                c.g(),
+                c.b()
+            )
+            .unwrap();
+        }
+    }
     out
 }
 
@@ -152,7 +174,7 @@ const LAYOUT: [(&str, &str, f32); 41] = [
     ("changes-dot", "changesDot", canvas::CHANGES_DOT),
 ];
 
-const MOTION: [(&str, &str, u32); 14] = [
+const MOTION: [(&str, &str, u32); 16] = [
     ("wipe", "wipe", motion::WIPE),
     ("step-in", "stepIn", motion::STEP_IN),
     ("stagger", "stagger", motion::STAGGER),
@@ -163,6 +185,8 @@ const MOTION: [(&str, &str, u32); 14] = [
     ("menu", "menu", motion::MENU),
     ("dialog", "dialog", motion::DIALOG),
     ("dialog-close", "dialogClose", motion::DIALOG_CLOSE),
+    ("visor", "visor", motion::VISOR),
+    ("pulse", "pulse", motion::PULSE),
     ("at-board", "atBoard", motion::AT_BOARD),
     ("at-panel", "atPanel", motion::AT_PANEL),
     ("at-footer", "atFooter", motion::AT_FOOTER),

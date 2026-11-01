@@ -158,6 +158,44 @@
   .dialog-backdrop[data-closing] .dialog::after {
     animation: fui-dialog-line-close var(--motion-dialog-close) var(--ease-pull) both;
   }
+  /* A working agent's status edge runs a light band down and back up it, casting a glow beside it in dark; a
+     needs-you edge breathes a glow beside it. Hard-edged strips (2, 4 and 6px), as Lite paints them; nothing crosses
+     the card's text. */
+  .edge-motion {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: calc(var(--card-edge) * 2.5);
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .edge-motion::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    width: var(--card-edge);
+  }
+  .edge-motion[data-motion="visor"]::before {
+    height: 25%;
+    background: var(--visor-band);
+    box-shadow:
+      calc(var(--card-edge) / 2) 0 0 var(--glow-active-3),
+      var(--card-edge) 0 0 var(--glow-active-2),
+      calc(var(--card-edge) * 1.5) 0 0 var(--glow-active-1);
+    animation: fui-visor var(--motion-visor) ease-in-out infinite alternate;
+  }
+  .edge-motion[data-motion="pulse"] {
+    animation: fui-pulse var(--motion-pulse) ease-in-out infinite;
+  }
+  .edge-motion[data-motion="pulse"]::before {
+    top: 0;
+    bottom: 0;
+    box-shadow:
+      calc(var(--card-edge) / 2) 0 0 var(--glow-attention-3),
+      var(--card-edge) 0 0 var(--glow-attention-2),
+      calc(var(--card-edge) * 1.5) 0 0 var(--glow-attention-1);
+  }
   /* Pressing a tab slides the panes' track to it; two tabs away crosses the middle one. */
   .pane-track {
     transition: transform var(--motion-slide) var(--ease-push);
@@ -245,5 +283,27 @@
 @keyframes fui-undim {
   to {
     opacity: 0;
+  }
+}
+/* Motion off: no band frozen at the top, no glow left lit. */
+:root[data-animations="off"] .edge-motion {
+  display: none;
+}
+/* The band's centre goes from the edge's top to its bottom, half of it past either end there. */
+@keyframes fui-visor {
+  from {
+    top: -12.5%;
+  }
+  to {
+    top: 87.5%;
+  }
+}
+@keyframes fui-pulse {
+  from,
+  to {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
   }
 }

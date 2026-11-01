@@ -205,6 +205,8 @@
   --motion-menu: 200ms;
   --motion-dialog: 380ms;
   --motion-dialog-close: 280ms;
+  --motion-visor: 1300ms;
+  --motion-pulse: 1800ms;
   --motion-at-board: 160ms;
   --motion-at-panel: 340ms;
   --motion-at-footer: 500ms;
@@ -254,6 +256,13 @@
   --selection-alpha-strong: 0.18;
   --selection-alpha-soft: 0.05;
   --chip-alpha: 0.090;
+  --visor-band: #9abef1;
+  --glow-attention-1: rgb(184 83 47 / 0.039);
+  --glow-attention-2: rgb(184 83 47 / 0.078);
+  --glow-attention-3: rgb(184 83 47 / 0.149);
+  --glow-active-1: rgb(31 111 224 / 0.000);
+  --glow-active-2: rgb(31 111 224 / 0.000);
+  --glow-active-3: rgb(31 111 224 / 0.000);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -297,6 +306,13 @@
     --selection-alpha-strong: 0.26;
     --selection-alpha-soft: 0.08;
     --chip-alpha: 0.122;
+    --visor-band: #a8d5ff;
+    --glow-attention-1: rgb(217 119 87 / 0.078);
+    --glow-attention-2: rgb(217 119 87 / 0.161);
+    --glow-attention-3: rgb(217 119 87 / 0.302);
+    --glow-active-1: rgb(61 162 255 / 0.078);
+    --glow-active-2: rgb(61 162 255 / 0.161);
+    --glow-active-3: rgb(61 162 255 / 0.302);
   }
 }
 :root[data-theme="dark"] {
@@ -340,6 +356,13 @@
   --selection-alpha-strong: 0.26;
   --selection-alpha-soft: 0.08;
   --chip-alpha: 0.122;
+  --visor-band: #a8d5ff;
+  --glow-attention-1: rgb(217 119 87 / 0.078);
+  --glow-attention-2: rgb(217 119 87 / 0.161);
+  --glow-attention-3: rgb(217 119 87 / 0.302);
+  --glow-active-1: rgb(61 162 255 / 0.078);
+  --glow-active-2: rgb(61 162 255 / 0.161);
+  --glow-active-3: rgb(61 162 255 / 0.302);
 }
 /* A chosen theme draws the native controls (checkboxes, selects, scrollbars) in it too. */
 :root[data-theme="light"] {

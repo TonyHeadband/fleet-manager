@@ -191,9 +191,11 @@ pub(crate) enum EdgeMotion {
 /// an unfocused window or the Animations setting off all cost nothing.
 pub(crate) fn edge_motion(ui: &Ui, agent: &Agent, tone: Tone) -> EdgeMotion {
     if agent.status == Status::Working && !agent.paused {
-        theme::visor(ui, 1.3).map_or(EdgeMotion::Still, EdgeMotion::Visor)
+        theme::visor(ui, theme::motion::VISOR as f32 / 1000.0)
+            .map_or(EdgeMotion::Still, EdgeMotion::Visor)
     } else if tone == Tone::Attention {
-        theme::pulse(ui, 1.8).map_or(EdgeMotion::Still, EdgeMotion::Pulse)
+        theme::pulse(ui, theme::motion::PULSE as f32 / 1000.0)
+            .map_or(EdgeMotion::Still, EdgeMotion::Pulse)
     } else {
         EdgeMotion::Still
     }

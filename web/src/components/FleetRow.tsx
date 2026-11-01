@@ -3,6 +3,7 @@ import type { UiSchema } from "../api/generated/UiSchema";
 import { columnFor, formatDuration, title } from "../api/schema";
 import { specialistIcon, statusWord } from "../board/groups";
 import { Mark } from "../ui/icons";
+import { EdgeMotion } from "./EdgeMotion";
 
 interface Props {
   schema: UiSchema;
@@ -39,6 +40,7 @@ export function FleetRow({ schema, agent, name, now, selected, stuck, pr, onOpen
         onOpen(agent);
       }}
     >
+      <EdgeMotion agent={agent} tone={tone} />
       <Mark name={specialistIcon(agent)} label={name} />
       <span className="fleet-row-title" title={agent.goal}>
         {title(agent)}
