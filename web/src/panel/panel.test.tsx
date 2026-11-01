@@ -53,6 +53,11 @@ describe("the panel's details", () => {
     expect(screen.queryByText(/^Model:/)).toBeNull();
   });
 
+  it("the_model_mode_and_effort_share_one_line", () => {
+    show(detailsAgent({ kind: "specialist", model: "opus", mode: "auto", effort: "high" }));
+    expect(screen.getByText("Model: opus · Mode: auto · Effort: high")).toHaveClass("details-meta");
+  });
+
   it("panel_shows_the_mode_and_effort", () => {
     show(detailsAgent({ mode: "auto", effort: "high" }));
     expect(screen.getByText("Mode: auto · Effort: high")).toBeInTheDocument();

@@ -9,7 +9,7 @@ import { navigate, tasksHref } from "../shell/routes";
 /**
  * What the card cannot show, under the panel's title: one status row (the column, every badge and the size, the time
  * at its right end), then a line per field the schema shows that nothing else says (fields this client does not
- * know), the model and the mode and effort. The header's path names the repos and the branch, the card the persona.
+ * know), then the model, mode and effort on one line. The header's path names the repos and the branch, the card the persona.
  * A stopped agent's opens in Tasks, where its history is.
  */
 export function Details({ schema, agent, now }: { schema: UiSchema; agent: Agent; now: number }) {
@@ -17,7 +17,9 @@ export function Details({ schema, agent, now }: { schema: UiSchema; agent: Agent
   const ofKind = (kind: string) => shown.filter((f) => f.kind === kind);
   const column = columnFor(schema, agent);
   const others = shown.filter((f) => (f.kind === "text" || f.kind === "mono") && !["title", "activity", "branch"].includes(f.key));
-  const modeEffort = [agent.mode && `Mode: ${agent.mode}`, agent.effort && `Effort: ${agent.effort}`].filter(Boolean).join(" · ");
+  // Only a fleet agent has a resolved model; a solo agent runs on whatever its persona's Claude is set to.
+  const model = (agent.kind ?? "solo") !== "solo" ? `Model: ${agent.model ?? "persona default"}` : null;
+  const run = [model, agent.mode && `Mode: ${agent.mode}`, agent.effort && `Effort: ${agent.effort}`].filter(Boolean).join(" · ");
   return (
     <div className="details">
       <div className="details-status">
@@ -54,9 +56,7 @@ export function Details({ schema, agent, now }: { schema: UiSchema; agent: Agent
           <Field def={f} agent={agent} now={now} />
         </div>
       ))}
-      {/* Only a fleet agent has a resolved model; a solo agent runs on whatever its persona's Claude is set to. */}
-      {(agent.kind ?? "solo") !== "solo" && <p className="details-meta">{`Model: ${agent.model ?? "persona default"}`}</p>}
-      {modeEffort && <p className="details-meta">{modeEffort}</p>}
+      {run && <p className="details-meta">{run}</p>}
       {agent.status === "stopped" && (
         <button type="button" className="link" onClick={() => navigate(tasksHref("all", agent.id))}>
           Open in Tasks
