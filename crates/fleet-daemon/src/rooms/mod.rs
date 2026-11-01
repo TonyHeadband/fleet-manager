@@ -112,10 +112,10 @@ fn is(member: &MemberRef, agent: &AgentId) -> bool {
 
 /// Every room, with the title and the owner's unread count.
 pub async fn list(store: &Store) -> Result<Vec<Room>, StoreError> {
-    let agents = store.snapshot().await?.agents;
+    let (agents, tasks) = (store.snapshot().await?.agents, store.tasks().await?);
     let mut out = Vec::new();
     for r in store.rooms().await? {
-        out.push(view(store, r, &agents).await?);
+        out.push(view(store, r, &agents, &tasks).await?);
     }
     Ok(out)
 }
@@ -123,7 +123,7 @@ pub async fn list(store: &Store) -> Result<Vec<Room>, StoreError> {
 /// The rooms the persona's owner reads: its operation rooms, live before archived, then every product room that has
 /// posts. The owner's unread count needs no member row: until they first read a room, every post in it counts.
 pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreError> {
-    let agents = store.snapshot().await?.agents;
+    let (agents, tasks) = (store.snapshot().await?.agents, store.tasks().await?);
     let (mut live, mut archived, mut products) = (Vec::new(), Vec::new(), Vec::new());
     for r in store.rooms().await? {
         let shelf = match r.kind {
@@ -133,24 +133,29 @@ pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreEr
             RoomKind::Product if store.room_posts(&r.id, None, 1).await?.is_empty() => continue,
             RoomKind::Product => &mut products,
         };
-        shelf.push(view(store, r, &agents).await?);
+        shelf.push(view(store, r, &agents, &tasks).await?);
     }
     live.extend(archived);
     live.extend(products);
     Ok(live)
 }
 
-async fn view(store: &Store, r: RoomRow, agents: &[Agent]) -> Result<Room, StoreError> {
+/// The room as the list shows it. `tasks` is every task, read once for the whole list.
+async fn view(
+    store: &Store,
+    r: RoomRow,
+    agents: &[Agent],
+    tasks: &[Task],
+) -> Result<Room, StoreError> {
     let mut members = Vec::new();
     for id in supervisors_of(store, &r, agents).await? {
-        let name = member_name(store, &r, &MemberRef::Agent(id.clone())).await?;
+        let name = name_with(&r, &MemberRef::Agent(id.clone()), tasks.iter(), agents);
         members.push(RoomMember { name, id });
     }
-    // The owner joins by reading and the daemon only announces: neither is someone to address. Nor is a conversation
-    // that only looked in.
+    // A conversation that only looked in is not someone to address.
     for id in present_agents(store, &r.id).await? {
         if !is_supervisor(agents, &id) {
-            let name = member_name(store, &r, &MemberRef::Agent(id.clone())).await?;
+            let name = name_with(&r, &MemberRef::Agent(id.clone()), tasks.iter(), agents);
             members.push(RoomMember { name, id });
         }
     }
@@ -174,16 +179,41 @@ pub(crate) async fn member_name(
     room: &RoomRow,
     m: &MemberRef,
 ) -> Result<String, StoreError> {
-    Ok(match m {
+    let task = match m {
+        MemberRef::Agent(a) if room.conversation.as_ref() != Some(a) => store.task(a).await?,
+        _ => None,
+    };
+    // Only a member that is no task may be a supervisor conversation outside its own room.
+    let agents = match (m, &task) {
+        (MemberRef::Agent(a), None) if room.conversation.as_ref() != Some(a) => {
+            store.snapshot().await?.agents
+        }
+        _ => Vec::new(),
+    };
+    Ok(name_with(room, m, task.iter(), &agents))
+}
+
+/// `member_name` from tasks and agents already read; `tasks` need only hold the member's task.
+fn name_with<'a>(
+    room: &RoomRow,
+    m: &MemberRef,
+    mut tasks: impl Iterator<Item = &'a Task>,
+    agents: &[Agent],
+) -> String {
+    match m {
         MemberRef::Owner => "owner".into(),
         MemberRef::Daemon => "Fleet Manager".into(),
         MemberRef::Agent(a) if room.conversation.as_ref() == Some(a) => SUPERVISOR.into(),
-        MemberRef::Agent(a) => match store.task(a).await? {
-            Some(t) => t.title.filter(|t| !t.is_empty()).unwrap_or(t.name),
-            None if is_supervisor(&store.snapshot().await?.agents, a) => SUPERVISOR.into(),
+        MemberRef::Agent(a) => match tasks.find(|t| &t.id == a) {
+            Some(t) => t
+                .title
+                .clone()
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| t.name.clone()),
+            None if is_supervisor(agents, a) => SUPERVISOR.into(),
             None => a.0.clone(),
         },
-    })
+    }
 }
 
 const SUPERVISOR: &str = "supervisor";
@@ -225,6 +255,7 @@ pub(crate) async fn present_agents(store: &Store, room: &str) -> Result<Vec<Agen
         .await?
         .into_iter()
         .filter(|m| m.left_at.is_none())
+        // The owner joins by reading and the daemon only announces: neither is someone to address.
         .filter_map(|m| match MemberRef::from_key(&m.member) {
             MemberRef::Agent(a) => Some(a),
             _ => None,
