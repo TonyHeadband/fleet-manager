@@ -14,6 +14,7 @@ import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { AgentSettings } from "./generated/AgentSettings";
 import type { AskAnswer } from "./generated/AskAnswer";
+import type { AskReply } from "./generated/AskReply";
 import type { ChatPage } from "./generated/ChatPage";
 import type { Conversation } from "./generated/Conversation";
 import type { CheckoutList } from "./generated/CheckoutList";
@@ -27,12 +28,15 @@ import type { FormDef } from "./generated/FormDef";
 import type { Release } from "./generated/Release";
 import type { MoveDefinition } from "./generated/MoveDefinition";
 import type { NewPersona } from "./generated/NewPersona";
+import type { NewPost } from "./generated/NewPost";
 import type { Persona } from "./generated/Persona";
 import type { PersonaList } from "./generated/PersonaList";
 import type { PersonaUpdate } from "./generated/PersonaUpdate";
+import type { Post } from "./generated/Post";
 import type { ProductList } from "./generated/ProductList";
 import type { SubmitDef } from "./generated/SubmitDef";
 import type { RepoList } from "./generated/RepoList";
+import type { Room } from "./generated/Room";
 import type { Snapshot } from "./generated/Snapshot";
 import type { SpawnRequest } from "./generated/SpawnRequest";
 import type { StopTaskResponse } from "./generated/StopTaskResponse";
@@ -237,6 +241,16 @@ export class FleetClient {
    * whether or not the client waits, so giving up at the check timeout would only invite a duplicate resend. */
   sendToConversation = (id: string, text: string) =>
     this.call<void>("POST", `/api/supervisor/conversations/${encodeURIComponent(id)}/message`, { text }, LONG_TIMEOUT_MS);
+
+  /** The persona's operation rooms, live before archived, then the product rooms that have posts. */
+  rooms = (persona: string) => this.call<Room[]>("GET", `/api/rooms?persona=${encodeURIComponent(persona)}`);
+  /** The room's latest posts, or those before `before`, newest last; the daemon marks them read for the owner. */
+  roomPosts = (id: string, before?: number) =>
+    this.call<Post[]>("GET", `/api/rooms/${encodeURIComponent(id)}/posts${before === undefined ? "" : `?before=${before}`}`);
+  /** The owner's announcement or message; the daemon refuses an ask. */
+  postToRoom = (id: string, body: NewPost) => this.call<Post>("POST", `/api/rooms/${encodeURIComponent(id)}/posts`, body);
+  /** Rejects with `already answered` when the ask has its answer. A breakdown's ask is decided by it. */
+  answerRoomAsk = (post: number, body: AskReply) => this.call<void>("POST", `/api/rooms/asks/${post}/answer`, body);
 
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);

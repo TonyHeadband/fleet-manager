@@ -180,6 +180,52 @@ fn the_openapi_document_lists_the_supervisor_routes() {
 }
 
 #[test]
+fn the_openapi_document_lists_the_rooms_routes() {
+    let doc = serde_json::to_value(openapi()).unwrap();
+    let paths = doc["paths"].as_object().expect("paths object");
+    for (p, method) in [
+        ("/api/rooms", "get"),
+        ("/api/rooms/{id}/posts", "get"),
+        ("/api/rooms/{id}/posts", "post"),
+        ("/api/rooms/asks/{post}/answer", "post"),
+    ] {
+        assert!(
+            paths.get(p).is_some_and(|o| o.get(method).is_some()),
+            "missing {method} {p}; have {:?}",
+            paths.keys()
+        );
+    }
+    let schemas = doc["components"]["schemas"].as_object().unwrap();
+    for s in [
+        "Room",
+        "RoomKind",
+        "MemberRef",
+        "Post",
+        "PostKind",
+        "NewPost",
+        "AskReply",
+    ] {
+        assert!(schemas.contains_key(s), "missing schema {s}");
+    }
+}
+
+#[test]
+fn the_owner_s_room_bodies_have_their_wire_form() {
+    let post: fleet_api::NewPost =
+        serde_json::from_value(json!({ "kind": "message", "to": { "agent": "a1" }, "text": "hi" }))
+            .unwrap();
+    assert_eq!(
+        post.to,
+        Some(fleet_api::MemberRef::Agent(fleet_api::AgentId("a1".into())))
+    );
+    let all: fleet_api::NewPost =
+        serde_json::from_value(json!({ "kind": "announcement", "text": "hi" })).unwrap();
+    assert_eq!(all.to, None);
+    let reply: fleet_api::AskReply = serde_json::from_value(json!({ "approve": true })).unwrap();
+    assert_eq!((reply.approve, reply.text), (Some(true), None));
+}
+
+#[test]
 fn the_openapi_document_lists_the_task_routes() {
     let doc = serde_json::to_value(openapi()).unwrap();
     let paths = doc["paths"].as_object().expect("paths object");
@@ -884,6 +930,8 @@ fn ts_bindings_export() {
     fleet_api::Room::export_all(&cfg).unwrap();
     fleet_api::MemberRef::export_all(&cfg).unwrap();
     fleet_api::Post::export_all(&cfg).unwrap();
+    fleet_api::NewPost::export_all(&cfg).unwrap();
+    fleet_api::AskReply::export_all(&cfg).unwrap();
     fleet_api::NewConversation::export_all(&cfg).unwrap();
     fleet_api::ConversationMessage::export_all(&cfg).unwrap();
     fleet_api::TaskEvent::export_all(&cfg).unwrap();
@@ -918,6 +966,8 @@ fn ts_bindings_export() {
         "MemberRef.ts",
         "Post.ts",
         "PostKind.ts",
+        "NewPost.ts",
+        "AskReply.ts",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }

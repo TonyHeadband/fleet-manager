@@ -112,3 +112,28 @@ pub struct Post {
     #[ts(optional = nullable)]
     pub breakdown_version: Option<u32>,
 }
+
+/// The owner's post from the Rooms widget: an announcement or a message. Asks are the orchestrators'.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct NewPost {
+    pub kind: PostKind,
+    /// One member of the room, or None for everyone.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub to: Option<MemberRef>,
+    pub text: String,
+}
+
+/// The owner's answer to an ask. `approve: true` answers `approve`, which approves a breakdown's version; otherwise
+/// the answer is `text`, which for a breakdown's ask requests changes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct AskReply {
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub text: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub approve: Option<bool>,
+}

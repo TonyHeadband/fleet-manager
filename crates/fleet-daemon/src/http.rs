@@ -31,15 +31,16 @@ use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AgentKind, AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    AskAnswer, AskKind, BlockedReason, ChatAsk, ChatItem, ChatPage, CheckoutInfo, CheckoutList,
-    ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind,
-    EffectiveSettings, Event, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
-    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    InternalRemote, MoveDefinition, NewConversation, NewPersona, NewProduct, NewRelease,
-    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
-    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse,
-    Task, TaskEvent, TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    AskAnswer, AskKind, AskReply, BlockedReason, ChatAsk, ChatItem, ChatPage, CheckoutInfo,
+    CheckoutList, ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile,
+    DefInfo, DefKind, EffectiveSettings, Event, EventKind, FieldError, FleetView, FormDef,
+    GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles,
+    InternalHistory, InternalRemote, MemberRef, MoveDefinition, NewConversation, NewPersona,
+    NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
+    PersonaUpdate, Post, PostKind, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
+    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, Room, SetTaskRelease, SetToken, Snapshot,
+    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskEvent, TaskList, ToolError,
+    ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -184,6 +185,9 @@ pub fn router(state: AppState) -> Router {
             "/api/supervisor/conversations/{id}/message",
             post(message_conversation),
         )
+        .route("/api/rooms", get(list_rooms))
+        .route("/api/rooms/{id}/posts", get(room_posts).post(post_to_room))
+        .route("/api/rooms/asks/{post}/answer", post(answer_room_ask))
         .route("/api/tasks", get(list_tasks))
         .route("/api/tasks/refresh", post(refresh_tasks))
         .route("/api/tasks/{id}/archive-plan", get(archive_plan))
@@ -1653,6 +1657,89 @@ async fn message_conversation(
     Supervisor::new(st.svc.clone())
         .message(&AgentId(id), &req.text)
         .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Deserialize)]
+struct RoomsQuery {
+    persona: String,
+}
+
+async fn list_rooms(
+    State(st): State<AppState>,
+    Query(q): Query<RoomsQuery>,
+) -> Result<Json<Vec<Room>>, ApiError> {
+    Ok(Json(
+        crate::rooms::list_for(&st.store, &q.persona)
+            .await
+            .map_err(internal)?,
+    ))
+}
+
+#[derive(serde::Deserialize)]
+struct PostsQuery {
+    before: Option<i64>,
+    limit: Option<u32>,
+}
+
+async fn room_posts(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<PostsQuery>,
+) -> Result<Json<Vec<Post>>, ApiError> {
+    let limit = q.limit.unwrap_or(200).clamp(1, 1000);
+    Ok(Json(st.svc.owner_read(&id, q.before, limit).await?))
+}
+
+async fn post_to_room(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<NewPost>,
+) -> Result<Json<Post>, ApiError> {
+    let post = detached(async move {
+        st.svc
+            .owner_post(&id, req.kind, req.to.as_ref(), &req.text)
+            .await
+    })
+    .await?;
+    // Here a refusal is the request's fault (a kind or recipient the owner cannot use), not a state conflict.
+    post.map(Json).map_err(|e| match e {
+        ServiceError::Refused(why) => ApiError::new(StatusCode::BAD_REQUEST, why),
+        e => e.into(),
+    })
+}
+
+/// The same answer as an agent's `room_answer`, given as the owner: a breakdown's ask is decided through it as the
+/// panel decides it.
+async fn answer_room_ask(
+    State(st): State<AppState>,
+    Path(post): Path<i64>,
+    Json(req): Json<AskReply>,
+) -> Result<StatusCode, ApiError> {
+    let q = st
+        .store
+        .post(post)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("no post {post}")))?;
+    if q.kind != PostKind::Ask {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("post {post} is not an ask"),
+        ));
+    }
+    let text = match req.approve {
+        Some(true) => "approve".to_string(),
+        _ => req.text.unwrap_or_default(),
+    };
+    let answered =
+        detached(async move { st.svc.room_answer(&MemberRef::Owner, post, &text).await }).await??;
+    if !answered {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "already answered".into(),
+        ));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

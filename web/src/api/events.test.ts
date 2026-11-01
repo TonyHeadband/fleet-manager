@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SILENCE_MS, subscribe, subscribeChat, subscribePane } from "./events";
+import { SILENCE_MS, subscribe, subscribeChat, subscribePane, subscribeRoomPosts } from "./events";
 import { FakeEventSource, agent } from "../test/fixtures";
 
 const factory = (url: string) => new FakeEventSource(url) as unknown as EventSource;
@@ -29,6 +29,22 @@ describe("subscribe", () => {
     // @ts-expect-error reaching into the fake to deliver raw text
     for (const fn of es.handlers.get("event") ?? []) fn(bad);
     expect(onEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("subscribeRoomPosts", () => {
+  it("a_room_post_event_reaches_the_widget_with_its_room_and_id", () => {
+    const onPost = vi.fn();
+    const stop = subscribeRoomPosts("http://d", onPost, factory);
+    const es = FakeEventSource.for("/api/events");
+    const post = { id: 7, room: "product:p", sender: "daemon", sender_name: "Fleet Manager", kind: "announcement", text: "landed", at: 1 };
+    es.emit("snapshot", { seq: 3, agents: [] }, "3");
+    es.emit("event", { seq: 4, kind: { type: "agent_removed", id: "a1" } }, "4");
+    es.emit("event", { seq: 5, kind: { type: "room_post", post } }, "5");
+    expect(onPost).toHaveBeenCalledTimes(1);
+    expect(onPost).toHaveBeenCalledWith(post);
+    stop();
+    expect(es.closed).toBe(true);
   });
 });
 

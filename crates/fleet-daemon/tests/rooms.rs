@@ -1,5 +1,6 @@
 mod common;
 
+use common::net::*;
 use common::*;
 use fleet_api::{
     AgentId, AgentKind, Approval, DecideBreakdown, EventKind, MemberRef, Post, PostKind, PrState,
@@ -8,11 +9,13 @@ use fleet_api::{
 use fleet_daemon::agents::AgentService;
 use fleet_daemon::agents::ServiceError;
 use fleet_daemon::fleet::breakdown::BreakdownAnswer;
+use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::rooms::posts::NO_ANSWER_YET;
 use fleet_daemon::session::SessionHost;
 use fleet_daemon::supervisor::Supervisor;
 use fleet_daemon::{mcp, rooms};
 use serde_json::{json, Value};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1713,4 +1716,345 @@ async fn asks_of_ended_tasks_or_archived_rooms_are_not_reposted() {
     assert!(events_of(&fx, &sup, TaskEventKind::RoomMessage)
         .await
         .is_empty());
+}
+
+// The owner's rooms API.
+
+struct Server {
+    addr: SocketAddr,
+}
+
+async fn serve(fx: &Fx) -> Server {
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    Server { addr }
+}
+
+async fn listed(srv: &Server, persona: &str) -> Vec<Room> {
+    let (status, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/rooms?persona={persona}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    serde_json::from_value(v).unwrap()
+}
+
+async fn read_posts(srv: &Server, room: &str, query: &str) -> Vec<Post> {
+    let (status, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/rooms/{room}/posts{query}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    serde_json::from_value(v).unwrap()
+}
+
+async fn post_as_owner(srv: &Server, room: &str, body: Value) -> (u16, Value) {
+    json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/rooms/{room}/posts"),
+        Some(&body),
+    )
+    .await
+}
+
+async fn answer_as_owner(srv: &Server, ask: i64, body: Value) -> (u16, Value) {
+    json_of(
+        srv.addr,
+        "POST",
+        &format!("/api/rooms/asks/{ask}/answer"),
+        Some(&body),
+    )
+    .await
+}
+
+async fn post_as(fx: &Fx, a: &AgentId, text: &str, room: Option<&str>) -> i64 {
+    let mut args = json!({ "kind": "message", "text": text });
+    if let Some(r) = room {
+        args["room"] = json!(r);
+    }
+    posted_id(&tool(&fx.svc, a, "room_post", args).await)
+}
+
+/// What the rooms list calls a task: its title, else its name.
+async fn task_name(fx: &Fx, a: &AgentId) -> String {
+    let t = fx.store.task(a).await.unwrap().unwrap();
+    t.title.filter(|t| !t.is_empty()).unwrap_or(t.name)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rooms_list_counts_the_owners_unread() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    // An archived operation room of this persona, and a live one of another persona.
+    let old = rooms::operation_room(&fx.store, &AgentId("old".into()), PERSONA)
+        .await
+        .unwrap();
+    fx.store.set_room_archived(&old, Some(5)).await.unwrap();
+    rooms::operation_room(&fx.store, &AgentId("theirs".into()), "someone-else")
+        .await
+        .unwrap();
+
+    let product = format!("product:{PRODUCT}");
+    // Before any post the product room is not listed.
+    let ids: Vec<String> = listed(&srv, PERSONA)
+        .await
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(ids, vec![op_room(&sup), old.clone()]);
+
+    post_as(&fx, &a, "one", None).await;
+    post_as(&fx, &a, "two", None).await;
+    post_as(&fx, &a, "in the product room", Some(&product)).await;
+    // The owner's own post is not unread to them.
+    let (status, v) = post_as_owner(
+        &srv,
+        &op_room(&sup),
+        json!({ "kind": "announcement", "text": "mine" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+
+    let rooms = listed(&srv, PERSONA).await;
+    let got: Vec<(String, u32)> = rooms.iter().map(|r| (r.id.clone(), r.unread)).collect();
+    // Live operation rooms, then archived ones, then product rooms with posts. The owner has no member row in the
+    // product room and every post there counts.
+    assert_eq!(
+        got,
+        vec![(op_room(&sup), 2), (old.clone(), 0), (product.clone(), 1)]
+    );
+    assert!(fx
+        .store
+        .room_members(&product)
+        .await
+        .unwrap()
+        .iter()
+        .all(|m| m.member != "owner"));
+    let theirs: Vec<String> = listed(&srv, "someone-else")
+        .await
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(theirs, vec!["operation:theirs".to_string(), product]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reading_a_room_clears_the_owners_unread() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let product = format!("product:{PRODUCT}");
+    let first = post_as(&fx, &a, "first", Some(&product)).await;
+    rooms::announce::landed(&fx.store, PRODUCT, "the thing", "https://example.test/pr/1")
+        .await
+        .unwrap();
+    let (status, v) = post_as_owner(
+        &srv,
+        &product,
+        json!({ "kind": "message", "text": "noted" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let unread = |srv| async move {
+        listed(srv, PERSONA)
+            .await
+            .into_iter()
+            .find(|r| r.id == format!("product:{PRODUCT}"))
+            .unwrap()
+            .unread
+    };
+    assert_eq!(unread(&srv).await, 2);
+
+    // Newest last, every sender named.
+    let posts = read_posts(&srv, &product, "").await;
+    let got: Vec<(&str, &str)> = posts
+        .iter()
+        .map(|p| (p.sender_name.as_str(), p.text.as_str()))
+        .collect();
+    let name = task_name(&fx, &a).await;
+    assert_eq!(
+        got,
+        vec![
+            (name.as_str(), "first"),
+            (
+                "Fleet Manager",
+                "landed: the thing · https://example.test/pr/1"
+            ),
+            ("owner", "noted"),
+        ]
+    );
+    assert_eq!(posts[0].id, first);
+    assert_eq!(unread(&srv).await, 0);
+
+    // Pages: the latest `limit`, and those before an id.
+    let latest = read_posts(&srv, &product, "?limit=1").await;
+    assert_eq!(
+        latest.iter().map(|p| p.text.as_str()).collect::<Vec<_>>(),
+        vec!["noted"]
+    );
+    let older = read_posts(&srv, &product, &format!("?before={}", latest[0].id)).await;
+    assert_eq!(older.len(), 2);
+    assert_eq!(older[0].id, first);
+
+    post_as(&fx, &a, "again", Some(&product)).await;
+    assert_eq!(unread(&srv).await, 1);
+    let (status, _) = json_of(srv.addr, "GET", "/api/rooms/nowhere/posts", None).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_owner_posts_messages_and_announcements_not_asks() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+
+    let (status, v) = post_as_owner(
+        &srv,
+        &room,
+        json!({ "kind": "message", "to": { "agent": a.0 }, "text": "rebase first" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let p: Post = serde_json::from_value(v).unwrap();
+    assert_eq!(
+        (
+            &p.sender,
+            p.sender_name.as_str(),
+            p.to.as_ref(),
+            p.kind,
+            p.text.as_str()
+        ),
+        (
+            &MemberRef::Owner,
+            "owner",
+            Some(&MemberRef::Agent(a.clone())),
+            PostKind::Message,
+            "rebase first"
+        )
+    );
+    // A message wakes its recipient: the working orchestrator gets it in its inbox.
+    assert!(
+        wait_until(|| async {
+            fx.store
+                .task(&a)
+                .await
+                .unwrap()
+                .unwrap()
+                .inbox
+                .iter()
+                .any(|e| e.kind == fleet_api::FleetEventKind::RoomPost)
+        })
+        .await
+    );
+
+    let (status, v) = post_as_owner(
+        &srv,
+        &room,
+        json!({ "kind": "announcement", "text": "freeze at five" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(v["to"], Value::Null);
+
+    for body in [
+        json!({ "kind": "ask", "text": "which port?" }),
+        json!({ "kind": "answer", "text": "this one" }),
+        json!({ "kind": "message", "text": "  " }),
+        json!({ "kind": "message", "to": { "agent": "nobody" }, "text": "hi" }),
+    ] {
+        let (status, v) = post_as_owner(&srv, &room, body.clone()).await;
+        assert_eq!(status, 400, "{body} → {v}");
+    }
+    let (status, _) =
+        post_as_owner(&srv, "nowhere", json!({ "kind": "message", "text": "hi" })).await;
+    assert_eq!(status, 404);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn answering_twice_is_409() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let held = ask_in_background(&fx.svc, &a, "owner", "which port?");
+    let ask = wait_ask(&fx, &room).await;
+
+    let (status, v) = answer_as_owner(&srv, ask, json!({ "text": "8080" })).await;
+    assert_eq!(status, 204, "{v}");
+    let (reply, failed) = tokio::time::timeout(Duration::from_secs(10), held)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!failed && reply.contains("8080"), "{reply}");
+    assert_eq!(answer_to(&fx, ask, &room).await.sender, MemberRef::Owner);
+
+    let (status, v) = answer_as_owner(&srv, ask, json!({ "text": "9090" })).await;
+    assert_eq!(
+        (status, v["error"].as_str()),
+        (409, Some("already answered"))
+    );
+    let (status, _) = answer_as_owner(&srv, 999_999, json!({ "text": "x" })).await;
+    assert_eq!(status, 404);
+    let note = post_as(&fx, &a, "not an ask", None).await;
+    let (status, _) = answer_as_owner(&srv, note, json!({ "text": "x" })).await;
+    assert_eq!(status, 400);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_owner_approves_a_breakdown_from_the_room() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+
+    // Text asks for changes, through the same decision as the panel's.
+    let (held, v1) = propose(&fx, &a, &room).await;
+    let (status, v) = answer_as_owner(&srv, v1.id, json!({ "text": "split the api step" })).await;
+    assert_eq!(status, 204, "{v}");
+    assert_eq!(
+        held_answer(held).await,
+        BreakdownAnswer::ChangesRequested("split the api step".into())
+    );
+
+    let (held, v2) = propose(&fx, &a, &room).await;
+    let (status, v) = answer_as_owner(&srv, v2.id, json!({ "approve": true })).await;
+    assert_eq!(status, 204, "{v}");
+    assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
+    let p = fx.store.task(&a).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[1].approval, Approval::Approved);
+    assert_eq!(answer_to(&fx, v2.id, &room).await.text, "approve");
+    // The panel finds it decided.
+    let err = fx
+        .svc
+        .decide_breakdown(&a, decision(true, None))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NoPendingBreakdown), "{err:?}");
+
+    let (status, v) = answer_as_owner(&srv, v2.id, json!({ "approve": true })).await;
+    assert_eq!(
+        (status, v["error"].as_str()),
+        (409, Some("already answered"))
+    );
+    let (status, v) = answer_as_owner(&srv, v1.id, json!({ "approve": true })).await;
+    assert_eq!(
+        (status, v["error"].as_str()),
+        (409, Some("breakdown v1 is stale: v2 is the latest"))
+    );
 }

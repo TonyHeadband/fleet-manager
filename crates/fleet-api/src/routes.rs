@@ -1,14 +1,15 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer, ChatPage, CheckoutList, ControlRequest,
-    Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
-    EffectiveSettings, Event, FleetView, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
-    InternalFile, InternalFiles, InternalHistory, MoveDefinition, NewConversation, NewPersona,
-    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo,
-    RepoList, RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse,
-    StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
+    ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer, AskReply, ChatPage, CheckoutList,
+    ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind,
+    DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest, HiddenSpecialistsPut,
+    InternalBranches, InternalFile, InternalFiles, InternalHistory, MoveDefinition,
+    NewConversation, NewPersona, NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut,
+    Persona, PersonaList, PersonaUpdate, Post, Product, ProductList, ProductUpdate,
+    RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, Room,
+    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task,
+    TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -300,3 +301,23 @@ pub fn new_conversation() {}
 /// unknown conversation.
 #[utoipa::path(post, path = "/api/supervisor/conversations/{id}/message", params(("id" = String, Path)), request_body = ConversationMessage, responses((status = 204), (status = 400), (status = 404)))]
 pub fn message_conversation() {}
+
+/// The persona's operation rooms, live before archived, then every product room that has posts. `unread` counts the
+/// posts the owner has not read.
+#[utoipa::path(get, path = "/api/rooms", params(("persona" = String, Query)), responses((status = 200, body = Vec<Room>)))]
+pub fn list_rooms() {}
+
+/// Up to `limit` posts before `before`, newest last, each with its sender's name. Marks them read for the owner.
+#[utoipa::path(get, path = "/api/rooms/{id}/posts", params(("id" = String, Path), ("before" = Option<i64>, Query, description = "A post id; default: after the last post"), ("limit" = Option<usize>, Query, description = "Default 200, at most 1000")), responses((status = 200, body = Vec<Post>), (status = 404)))]
+pub fn room_posts() {}
+
+/// The owner's announcement or message; a message wakes its recipients. 400 for blank text, an ask or an answer, or
+/// a recipient not in the room; 404 for an unknown room.
+#[utoipa::path(post, path = "/api/rooms/{id}/posts", params(("id" = String, Path)), request_body = NewPost, responses((status = 200, body = Post), (status = 400), (status = 404)))]
+pub fn post_to_room() {}
+
+/// The owner's answer to an ask; for a breakdown's ask, the owner's decision on that version. 409 with `already
+/// answered` when it was answered, or naming the latest version when the ask's breakdown version is stale. 400 for
+/// a post that is not an ask or a blank answer; 404 for an unknown post.
+#[utoipa::path(post, path = "/api/rooms/asks/{post}/answer", params(("post" = i64, Path)), request_body = AskReply, responses((status = 204), (status = 400), (status = 404), (status = 409)))]
+pub fn answer_room_ask() {}

@@ -58,7 +58,7 @@ pub use requests::{
     RefuseRepoRequest, RepoInfo, RepoList, RepoPick, SetToken, SpawnRequest, SpawnResponse,
     WorkflowState, WorkspaceDiff,
 };
-pub use rooms::{MemberRef, Post, PostKind, Room, RoomKind};
+pub use rooms::{AskReply, MemberRef, NewPost, Post, PostKind, Room, RoomKind};
 pub use status::{BlockedReason, Status, StopCause};
 pub use supervisor::{
     Conversation, ConversationMessage, NewConversation, TaskEvent, TaskEventKind, TaskMark,
@@ -148,6 +148,10 @@ use utoipa::OpenApi;
         routes::list_conversations,
         routes::new_conversation,
         routes::message_conversation,
+        routes::list_rooms,
+        routes::room_posts,
+        routes::post_to_room,
+        routes::answer_room_ask,
     ),
     components(schemas(
         Status,
@@ -275,7 +279,14 @@ use utoipa::OpenApi;
         Conversation,
         TaskMark,
         NewConversation,
-        ConversationMessage
+        ConversationMessage,
+        Room,
+        RoomKind,
+        MemberRef,
+        Post,
+        PostKind,
+        NewPost,
+        AskReply
     ))
 )]
 struct ApiDoc;

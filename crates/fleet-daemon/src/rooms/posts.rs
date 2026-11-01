@@ -242,6 +242,59 @@ impl AgentService {
         Ok(self.publish(&room, p).await?.id)
     }
 
+    /// The owner's post from the Rooms widget: an announcement or a message, to one member or everyone. A message
+    /// wakes its recipients as an agent's does.
+    pub async fn owner_post(
+        self: &Arc<Self>,
+        room: &str,
+        kind: PostKind,
+        to: Option<&MemberRef>,
+        text: &str,
+    ) -> Result<Post, ServiceError> {
+        if !matches!(kind, PostKind::Announcement | PostKind::Message) {
+            return Err(refuse("the owner posts an announcement or a message"));
+        }
+        let room = self.store.room(room).await?.ok_or(ServiceError::NotFound)?;
+        let mut p = self.new_post(&room, MemberRef::Owner, kind, text)?;
+        p.to = match to {
+            None => None,
+            Some(MemberRef::Agent(a)) => self.recipient(&room, &a.0).await?,
+            Some(m) => return Err(refuse(format!("{} is not a member to post to", m.key()))),
+        };
+        self.publish(&room, p).await
+    }
+
+    /// The owner's view of a room: up to `limit` posts before `before` (the latest when None), oldest first, each
+    /// with its sender's name. Whatever it returns is marked read for the owner, who joins the room for that.
+    pub async fn owner_read(
+        &self,
+        room: &str,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<Post>, ServiceError> {
+        let room = self.store.room(room).await?.ok_or(ServiceError::NotFound)?;
+        let mut posts = self.store.room_posts(&room.id, before, limit).await?;
+        let mut names: std::collections::HashMap<MemberRef, String> = Default::default();
+        for p in &mut posts {
+            p.sender_name = match names.get(&p.sender) {
+                Some(n) => n.clone(),
+                None => {
+                    let n = self.name_of(&room, &p.sender).await?;
+                    names.insert(p.sender.clone(), n.clone());
+                    n
+                }
+            };
+        }
+        if let Some(last) = posts.last() {
+            let owner = MemberRef::Owner.key();
+            self.store
+                .add_member(&room.id, owner, self.opts.clock.now())
+                .await?;
+            self.store.set_read_upto(&room.id, owner, last.id).await?;
+        }
+        Ok(posts)
+    }
+
     /// `room_read`: the posts the caller has not seen in the room, which are then marked read.
     pub async fn room_read(
         &self,

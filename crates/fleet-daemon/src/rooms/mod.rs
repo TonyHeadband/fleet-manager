@@ -105,19 +105,42 @@ pub async fn list(store: &Store) -> Result<Vec<Room>, StoreError> {
     let agents = store.snapshot().await?.agents;
     let mut out = Vec::new();
     for r in store.rooms().await? {
-        let title = title_with(store, &r, &agents).await?;
-        out.push(Room {
-            unread: store.unread_posts(&r.id, MemberRef::Owner.key()).await?,
-            id: r.id,
-            kind: r.kind,
-            title,
-            product: r.product,
-            conversation: r.conversation,
-            persona: r.persona,
-            archived_at: r.archived_at,
-        });
+        out.push(view(store, r, &agents).await?);
     }
     Ok(out)
+}
+
+/// The rooms the persona's owner reads: its operation rooms, live before archived, then every product room that has
+/// posts. The owner's unread count needs no member row: until they first read a room, every post in it counts.
+pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreError> {
+    let agents = store.snapshot().await?.agents;
+    let (mut live, mut archived, mut products) = (Vec::new(), Vec::new(), Vec::new());
+    for r in store.rooms().await? {
+        let shelf = match r.kind {
+            RoomKind::Operation if r.persona.as_deref() != Some(persona) => continue,
+            RoomKind::Operation if r.archived_at.is_some() => &mut archived,
+            RoomKind::Operation => &mut live,
+            RoomKind::Product if store.room_posts(&r.id, None, 1).await?.is_empty() => continue,
+            RoomKind::Product => &mut products,
+        };
+        shelf.push(view(store, r, &agents).await?);
+    }
+    live.extend(archived);
+    live.extend(products);
+    Ok(live)
+}
+
+async fn view(store: &Store, r: RoomRow, agents: &[Agent]) -> Result<Room, StoreError> {
+    Ok(Room {
+        title: title_with(store, &r, agents).await?,
+        unread: store.unread_posts(&r.id, MemberRef::Owner.key()).await?,
+        id: r.id,
+        kind: r.kind,
+        product: r.product,
+        conversation: r.conversation,
+        persona: r.persona,
+        archived_at: r.archived_at,
+    })
 }
 
 /// The room as people read it: its product's name, or its conversation's title.

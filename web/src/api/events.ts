@@ -3,6 +3,7 @@ import type { Snapshot } from "./generated/Snapshot";
 import type { ChatAsk } from "./generated/ChatAsk";
 import type { ChatItem } from "./generated/ChatItem";
 import type { ChatPage } from "./generated/ChatPage";
+import type { Post } from "./generated/Post";
 
 export type EventSourceFactory = (url: string) => EventSource;
 export const browserEventSource: EventSourceFactory = (url) => new EventSource(url);
@@ -72,6 +73,23 @@ export function subscribe(
     clearInterval(watchdog);
     es.close();
   };
+}
+
+/** Room posts as they are made, answers included, for the Rooms widget to merge by id. Rides the board feed, so it
+ * reconnects as that does; a post missed while it was down is in the room's next read. */
+export function subscribeRoomPosts(
+  baseUrl: string,
+  onPost: (p: Post) => void,
+  factory: EventSourceFactory = browserEventSource,
+): () => void {
+  return subscribe(
+    baseUrl,
+    () => {},
+    (e) => {
+      if (e.kind.type === "room_post") onPost(e.kind.post);
+    },
+    factory,
+  );
 }
 
 /** Read-only pane text for one agent. */

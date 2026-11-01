@@ -1830,6 +1830,24 @@ impl Store {
         rows.iter().map(post_row).collect()
     }
 
+    /// Up to `limit` of the room's posts with an id below `before` (every post when None), oldest first.
+    pub async fn room_posts(
+        &self,
+        room: &str,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<Post>> {
+        let rows = sqlx::query(
+            "SELECT * FROM (SELECT * FROM posts WHERE room = ? AND id < ? ORDER BY id DESC LIMIT ?) ORDER BY id",
+        )
+        .bind(room)
+        .bind(before.unwrap_or(i64::MAX))
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(post_row).collect()
+    }
+
     /// Moves the member's `read_upto` forward to `upto`; never back.
     pub async fn set_read_upto(&self, room: &str, member: &str, upto: i64) -> Result<()> {
         let _w = self.write_lock.lock().await;

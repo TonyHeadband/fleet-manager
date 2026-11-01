@@ -200,6 +200,29 @@ describe("FleetClient", () => {
     ]);
   });
 
+  it("the_rooms_client_calls_hit_their_urls", async () => {
+    const room = { id: "operation:c1", kind: "operation", title: "Untitled", unread: 2 };
+    const post = { id: 7, room: "operation:c1", sender: "owner", sender_name: "owner", kind: "message", text: "hi", at: 1 };
+    const f = vi.fn(async (url: string, _init?: RequestInit) =>
+      url.endsWith("/answer")
+        ? new Response(null, { status: 204 })
+        : new Response(JSON.stringify(url.startsWith("/api/rooms?") ? [room] : url.endsWith("/posts") && _init?.method === "POST" ? post : [post])),
+    );
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    expect(await c.rooms("me/x")).toEqual([room]);
+    expect(await c.roomPosts("operation:c1")).toEqual([post]);
+    expect(await c.roomPosts("operation:c1", 7)).toEqual([post]);
+    expect(await c.postToRoom("operation:c1", { kind: "message", to: { agent: "t1" }, text: "hi" })).toEqual(post);
+    expect(await c.answerRoomAsk(9, { approve: true })).toBeUndefined();
+    expect(f.mock.calls.map(([url, init]) => [url, init?.method, init?.body && JSON.parse(init.body as string)])).toEqual([
+      ["/api/rooms?persona=me%2Fx", "GET", undefined],
+      ["/api/rooms/operation%3Ac1/posts", "GET", undefined],
+      ["/api/rooms/operation%3Ac1/posts?before=7", "GET", undefined],
+      ["/api/rooms/operation%3Ac1/posts", "POST", { kind: "message", to: { agent: "t1" }, text: "hi" }],
+      ["/api/rooms/asks/9/answer", "POST", { approve: true }],
+    ]);
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);
