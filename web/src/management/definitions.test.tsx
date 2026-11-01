@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -322,5 +322,35 @@ describe("Definitions per persona", () => {
     await userEvent.click(await row("plain built-in"));
     expect(definitions).toHaveBeenCalled();
     expect(definition).toHaveBeenLastCalledWith("pr_style", "plain");
+  });
+
+  it("a_save_landing_after_a_persona_switch_refreshes_its_own_list_and_leaves_the_others", async () => {
+    const asked: { p: string; answer: ReturnType<typeof pending<DefInfo[]>> }[] = [];
+    // The first list answers at once; the ones asked after wait to be answered by hand.
+    const personaDefinitions = vi.fn((p: string) => {
+      if (personaDefinitions.mock.calls.length === 1) return Promise.resolve([def("specialist", "rust", null, { builtin: false })]);
+      const answer = pending<DefInfo[]>();
+      asked.push({ p, answer });
+      return answer.promise;
+    });
+    const save = pending<DefInfo>();
+    const over = {
+      personaDefinitions,
+      personaDefinition: vi.fn().mockResolvedValue(file("specialist", "rust", "mine", false)),
+      savePersonaDefinition: vi.fn(() => save.promise),
+    };
+    await management("Specialists", { personas: two, over });
+    await userEvent.click(await row("rust custom"));
+    await userEvent.type(await screen.findByRole("textbox", { name: "specialists/rust" }), "!");
+    await click("Save");
+    await switchTo("Home");
+    await land(save, def("specialist", "rust", null, { builtin: false }));
+    await waitFor(() => expect(asked.map((a) => a.p)).toEqual(["b", "a"]));
+    // B's answer comes first, then A's refresh: neither drops the other.
+    await land(asked[0]!.answer, [def("specialist", "go")]);
+    expect(await row("go built-in")).toBeInTheDocument();
+    await land(asked[1]!.answer, [def("specialist", "rust"), def("specialist", "extra")]);
+    await switchTo("Work");
+    expect(await row("extra built-in")).toBeInTheDocument();
   });
 });

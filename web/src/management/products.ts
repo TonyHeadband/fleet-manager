@@ -185,8 +185,18 @@ export function useProductsTab(
   useEffect(() => {
     if (shown && products.state === "ready") update((s) => sync(s, products.value));
   }, [shown, products, update]);
+  // The old persona's settings are not the new one's: dropped now, and its late answer ignored below.
+  useEffect(() => setEffective(null), [persona]);
   useEffect(() => {
-    if (shown && products.state === "ready" && persona !== null) client.effectiveSettings(persona).then(setEffective, () => {});
+    if (!shown || products.state !== "ready" || persona === null) return;
+    let stale = false;
+    client.effectiveSettings(persona).then(
+      (e) => !stale && setEffective(e),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
   }, [client, shown, products, persona]);
 
   /** One of the product's own lists is sent; `done` takes the answer, then the list is asked for on success. */

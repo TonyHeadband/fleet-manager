@@ -5,7 +5,7 @@ import { FleetError } from "../api/client";
 import type { Product } from "../api/generated/Product";
 import type { ProductOverride } from "../api/generated/ProductOverride";
 import { choose, optionsOf } from "../test/fixtures";
-import { click, managedDef as def, managedProduct as product, managedRepo as repo, management, pending } from "./harness";
+import { click, managedDef as def, managedProduct as product, managedPersona, managedRepo as repo, management, pending } from "./harness";
 
 // Ports of the Products tests in crates/fleet-gui/tests/management.rs.
 
@@ -418,5 +418,26 @@ describe("Products: hidden specialists and overrides", () => {
       { section: "modes", key: "rust", value: "manual" },
       { section: "efforts", key: "rust", value: "xhigh" },
     ]);
+  });
+
+  it("a_late_answer_for_another_persona_leaves_the_active_ones_settings", async () => {
+    const answers: Record<string, ReturnType<typeof pending<{ values: unknown[] }>>> = { a: pending(), b: pending() };
+    const effectiveSettings = vi.fn((p: string) => answers[p]!.promise);
+    const two = [managedPersona("a", "Work", true), managedPersona("b", "Home", true)];
+    await management("Products", {
+      products: [alpha({ overrides: [override("limits", "max_steps", "30")] })],
+      personas: two,
+      over: { effectiveSettings },
+    });
+    await waitFor(() => expect(effectiveSettings).toHaveBeenCalledWith("a"));
+    await userEvent.click(screen.getByRole("button", { name: "Active persona" }));
+    await userEvent.click(within(document.querySelector<HTMLElement>(".menu")!).getByText("Home"));
+    await waitFor(() => expect(effectiveSettings).toHaveBeenCalledWith("b"));
+    const values = (value: string) => ({ values: [{ section: "limits", key: "max_steps", value, source: "default" }] });
+    await act(async () => answers.b!.resolve(values("20")));
+    expect(await screen.findByText("replaces 20 (default)")).toBeInTheDocument();
+    await act(async () => answers.a!.resolve(values("99")));
+    expect(screen.getByText("replaces 20 (default)")).toBeInTheDocument();
+    expect(screen.queryByText("replaces 99 (default)")).toBeNull();
   });
 });

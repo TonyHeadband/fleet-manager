@@ -103,14 +103,16 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
   const st: DefsState = { ...held, list: held.lists[active] ?? null, selected: held.picks[active] ?? null };
 
   // Lists asked so far: one answered after a newer one is stale (entering a tab, a persona switch and a save's refresh).
-  const lists = useRef(0);
+  // Counted per persona: another persona's answer never makes this one's stale.
+  const lists = useRef<Record<string, number>>({});
   const loadList = useCallback(() => {
     if (persona === null) return;
-    const seq = ++lists.current;
+    const seq = (lists.current[persona] = (lists.current[persona] ?? 0) + 1);
+    const latest = () => seq === lists.current[persona];
     client.personaDefinitions(persona).then(
-      (list) => seq === lists.current && update((s) => ({ ...s, lists: { ...s.lists, [persona]: list } })),
+      (list) => latest() && update((s) => ({ ...s, lists: { ...s.lists, [persona]: list } })),
       // egui keeps what it had and toasts; a tab with no list yet stays on Loading….
-      (e: unknown) => seq === lists.current && say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
+      (e: unknown) => latest() && say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
     );
   }, [client, persona, update, say]);
 
