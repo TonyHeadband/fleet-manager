@@ -8,6 +8,7 @@ use crate::agents::{
     fleet_config, one_line, write_prompt, AgentService, Clock, SpawnError, Start, MAX_PROMPT_BYTES,
     PROMPT_FILE, SESSION_PREFIX,
 };
+use crate::first_run::trust_folder;
 use crate::fleet::ops::agent_vars;
 use crate::hooks_cfg::{write_mcp_config, write_settings};
 use crate::repo_rules::RepoRules;
@@ -100,6 +101,14 @@ impl Supervisor {
         let cwd = folder(svc.config(), persona);
         let settings_dir = svc.agent_dir(&id.0);
         std::fs::create_dir_all(&cwd).map_err(SpawnError::from)?;
+        // Task folders inherit the trust the persona gave the tasks root at login; this folder has none of its own.
+        if let Some(claude_dir) = env.claude_dir() {
+            let dir = cwd.clone();
+            tokio::task::spawn_blocking(move || trust_folder(&claude_dir, &dir))
+                .await
+                .map_err(|e| SpawnError::from(std::io::Error::other(e)))?
+                .map_err(SpawnError::from)?;
+        }
         let written = write_settings(
             &settings_dir,
             &svc.options().base_url,

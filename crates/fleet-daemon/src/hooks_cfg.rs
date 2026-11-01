@@ -83,6 +83,8 @@ pub struct RoleSettings {
     pub deny: Vec<String>,
     /// Absolute folders Claude Code may work in (read, and edit unless a deny rule says otherwise) beyond its cwd, written as `permissions.additionalDirectories`.
     pub dirs: Vec<String>,
+    /// Adds the fail-closed `PreToolUse` hook on the subagent tools (see `SUBAGENT_GUARD_MATCHER`).
+    pub guard_subagents: bool,
 }
 
 impl RoleSettings {
@@ -113,6 +115,7 @@ impl RoleSettings {
             allow: SUPERVISOR_TOOLS.iter().map(|t| t.to_string()).collect(),
             deny,
             dirs: read_dirs,
+            guard_subagents: true,
         }
     }
 
@@ -137,6 +140,7 @@ impl RoleSettings {
                 .chain(def.deny.clone())
                 .collect(),
             dirs: vec![],
+            guard_subagents: false,
         }
     }
 }
@@ -230,7 +234,7 @@ pub fn write_settings(
     role: &RoleSettings,
 ) -> Result<PathBuf, SettingsError> {
     check(base_url, agent)?;
-    let hooks = hooks(base_url, agent);
+    let hooks = hooks(base_url, agent, role.guard_subagents);
 
     let mut permissions = serde_json::Map::new();
     let allow: Vec<&str> = ALLOWED_TOOLS
@@ -278,8 +282,17 @@ pub fn write_settings(
     Ok(path)
 }
 
-/// The hooks that report to the daemon at `base_url`; checked by the caller.
-fn hooks(base_url: &str, agent: &AgentId) -> Value {
+/// The matcher of a supervisor's second `PreToolUse` hook: the subagent tool under both its names.
+const SUBAGENT_GUARD_MATCHER: &str = "Agent|Task";
+
+/// The hooks that report to the daemon at `base_url`; checked by the caller. `guard_subagents` adds a second
+/// `PreToolUse` entry for the subagent tools only, whose answer refuses all but the read-only types (see `hook` in
+/// `http.rs`). Claude Code's hooks docs: an HTTP hook blocks a call by returning "a 2xx response with a JSON body
+/// containing the appropriate decision fields", but a non-2xx answer, a failed connection, a non-JSON body or a
+/// timeout lets the call proceed, unless the entry sets `"onFailure": "block"` (CLI 2.1.295 and later). So a daemon
+/// that is down cannot let a general-purpose subagent through; every other tool stays fail-open. The call then
+/// reaches the daemon twice, which `ingest` reduces to one change.
+fn hooks(base_url: &str, agent: &AgentId, guard_subagents: bool) -> Value {
     let url = format!("{base_url}/internal/hooks/{}", agent.0);
     let mut hooks = serde_json::Map::new();
     for ev in HTTP_EVENTS {
@@ -292,7 +305,12 @@ fn hooks(base_url: &str, agent: &AgentId) -> Value {
         if ev == "PermissionRequest" {
             hook["timeout"] = json!(PERMISSION_HOLD_SECS);
         }
-        hooks.insert(ev.into(), json!([{ "matcher": "", "hooks": [hook] }]));
+        let mut entries = vec![json!({ "matcher": "", "hooks": [hook.clone()] })];
+        if ev == "PreToolUse" && guard_subagents {
+            hook["onFailure"] = json!("block");
+            entries.push(json!({ "matcher": SUBAGENT_GUARD_MATCHER, "hooks": [hook] }));
+        }
+        hooks.insert(ev.into(), Value::Array(entries));
     }
     // `|| true`: a daemon that is down must never make Claude Code report a hook error.
     let command = format!(
@@ -323,9 +341,22 @@ pub fn rebase(
             "settings.json is not an object",
         )));
     };
-    obj.insert("hooks".into(), hooks(base_url, agent));
+    let guarded = has_subagent_guard(obj.get("hooks"));
+    obj.insert("hooks".into(), hooks(base_url, agent, guarded));
     std::fs::write(&path, serde_json::to_string_pretty(&settings)?)?;
     Ok((path, write_mcp_config(dir, base_url, agent, token)?))
+}
+
+/// Whether settings written at spawn carry the subagent guard, so a rebase keeps it.
+fn has_subagent_guard(hooks: Option<&Value>) -> bool {
+    hooks
+        .and_then(|h| h.get("PreToolUse"))
+        .and_then(Value::as_array)
+        .is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|e| e.get("matcher").and_then(Value::as_str) == Some(SUBAGENT_GUARD_MATCHER))
+        })
 }
 
 /// Writes `<dir>/mcp.json`, which points Claude Code at `/internal/mcp/<id>` as the http server "fleet". The file

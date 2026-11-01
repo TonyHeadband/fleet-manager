@@ -40,6 +40,35 @@ pub fn seed_first_run(claude_dir: &Path) -> std::io::Result<()> {
     })
 }
 
+/// Marks `folder` trusted in `<claude_dir>/.claude.json` (`projects[<folder>].hasTrustDialogAccepted`), as answering
+/// Claude Code's "trust this folder" dialog there would. For folders fleet itself owns and the persona never opened by
+/// hand, such as the supervisor's: no hook fires at that dialog, so a session would sit at it. The key is the
+/// canonical path, with `/` separators on Windows as Claude Code writes them; other entries and fields stay.
+pub fn trust_folder(claude_dir: &Path, folder: &Path) -> std::io::Result<()> {
+    let key = trust_key(&fleet_fs::canonical(folder)?);
+    merge_json(claude_dir, ".claude.json", |obj| {
+        let projects = obj.entry("projects").or_insert_with(|| json!({}));
+        let Some(projects) = projects.as_object_mut() else {
+            warn!("`projects` in .claude.json is not an object, left as it is");
+            return;
+        };
+        let project = projects.entry(key).or_insert_with(|| json!({}));
+        if let Some(project) = project.as_object_mut() {
+            project.insert("hasTrustDialogAccepted".into(), Value::Bool(true));
+        }
+    })
+}
+
+/// A folder as Claude Code keys it in `projects`.
+pub fn trust_key(folder: &Path) -> String {
+    let key = folder.to_string_lossy();
+    if cfg!(windows) {
+        key.replace('\\', "/")
+    } else {
+        key.into_owned()
+    }
+}
+
 /// Applies `edit` to the JSON object in `<claude_dir>/<name>` and writes it back only when that changed something.
 fn merge_json(
     claude_dir: &Path,

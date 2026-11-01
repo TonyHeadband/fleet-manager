@@ -161,6 +161,17 @@ async fn settings_deny_gh_push_and_edits_outside_its_folder() {
             "{tool} missing from {allow:?}"
         );
     }
+    // The subagent tools get a second PreToolUse hook that fails closed; the first, for every tool, stays as for
+    // any agent.
+    let pre = s["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre.len(), 2, "{pre:?}");
+    assert_eq!(pre[0]["matcher"], "");
+    assert!(pre[0]["hooks"][0].get("onFailure").is_none(), "{pre:?}");
+    assert_eq!(pre[1]["matcher"], "Agent|Task");
+    let guard = &pre[1]["hooks"][0];
+    assert_eq!(guard["type"], "http");
+    assert_eq!(guard["onFailure"], "block");
+    assert_eq!(guard["url"], pre[0]["hooks"][0]["url"]);
     let clone = fx.repos.clone_dir(PERSONA, PRODUCT, "core");
     assert_eq!(
         strings(&s["permissions"]["additionalDirectories"]),
@@ -290,4 +301,48 @@ async fn a_stopped_supervisor_does_not_trigger_a_merge_check() {
     assert!(wait_until(|| async { fx.svc.merge_checks_run() > base }).await);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fx.svc.merge_checks_run(), base + 1);
+}
+
+#[tokio::test]
+async fn other_agents_get_no_subagent_guard() {
+    let fx = fixture().await;
+    let a = spawn_ready(&fx).await;
+    let pre = settings(&fx, &a.id)["hooks"]["PreToolUse"].clone();
+    assert_eq!(pre.as_array().unwrap().len(), 1, "{pre}");
+    assert!(pre[0]["hooks"][0].get("onFailure").is_none(), "{pre}");
+}
+
+#[tokio::test]
+async fn a_rebase_keeps_the_subagent_guard() {
+    let fx = fixture().await;
+    let a = start(&fx, "hello").await;
+    let dir = fx.state_dir.join("agents").join(&a.id.0);
+    let token = fx.store.agent_token(&a.id).await.unwrap().unwrap();
+    fleet_daemon::hooks_cfg::rebase(&dir, "http://127.0.0.1:9999", &a.id, &token).unwrap();
+    let pre = settings(&fx, &a.id)["hooks"]["PreToolUse"].clone();
+    assert_eq!(pre[1]["matcher"], "Agent|Task", "{pre}");
+    assert_eq!(pre[1]["hooks"][0]["onFailure"], "block");
+    assert_eq!(
+        pre[1]["hooks"][0]["url"],
+        format!("http://127.0.0.1:9999/internal/hooks/{}", a.id.0)
+    );
+}
+
+#[tokio::test]
+async fn the_supervisor_folder_is_trusted_for_its_persona() {
+    let fx = fixture().await;
+    start(&fx, "hello").await;
+    let claude_dir = fixture_env(&fx).await.claude_dir().unwrap();
+    let config: Value =
+        serde_json::from_str(&std::fs::read_to_string(claude_dir.join(".claude.json")).unwrap())
+            .unwrap();
+    let key = fleet_daemon::first_run::trust_key(
+        &fleet_fs::canonical(&folder(fx.svc.config(), PERSONA)).unwrap(),
+    );
+    assert_eq!(
+        config["projects"][&key]["hasTrustDialogAccepted"], true,
+        "{config}"
+    );
+    // The first-run answers are still there.
+    assert_eq!(config["hasCompletedOnboarding"], true);
 }
