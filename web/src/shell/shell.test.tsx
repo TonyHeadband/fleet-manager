@@ -176,17 +176,30 @@ describe("Shell", () => {
     expect(within(drawer).getByRole("button", { name: "New product" })).toBeEnabled();
   });
 
-  it("the_persona_picker_shows_its_avatar_beside_two_lines", async () => {
+  it("the_pickers_are_captioned_above_and_the_persona_shows_its_avatar", async () => {
     start();
     const picker = await screen.findByRole("button", { name: "Active persona" });
-    // The persona's portrait slot, then its label over its name.
+    // The label sits above the selector, outside it; the selector holds the avatar and the name only.
+    expect(picker).toHaveTextContent(/^me$/);
     expect(picker.querySelector(".avatar")).not.toBeNull();
-    const lines = picker.querySelector(".filter-lines")!;
-    expect([...lines.children].map((c) => c.textContent)).toEqual(["Persona", "me"]);
-    // The product picker stays one line.
-    expect(screen.getByRole("button", { name: "Active product" }).querySelector(".filter-lines")).toBeNull();
+    const caption = picker.closest(".filter-menu")!.querySelector(".filter-caption");
+    expect(caption).toHaveTextContent("Persona");
+    expect(caption!.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const product = screen.getByRole("button", { name: "Active product" });
+    expect(product.closest(".filter-menu")!.querySelector(".filter-caption")).toHaveTextContent("Product");
+    expect(product.querySelector(".avatar")).toBeNull();
     const css = readFileSync("src/shell/shell.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/\.drawer-picker \.avatar \{[^}]*height: var\(--drawer-avatar-h\);/);
+  });
+
+  it("the_header_filters_are_captioned_above", async () => {
+    start();
+    const header = await screen.findByRole("banner");
+    for (const [name, caption] of [["Repo filter", "Repo"], ["Persona filter", "Persona"], ["Release filter", "Release"], ["Subtasks display", "Subtasks"]] as const) {
+      const button = await within(header).findByRole("button", { name });
+      expect(button.closest(".filter-menu")!.querySelector(".filter-caption"), name).toHaveTextContent(caption);
+      expect(button, name).not.toHaveTextContent(caption);
+    }
   });
 
   it("the_first_ready_persona_becomes_the_active_one", async () => {

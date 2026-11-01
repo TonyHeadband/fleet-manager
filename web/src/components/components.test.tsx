@@ -519,18 +519,18 @@ describe("Header filters", () => {
 
   it("filter_summary_names_the_selection", async () => {
     render(<Repos />);
-    expect(filter("Repo filter")).toHaveTextContent("Repo All repos");
+    expect(filter("Repo filter")).toHaveTextContent("All repos");
     await userEvent.click(filter("Repo filter"));
     await userEvent.click(screen.getByRole("checkbox", { name: "core" }));
-    expect(filter("Repo filter")).toHaveTextContent("Repo core");
+    expect(filter("Repo filter")).toHaveTextContent("core");
     await userEvent.click(screen.getByRole("checkbox", { name: "portal" }));
-    expect(filter("Repo filter")).toHaveTextContent("Repo 2 repos");
+    expect(filter("Repo filter")).toHaveTextContent("2 repos");
   });
 
   it("the_repo_filter_reports_its_value_as_written", () => {
     render(<Repos />);
     expect(filter("Repo filter")).toHaveAttribute("aria-haspopup");
-    expect(filter("Repo filter").textContent?.replace(/\s+/g, " ").trim()).toBe("Repo All repos");
+    expect(filter("Repo filter").textContent?.replace(/\s+/g, " ").trim()).toBe("All repos");
   });
 
   it("repo_filter_toggles_repos_in_click_order", async () => {
@@ -577,21 +577,21 @@ describe("Header filters", () => {
     const onChange = vi.fn();
     const rows = [{ id: "p", label: "Ann (p)", count: 1 }, { id: "w", label: "Ann (w)", count: 2 }];
     const { rerender } = render(<PersonaFilter rows={rows} selected={[]} onChange={onChange} />);
-    expect(filter("Persona filter")).toHaveTextContent("Persona All personas");
+    expect(filter("Persona filter")).toHaveTextContent("All personas");
     await userEvent.click(filter("Persona filter"));
     await userEvent.click(screen.getByRole("checkbox", { name: "Ann (w)" }));
     expect(onChange, "the filter keeps the id").toHaveBeenCalledWith(["w"]);
     rerender(<PersonaFilter rows={rows} selected={["w"]} onChange={onChange} />);
-    expect(filter("Persona filter")).toHaveTextContent("Persona Ann (w)");
+    expect(filter("Persona filter")).toHaveTextContent("Ann (w)");
     rerender(<PersonaFilter rows={rows} selected={["w", "p"]} onChange={onChange} />);
-    expect(filter("Persona filter")).toHaveTextContent("Persona 2 personas");
+    expect(filter("Persona filter")).toHaveTextContent("2 personas");
   });
 
   it("the_release_filter_picks_one_and_closes", async () => {
     const onChange = vi.fn();
     const releases = [{ id: 1, product: "p1", version: "1.0", start: "", target: "", released_at: null }];
     render(<ReleaseFilter releases={releases} value={{ type: "all" }} onChange={onChange} />);
-    expect(filter("Release filter")).toHaveTextContent("Release All releases");
+    expect(filter("Release filter")).toHaveTextContent("All releases");
     await userEvent.click(filter("Release filter"));
     expect(screen.getAllByRole("button", { name: /All releases|1\.0|Backlog/ }).map((b) => b.textContent)).toEqual(["All releases", "1.0", "Backlog"]);
     await userEvent.click(screen.getByRole("button", { name: "All releases", pressed: true }));

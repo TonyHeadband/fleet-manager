@@ -11,13 +11,12 @@ interface Props<T extends string> {
   placeholder?: string;
   onPick: (id: T) => void;
   lead?: ReactNode;
-  stacked?: boolean;
 }
 
 /** The filter combo as a single choice: the current pick as its summary, and a menu that closes on a pick. */
-export function ChoiceMenu<T extends string>({ label, name, width, items, value, placeholder = "", onPick, lead, stacked }: Props<T>) {
+export function ChoiceMenu<T extends string>({ label, name, width, items, value, placeholder = "", onPick, lead }: Props<T>) {
   return (
-    <FilterMenu label={label} summary={items.find((i) => i.id === value)?.name ?? placeholder} name={name} width={width} lead={lead} stacked={stacked}>
+    <FilterMenu label={label} summary={items.find((i) => i.id === value)?.name ?? placeholder} name={name} width={width} lead={lead}>
       {(close) =>
         items.map((i) => (
           <button

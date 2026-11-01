@@ -66,7 +66,6 @@ export function Drawer({
             placeholder="Pick a persona"
             onPick={onPersona}
             lead={<Avatar title={ready.find((p) => p.id === persona)?.name} />}
-            stacked
           />
         )}
         {listed.length > 0 && (
@@ -121,7 +120,6 @@ function Picker(props: {
   placeholder: string;
   onPick: (id: string) => void;
   lead?: ReactNode;
-  stacked?: boolean;
 }) {
   return (
     <div className="drawer-picker">

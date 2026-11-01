@@ -275,3 +275,9 @@
 /* A persona's avatar (Avatar.tsx): the app's portrait shape, empty until the generator fills it, a sunken 1px frame.
    Each place sizes it, 3 wide for 4 tall. */
 .avatar { flex: none; display: block; border: 1px solid var(--border); background: var(--sunken); }
+/* A combo's caption, above it and outside it (FilterMenu): the control holds only what is picked. */
+.filter-menu:has(> .filter-caption) { display: inline-grid; justify-items: start; gap: var(--space-chip-gap); }
+.filter-caption { font-size: var(--size-meta); line-height: 1; color: var(--accent-text); }
+/* A leading mark (the persona's avatar) beside the summary. */
+.filter-button:has(> .avatar) { display: flex; align-items: center; gap: var(--space-button-gap); }
+.filter-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
