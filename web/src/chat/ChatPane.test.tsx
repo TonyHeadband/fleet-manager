@@ -7,7 +7,6 @@ import { FleetError } from "../api/client";
 import type { ChatAsk } from "../api/generated/ChatAsk";
 import type { ChatBody } from "../api/generated/ChatBody";
 import type { ChatItem } from "../api/generated/ChatItem";
-import type { TaskEventKind } from "../api/generated/TaskEventKind";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, factory, fakeClient, persona, product, schema } from "../test/fixtures";
 import { ChatPane, Entry, type ChatClient } from "./ChatPane";
@@ -96,29 +95,14 @@ describe("ChatPane", () => {
     expect(screen.getByText("New session")).toHaveClass("chat-line");
   });
 
-  it("event_rows_render_as_system_lines_with_their_tone", () => {
+  it("a_task_event_body_draws_no_row", () => {
     start();
-    const event = (kind: TaskEventKind, text: string) =>
-      item({ type: "event", task: "t1", task_title: "Build X", kind, text });
-    page([
-      prompt("Resume the task", "system"),
-      event("needs_you", "needs you · approve the plan"),
-      event("checks_failed", "checks failed"),
-      event("checks_passed", "checks passed"),
-      event("pr_opened", "PR opened"),
-      event("pr_merged", "PR merged"),
-      event("room_message", "Build X in Untitled: PR is up"),
-      event("room_ask", "Build X in Untitled: can I change the schema?"),
-    ]);
-    const rows = [...feed().querySelectorAll(".chat-line[data-event]")];
-    expect(rows.map((r) => r.getAttribute("data-from"))).toEqual(Array(7).fill("system"));
-    expect(rows[0]!.querySelector(".chat-event-title")).toHaveTextContent("Build X");
-    expect(rows[0]).toHaveTextContent("Build X needs you · approve the plan");
-    expect(rows.map((r) => r.querySelector(".chat-mark")!.getAttribute("data-tone"))).toEqual(["accent", "danger", "done", "done", "done", "done", "accent"]);
-    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
-    expect(css).toMatch(/\.chat-event-title \{[^}]*color: var\(--text-high\);/);
-    expect(css).toMatch(/\.chat-mark\[data-tone="accent"\] \{[^}]*background: var\(--fill\);/);
-    expect(css).toMatch(/\.chat-mark\[data-tone="danger"\] \{[^}]*background: var\(--danger\);/);
+    // The daemon no longer sends event bodies; one that still arrives is not drawn as a notice row.
+    page([prompt("Resume the task", "system"), item({ type: "event", task: "t1", task_title: "Build X", kind: "checks_passed", text: "checks passed" } as unknown as ChatBody), reply("done")]);
+    expect(screen.getByText("Resume the task")).toBeInTheDocument();
+    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(feed().querySelector("[data-event]")).toBeNull();
+    expect(feed()).not.toHaveTextContent("Build X");
   });
 
   it("sections_fold_and_open", async () => {
@@ -441,7 +425,6 @@ describe("the Chat in the app", () => {
     expect(rule(".chat-call")).toMatch(/min-width: 0/);
     expect(rule(".chat-calls")).toMatch(/min-width: 0/);
     expect(rule(".chat-section")).toMatch(/min-width: 0/);
-    expect(rule(".chat-event-title")).toMatch(/min-width: 0/);
     // Boxes of output and code scroll or wrap inside themselves.
     expect(rule(".chat-call-output")).toMatch(/overflow: auto/);
     expect(rule(".markdown pre")).toMatch(/overflow-x: auto/);

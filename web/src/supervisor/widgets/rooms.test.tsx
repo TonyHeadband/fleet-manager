@@ -156,6 +156,17 @@ describe("Rooms widget", () => {
     expect(daemon.querySelector(".avatar")).toBeNull();
   });
 
+  it("a_task_notice_announcement_reads_as_a_system_line", async () => {
+    show();
+    const feed = await log();
+    await within(feed).findByText("on it");
+    emit(post({ kind: "announcement", text: "Fix login · checks passed" }));
+    const line = await within(feed).findByText(/Fix login · checks passed/);
+    expect(line).toHaveClass("chat-line");
+    expect(line).toHaveAttribute("data-from", "system");
+    expect(line.querySelector(".avatar")).toBeNull();
+  });
+
   it("a_supervisor_is_known_by_its_kind_in_a_product_room", async () => {
     const ask = post({ room: "r2", sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: { agent: "s1" }, text: "Merge order?" });
     const said = post({ room: "r2", sender: { agent: "s1" }, sender_name: "supervisor", text: "core first" });
