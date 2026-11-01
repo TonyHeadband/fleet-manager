@@ -9,7 +9,7 @@ import type { FleetTab } from "../shell/routes";
 // A port of crates/fleet-gui/src/views/management/definitions.rs's DefsState and of the definition calls in
 // app/fleet.rs: every orchestrator, specialist, skill and PR style, each opened file with its own draft and error.
 
-/** `{kind}/{name}`: one definition. */
+/** `{persona}/{kind}/{name}`: one definition. A PR style belongs to no persona, so its persona is empty. */
 export type DefKey = string;
 
 /** The Fleet tabs that each list one kind. */
@@ -20,14 +20,16 @@ export const DEF_TABS = {
   "pr-styles": "pr_style",
 } as const satisfies Partial<Record<FleetTab, DefKind>>;
 
-export const defKey = (kind: DefKind, name: string): DefKey => `${kind}/${name}`;
+export const defKey = (persona: string, kind: DefKind, name: string): DefKey => `${persona}/${kind}/${name}`;
 
 /** egui's `usable`: the names of `kind` that load. */
 export const usable = (defs: DefInfo[], kind: DefKind) => defs.filter((d) => d.kind === kind && !d.error).map((d) => d.name);
 
 export interface DefsState {
-  /** The daemon's list; null until it first answers. */
+  /** The active persona's orchestrators, specialists and skills; null until the daemon first answers for it. */
   list: DefInfo[] | null;
+  /** The fleet-wide PR styles; null until they first load. */
+  styles: DefInfo[] | null;
   selected: { kind: DefKind; name: string } | null;
   /** Each opened definition's file as the daemon last sent it. */
   files: Record<DefKey, DefFile>;
@@ -39,7 +41,15 @@ export interface DefsState {
   saving: { key: DefKey; text: string } | null;
 }
 
-export const initialDefs: DefsState = { list: null, selected: null, files: {}, drafts: {}, errors: {}, saving: null };
+export const initialDefs: DefsState = { list: null, styles: null, selected: null, files: {}, drafts: {}, errors: {}, saving: null };
+
+type Say = (notice: Notice, text: string) => void;
+
+/** What the hook keeps: a persona's list and selection are held apart, and `st` shows the active persona's. */
+interface Held extends DefsState {
+  lists: Record<string, DefInfo[]>;
+  picks: Record<string, NonNullable<DefsState["selected"]>>;
+}
 
 const without = <T>(r: Record<DefKey, T>, key: DefKey) => {
   const { [key]: _, ...rest } = r;
@@ -79,26 +89,37 @@ export const defDirty = (draft: string, file: DefFile) => draft !== file.text ||
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** The definitions and their calls, kept above Management so drafts outlive the tabs and the view. */
-export function useDefinitions(client: FleetClient, say: (notice: Notice, text: string) => void) {
-  const [st, setSt] = useState<DefsState>(initialDefs);
+/** The definitions and their calls, kept above Management so drafts outlive the tabs, the view and a persona switch. */
+export function useDefinitions(client: FleetClient, persona: string | null, say: Say) {
+  const [held, setHeld] = useState<Held>({ ...initialDefs, lists: {}, picks: {} });
   // Read synchronously, so a second save asked for before a render is refused, as egui's is.
-  const now = useRef(st);
-  now.current = st;
-  const update = useCallback((f: (s: DefsState) => DefsState) => {
+  const now = useRef(held);
+  now.current = held;
+  const update = useCallback((f: (s: Held) => Held) => {
     now.current = f(now.current);
-    setSt(now.current);
+    setHeld(now.current);
   }, []);
+  const active = persona ?? "";
+  const st: DefsState = { ...held, list: held.lists[active] ?? null, selected: held.picks[active] ?? null };
 
-  // Lists asked so far: one answered after a newer one is stale (entering a tab and a save's refresh both out).
+  // Lists asked so far: one answered after a newer one is stale (entering a tab, a persona switch and a save's refresh).
   const lists = useRef(0);
   const loadList = useCallback(() => {
+    if (persona === null) return;
     const seq = ++lists.current;
-    const latest = () => seq === lists.current;
-    client.definitions().then(
-      (list) => latest() && update((s) => ({ ...s, list })),
+    client.personaDefinitions(persona).then(
+      (list) => seq === lists.current && update((s) => ({ ...s, lists: { ...s.lists, [persona]: list } })),
       // egui keeps what it had and toasts; a tab with no list yet stays on Loading….
-      (e: unknown) => latest() && say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
+      (e: unknown) => seq === lists.current && say("error", `Could not load the orchestrators and specialists: ${message(e)}`),
+    );
+  }, [client, persona, update, say]);
+
+  const styleLists = useRef(0);
+  const loadStyles = useCallback(() => {
+    const seq = ++styleLists.current;
+    client.definitions().then(
+      (styles) => seq === styleLists.current && update((s) => ({ ...s, styles })),
+      (e: unknown) => seq === styleLists.current && say("error", `Could not load the PR styles: ${message(e)}`),
     );
   }, [client, update, say]);
 
@@ -109,38 +130,48 @@ export function useDefinitions(client: FleetClient, say: (notice: Notice, text: 
 
   const fail = (key: DefKey) => (e: unknown) => update((s) => ({ ...s, errors: { ...s.errors, [key]: message(e) } }));
 
+  // A PR style is the fleet's, every other kind the persona's.
+  const keyOf = (kind: DefKind, name: string) => defKey(kind === "pr_style" ? "" : active, kind, name);
+  const read = (kind: DefKind, name: string) =>
+    kind === "pr_style" || persona === null ? client.definition(kind, name) : client.personaDefinition(persona, kind, name);
+
   const open = (kind: DefKind, name: string) => {
-    const key = defKey(kind, name);
+    const key = keyOf(kind, name);
     const asked = saves.current[key];
     const fresh = () => saves.current[key] === asked;
-    update((s) => ({ ...s, selected: { kind, name } }));
-    client.definition(kind, name).then(
-      (file) => fresh() && update((s) => loaded(s, key, file)),
+    update((s) => ({ ...s, picks: { ...s.picks, [active]: { kind, name } } }));
+    read(kind, name).then(
+      (file) => fresh() && update((s) => ({ ...s, ...loaded(s, key, file) })),
       (e: unknown) => fresh() && fail(key)(e),
     );
   };
 
+  const reload = (kind: DefKind) => (kind === "pr_style" ? loadStyles() : loadList());
+
   return {
     st,
     loadList,
+    loadStyles,
     open,
+    key: keyOf,
     edit: (key: DefKey, text: string) => update((s) => ({ ...s, drafts: { ...s.drafts, [key]: text } })),
     override: (key: DefKey) => {
       const file = now.current.files[key];
       if (file) update((s) => ({ ...s, drafts: { ...s.drafts, [key]: file.text } }));
     },
     save: (kind: DefKind, name: string) => {
-      const key = defKey(kind, name);
+      const key = keyOf(kind, name);
       const text = now.current.drafts[key];
       if (now.current.saving || text === undefined) return;
       bump(key);
       update((s) => ({ ...s, saving: { key, text }, errors: without(s.errors, key) }));
-      client.saveDefinition(kind, name, text).then(
+      const put = kind === "pr_style" || persona === null ? client.saveDefinition(kind, name, text) : client.savePersonaDefinition(persona, kind, name, text);
+      put.then(
         () => {
           bump(key);
-          update(saved);
+          update((s) => ({ ...s, ...saved(s) }));
           say("success", `${name} saved`);
-          loadList();
+          reload(kind);
         },
         // The message goes under the editor; the draft stays to be fixed.
         (e: unknown) => update((s) => ({ ...s, saving: null, errors: { ...s.errors, [key]: message(e) } })),
@@ -155,13 +186,14 @@ export function useDefinitions(client: FleetClient, say: (notice: Notice, text: 
       }),
     /** Asked after the confirm: deletes the user's copy, then reads the built-in again if it is still open. */
     reset: (kind: DefKind, name: string) => {
-      const key = defKey(kind, name);
-      client.resetDefinition(kind, name).then(() => {
-        update((s) => reset(s, key));
+      const key = keyOf(kind, name);
+      const del = kind === "pr_style" || persona === null ? client.resetDefinition(kind, name) : client.resetPersonaDefinition(persona, kind, name);
+      del.then(() => {
+        update((s) => ({ ...s, ...reset(s, key) }));
         say("success", `${name} reset to built-in`);
-        const sel = now.current.selected;
+        const sel = now.current.picks[active];
         if (sel?.kind === kind && sel.name === name) open(kind, name);
-        loadList();
+        reload(kind);
       }, fail(key));
     },
   };

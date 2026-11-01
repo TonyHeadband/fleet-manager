@@ -6,7 +6,7 @@ import { FleetError } from "../api/client";
 import type { DefFile } from "../api/generated/DefFile";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
-import { click, fleetSelected, fleetTab, management, pending } from "./harness";
+import { click, fleetSelected, fleetTab, management, managedPersona, pending } from "./harness";
 
 // Ports of the definitions tests in crates/fleet-gui/tests/management.rs.
 
@@ -40,10 +40,11 @@ async function defsTab(tab: string, defs: DefInfo[], extra: Record<string, unkno
       return p.promise;
     });
   const over = {
-    definitions: vi.fn().mockResolvedValue(defs),
-    definition: answered(reads),
-    saveDefinition: answered(saves),
-    resetDefinition: answered(resets),
+    definitions: vi.fn().mockResolvedValue(defs.filter((d) => d.kind === "pr_style")),
+    personaDefinitions: vi.fn().mockResolvedValue(defs.filter((d) => d.kind !== "pr_style")),
+    personaDefinition: answered(reads),
+    savePersonaDefinition: answered(saves),
+    resetPersonaDefinition: answered(resets),
     ...extra,
   };
   await management(tab, { over });
@@ -73,7 +74,7 @@ describe("Definitions", () => {
     expect(fleetSelected()).toHaveTextContent("Orchestrators");
     await userEvent.click(await row("bug-fix built-in"));
     expect(screen.queryByRole("button", { name: /rust/ })).toBeNull();
-    expect(h.definition).toHaveBeenLastCalledWith("orchestrator", "bug-fix");
+    expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "orchestrator", "bug-fix");
     const text = "---\nname: bug-fix\n---\nFix it.";
     await land(h.reads[0]!, file("orchestrator", "bug-fix", text, true));
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
@@ -84,7 +85,7 @@ describe("Definitions", () => {
     await click("Override");
     await userEvent.type(editor("orchestrators/bug-fix"), " Now.");
     await click("Save");
-    expect(h.saveDefinition).toHaveBeenLastCalledWith("orchestrator", "bug-fix", `${text} Now.`);
+    expect(h.savePersonaDefinition).toHaveBeenLastCalledWith("a", "orchestrator", "bug-fix", `${text} Now.`);
 
     // An invalid file: the daemon's message under the editor, and the draft kept.
     await refuse(h.saves[0]!, "orchestrators/bug-fix.md: missing `skills`");
@@ -101,11 +102,11 @@ describe("Definitions", () => {
     expect(screen.getByRole("button", { name: "Revert" })).toBeInTheDocument();
     await click("Reset to built-in");
     expect(screen.getByRole("dialog", { name: "Reset rust to built-in?" })).toBeInTheDocument();
-    expect(h.resetDefinition).not.toHaveBeenCalled();
+    expect(h.resetPersonaDefinition).not.toHaveBeenCalled();
     await click("Cancel");
     await click("Reset to built-in");
     await click("Reset");
-    expect(h.resetDefinition).toHaveBeenLastCalledWith("specialist", "rust");
+    expect(h.resetPersonaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
     // A refused reset says why under the editor, like a refused save, and keeps the file.
     await refuse(h.resets[0]!, "specialists/rust.md: permission denied");
     expect(screen.getByText(/permission denied/)).toBeInTheDocument();
@@ -117,7 +118,7 @@ describe("Definitions", () => {
     // egui's toast, in the footer.
     expect(within(footer()).getByText("rust reset to built-in")).toBeInTheDocument();
     // The draft is gone and the built-in is read again.
-    expect(h.definition).toHaveBeenLastCalledWith("specialist", "rust");
+    expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
     expect(screen.queryByRole("textbox")).toBeNull();
     const builtin = "---\nname: rust\n---\nBuilt in.";
     await land(h.reads[2]!, file("specialist", "rust", builtin, true));
@@ -152,7 +153,7 @@ describe("Definitions", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
     expect(within(footer()).getByText("bug-fix saved")).toBeInTheDocument();
-    expect(h.definitions).toHaveBeenCalledTimes(2);
+    expect(h.personaDefinitions).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Override" })).toBeNull();
@@ -218,7 +219,7 @@ describe("Definitions", () => {
       lists.push(p);
       return p.promise;
     });
-    const h = await defsTab("Orchestrators", [], { definitions });
+    const h = await defsTab("Orchestrators", [], { personaDefinitions: definitions });
     const builtin = [def("orchestrator", "bug-fix")];
     await land(lists[0]!, builtin);
     await click("bug-fix built-in");
@@ -244,7 +245,7 @@ describe("Definitions", () => {
   });
 
   it("a_failed_list_load_tells_the_footer", async () => {
-    await management("Orchestrators", { over: { definitions: vi.fn().mockRejectedValue(new FleetError("daemon down")) } });
+    await management("Orchestrators", { over: { personaDefinitions: vi.fn().mockRejectedValue(new FleetError("daemon down")) } });
     expect(await within(footer()).findByText("Could not load the orchestrators and specialists: daemon down")).toBeInTheDocument();
     // The tab waits for a list, as egui's.
     expect(screen.getByText("Loading…")).toBeInTheDocument();
@@ -277,5 +278,49 @@ describe("Definitions", () => {
     await fleetTab("Agents");
     for (const name of ["Add allow rule", "Add deny rule", "Add variable"])
       expect(await screen.findByRole("button", { name })).toBeEnabled();
+  });
+});
+
+describe("Definitions per persona", () => {
+  const two = [managedPersona("a", "Work", true), managedPersona("b", "Home", true)];
+  const switchTo = async (name: string) => {
+    await userEvent.click(screen.getByRole("button", { name: "Active persona" }));
+    await userEvent.click(within(document.querySelector<HTMLElement>(".menu")!).getByText(name));
+  };
+
+  it("the_list_follows_the_active_persona", async () => {
+    const personaDefinitions = vi.fn(async (p: string) => [def("specialist", p === "a" ? "rust" : "go")]);
+    await management("Specialists", { personas: two, over: { personaDefinitions } });
+    expect(await row("rust built-in")).toBeInTheDocument();
+    expect(personaDefinitions).toHaveBeenCalledWith("a");
+    await switchTo("Home");
+    expect(await row("go built-in")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "rust built-in" })).toBeNull();
+    expect(personaDefinitions).toHaveBeenLastCalledWith("b");
+  });
+
+  it("a_draft_stays_with_its_persona", async () => {
+    const personaDefinitions = vi.fn().mockResolvedValue([def("specialist", "rust", null, { builtin: false })]);
+    const personaDefinition = vi.fn(async (p: string) => file("specialist", "rust", `mine ${p}`, false));
+    await management("Specialists", { personas: two, over: { personaDefinitions, personaDefinition } });
+    await userEvent.click(await row("rust custom"));
+    await userEvent.type(await screen.findByRole("textbox", { name: "specialists/rust" }), " edited");
+    expect(personaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
+    await switchTo("Home");
+    await userEvent.click(await row("rust custom"));
+    expect(await screen.findByRole("textbox", { name: "specialists/rust" })).toHaveValue("mine b");
+    await switchTo("Work");
+    await userEvent.click(await row("rust custom"));
+    expect(await screen.findByRole("textbox", { name: "specialists/rust" })).toHaveValue("mine a edited");
+  });
+
+  it("pr_styles_still_load_from_the_fleet_routes", async () => {
+    const definitions = vi.fn().mockResolvedValue([def("pr_style", "plain")]);
+    const personaDefinitions = vi.fn().mockResolvedValue([]);
+    const definition = vi.fn().mockResolvedValue(file("pr_style", "plain", "text", true));
+    await management("PR styles", { personas: two, over: { definitions, personaDefinitions, definition } });
+    await userEvent.click(await row("plain built-in"));
+    expect(definitions).toHaveBeenCalled();
+    expect(definition).toHaveBeenLastCalledWith("pr_style", "plain");
   });
 });

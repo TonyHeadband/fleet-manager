@@ -160,6 +160,8 @@ export function useProductsTab(
   shown: boolean,
   /** A product was deleted: App lets go of it if it was the active one. */
   deleted: (id: string) => void,
+  /** The drawer's active persona, whose definitions the settings are read for. */
+  persona: string | null,
 ) {
   const base = products.state === "ready" ? products.value : null;
   const [st, setSt] = useState<ProductsState>(initial);
@@ -184,8 +186,8 @@ export function useProductsTab(
     if (shown && products.state === "ready") update((s) => sync(s, products.value));
   }, [shown, products, update]);
   useEffect(() => {
-    if (shown && products.state === "ready") client.effectiveSettings().then(setEffective, () => {});
-  }, [client, shown, products]);
+    if (shown && products.state === "ready" && persona !== null) client.effectiveSettings(persona).then(setEffective, () => {});
+  }, [client, shown, products, persona]);
 
   /** One of the product's own lists is sent; `done` takes the answer, then the list is asked for on success. */
   const send = async (busy: "hiddenBusy" | "overridesBusy", put: (id: string) => Promise<Product>, done: typeof hiddenDone) => {

@@ -183,17 +183,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   // For a choice saved that was not the person's pick (a persona adopted, a deleted product let go): only a failed
   // save is worth a word, where egui also says "Settings saved".
   const sayFailure = useCallback((notice: Notice, text: string) => notice !== "success" && say(notice, text), [say]);
-  const definitions = useDefinitions(client, say);
   const personasTab = usePersonasTab(client, personas.state === "ready" ? personas.value : null, reloadPersonas, native, wizard.local, say);
   // Management's "+ New persona" and Resume open the setup in their modes, over the app.
   const [managedSetup, setManagedSetup] = useState<{ mode: Exclude<SetupMode, "wizard">; draft: Persona | null } | null>(null);
-  const loadDefinitions = definitions.loadList;
-  // Asked again on each way into a definitions tab, into Personas for its nickname fields, into Products for its
-  // specialists and override keys and into Pull requests for its styles, so files changed on disk show (egui asks at
-  // start and after a save or reset).
-  useEffect(() => {
-    if (route === "fleet" && (fleetTab in DEF_TABS || ["personas", "products", "pull-requests"].includes(fleetTab))) loadDefinitions();
-  }, [route, fleetTab, loadDefinitions]);
   // Where Tasks, Fleet and Settings were left, so the drawer and the strip open them there again (egui keeps
   // their state).
   const hash = useHash();
@@ -296,6 +288,21 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     setSavedPersona(persona);
     writeChoice("fleet.persona", persona, sayFailure);
   }, [personas.state, persona, savedPersona, sayFailure]);
+
+  const definitions = useDefinitions(client, persona, say);
+  const { loadList: loadDefinitions, loadStyles } = definitions;
+  // Asked again on each way into a definitions tab, into Personas for its nickname fields, into Products for its
+  // specialists and override keys and into Pull requests for its styles, so files changed on disk show (egui asks at
+  // start and after a save or reset). The persona's list is asked again when the drawer's persona changes.
+  useEffect(() => {
+    if (route !== "fleet") return;
+    if (["pr-styles", "pull-requests", "products"].includes(fleetTab)) loadStyles();
+    if (["orchestrators", "specialists", "skills", "personas", "products"].includes(fleetTab)) loadDefinitions();
+  }, [route, fleetTab, loadDefinitions, loadStyles]);
+
+  // A product's override keys offer the persona's definitions and the fleet's PR styles.
+  const { list: personaDefs, styles: styleDefs } = definitions.st;
+  const productDefs = useMemo(() => personaDefs && [...personaDefs, ...(styleDefs ?? [])], [personaDefs, styleDefs]);
 
   const product = activeProduct(products, savedProduct);
   const productInfo = products.state === "ready" ? products.value.find((p) => p.id === product) : undefined;
@@ -551,6 +558,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     reloadRepos,
     route === "fleet" && fleetTab === "products",
     productDeleted,
+    persona,
   );
   // egui's New product modal, from the drawer and from Management → Products.
   const [newProductOpen, setNewProductOpen] = useState(false);
@@ -788,13 +796,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               case "limits":
                 return <RulesPage {...rules} kinds={["limits"]} />;
               case "pull-requests":
-                return <RulesPage {...rules} kinds={["pr"]} styles={definitions.st.list && usable(definitions.st.list, "pr_style")} />;
+                return <RulesPage {...rules} kinds={["pr"]} styles={definitions.st.styles && usable(definitions.st.styles, "pr_style")} />;
               case "products":
                 return (
                   <Products
                     products={products.state === "ready" ? products.value : null}
                     personas={personas.state === "ready" ? personas.value : []}
-                    defs={definitions.st.list}
+                    defs={productDefs}
                     tab={productsTab}
                     onNewProduct={openNewProduct}
                     now={now}

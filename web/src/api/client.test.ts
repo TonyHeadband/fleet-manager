@@ -111,6 +111,26 @@ describe("FleetClient", () => {
     expect(f.mock.calls[0]![0]).toBe("/api/definitions");
   });
 
+  it("reads and writes a persona's definitions on its own routes", async () => {
+    const f = fakeFetch(200, []);
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    await c.personaDefinitions("my work");
+    await c.personaDefinition("my work", "specialist", "my rust");
+    await c.savePersonaDefinition("my work", "skill", "s", "text");
+    await c.resetPersonaDefinition("my work", "specialist", "rust");
+    await c.movePersonaDefinition("my work", "specialist", "rust", "orchestrator");
+    await c.setNickname("my work", "rust", "Rusty");
+    const calls = f.mock.calls.map(([url, init]) => [(init as RequestInit | undefined)?.method ?? "GET", url, (init as RequestInit | undefined)?.body]);
+    expect(calls).toEqual([
+      ["GET", "/api/personas/my%20work/definitions", undefined],
+      ["GET", "/api/personas/my%20work/definitions/specialist/my%20rust", undefined],
+      ["PUT", "/api/personas/my%20work/definitions/skill/s", "text"],
+      ["DELETE", "/api/personas/my%20work/definitions/specialist/rust", undefined],
+      ["POST", "/api/personas/my%20work/definitions/specialist/rust/move", JSON.stringify({ to: "orchestrator" })],
+      ["PUT", "/api/personas/my%20work/nicknames/rust", "Rusty"],
+    ]);
+  });
+
   it("saves a definition as plain text and resets it", async () => {
     const f = fakeFetch(200, { kind: "specialist", name: "my rust", summary: "", builtin: false, overridden: true });
     const c = new FleetClient("", f as unknown as typeof fetch);
@@ -134,7 +154,7 @@ describe("FleetClient", () => {
     await c.deleteProduct("p 1");
     await c.putHiddenSpecialists("p 1", ["rust"]);
     await c.putOverrides("p 1", [{ section: "limits", key: "max_steps", value: "30" }]);
-    await c.effectiveSettings();
+    await c.effectiveSettings("my work");
     await c.internalBranches("p 1");
     await c.internalFile("p 1", "task/a b", "designs/a b.md");
     await c.internalHistory("p 1", "main", "a.md");
@@ -147,7 +167,7 @@ describe("FleetClient", () => {
       ["DELETE", "/api/products/p%201", undefined],
       ["PUT", "/api/products/p%201/hidden-specialists", JSON.stringify({ hidden: ["rust"] })],
       ["PUT", "/api/products/p%201/overrides", JSON.stringify({ overrides: [{ section: "limits", key: "max_steps", value: "30" }] })],
-      ["GET", "/api/settings/effective", undefined],
+      ["GET", "/api/settings/effective?persona=my%20work", undefined],
       ["GET", "/api/products/p%201/internal/branches", undefined],
       ["GET", "/api/products/p%201/internal/file?branch=task%2Fa%20b&path=designs%2Fa%20b.md", undefined],
       ["GET", "/api/products/p%201/internal/history?branch=main&path=a.md", undefined],

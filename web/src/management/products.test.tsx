@@ -233,7 +233,7 @@ const override = (section: string, key: string, value: string, error: string | n
 /** egui's `overrides_harness`: Alpha with these overrides, and a model named `rust` among the definitions. */
 async function overrides(list: ProductOverride[], over = {}) {
   const client = await products([alpha({ overrides: list })], {
-    definitions: vi.fn().mockResolvedValue([def("orchestrator", "bug-fix"), def("specialist", "rust")]),
+    personaDefinitions: vi.fn().mockResolvedValue([def("orchestrator", "bug-fix"), def("specialist", "rust")]),
     ...over,
   });
   await screen.findByRole("button", { name: "rust" });
@@ -245,7 +245,7 @@ describe("Products: hidden specialists and overrides", () => {
     const stored = alpha({ repos: [repo("core", "/src/core", null)], hidden_specialists: ["stale"] });
     const saved = { ...stored, hidden_specialists: ["reviewer"] };
     const client = await products([stored], {
-      definitions: vi
+      personaDefinitions: vi
         .fn()
         .mockResolvedValue([
           def("specialist", "reviewer"),

@@ -25,6 +25,7 @@ import type { DecideBreakdown } from "./generated/DecideBreakdown";
 import type { FleetView } from "./generated/FleetView";
 import type { FormDef } from "./generated/FormDef";
 import type { Release } from "./generated/Release";
+import type { MoveDefinition } from "./generated/MoveDefinition";
 import type { NewPersona } from "./generated/NewPersona";
 import type { Persona } from "./generated/Persona";
 import type { PersonaList } from "./generated/PersonaList";
@@ -79,6 +80,10 @@ const productPath = (id: string) => `/api/products/${encodeURIComponent(id)}`;
 const internalQuery = (branch: string, path: string) => `branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`;
 
 const defPath = (kind: DefKind, name: string) => `/api/definitions/${kind}/${encodeURIComponent(name)}`;
+
+const personaPath = (persona: string) => `/api/personas/${encodeURIComponent(persona)}`;
+const personaDefPath = (persona: string, kind: DefKind, name: string) =>
+  `${personaPath(persona)}/definitions/${kind}/${encodeURIComponent(name)}`;
 
 /** A body sent as it is, not as JSON: a definition file. */
 class PlainText {
@@ -153,7 +158,8 @@ export class FleetClient {
   /** The whole override list: it replaces what is stored. */
   putOverrides = (id: string, overrides: ProductOverride[]) => this.call<Product>("PUT", `${productPath(id)}/overrides`, { overrides });
   /** The global settings as agents get them, each with where it comes from. */
-  effectiveSettings = () => this.call<EffectiveSettings>("GET", "/api/settings/effective");
+  effectiveSettings = (persona: string) =>
+    this.call<EffectiveSettings>("GET", `/api/settings/effective?persona=${encodeURIComponent(persona)}`);
   internalBranches = (id: string) => this.call<InternalBranches>("GET", `${productPath(id)}/internal/branches`);
   internalFiles = async (id: string, branch: string) =>
     (await this.call<InternalFiles>("GET", `${productPath(id)}/internal/files?branch=${encodeURIComponent(branch)}`)).files;
@@ -172,7 +178,7 @@ export class FleetClient {
   checkouts = async (product: string, name: string) =>
     (await this.call<CheckoutList>("GET", `/api/products/${encodeURIComponent(product)}/repos/${encodeURIComponent(name)}/checkouts`))
       .checkouts;
-  /** The orchestrator, specialist, skill and PR style definitions, with why any cannot be used. */
+  /** The PR styles, which are fleet-wide, with why any cannot be used. */
   definitions = () => this.call<DefInfo[]>("GET", "/api/definitions");
   definition = (kind: DefKind, name: string) => this.call<DefFile>("GET", defPath(kind, name));
   /** Saves `text` as the user's file, overriding a built-in of the same name; the daemon refuses a file it cannot load. */
@@ -180,6 +186,19 @@ export class FleetClient {
     this.call<DefInfo>("PUT", defPath(kind, name), new PlainText(text));
   /** Deletes the user's copy, so the built-in applies again. */
   resetDefinition = (kind: DefKind, name: string) => this.call<void>("DELETE", defPath(kind, name));
+  /** The persona's orchestrators, specialists and skills, with why any cannot be used. */
+  personaDefinitions = (persona: string) => this.call<DefInfo[]>("GET", `${personaPath(persona)}/definitions`);
+  personaDefinition = (persona: string, kind: DefKind, name: string) => this.call<DefFile>("GET", personaDefPath(persona, kind, name));
+  savePersonaDefinition = (persona: string, kind: DefKind, name: string, text: string) =>
+    this.call<DefInfo>("PUT", personaDefPath(persona, kind, name), new PlainText(text));
+  resetPersonaDefinition = (persona: string, kind: DefKind, name: string) =>
+    this.call<void>("DELETE", personaDefPath(persona, kind, name));
+  /** Changes the role of the persona's definition; it either completes or changes nothing. */
+  movePersonaDefinition = (persona: string, kind: DefKind, name: string, to: DefKind) =>
+    this.call<DefInfo>("POST", `${personaDefPath(persona, kind, name)}/move`, { to } satisfies MoveDefinition);
+  /** An empty nickname clears it. */
+  setNickname = (persona: string, name: string, nickname: string) =>
+    this.call<void>("PUT", `${personaPath(persona)}/nicknames/${encodeURIComponent(name)}`, new PlainText(nickname));
 
   diff = (agentId: string) => this.call<DiffReport>("GET", `/api/agents/${encodeURIComponent(agentId)}/diff`);
 

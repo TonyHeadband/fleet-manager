@@ -253,10 +253,10 @@ describe("Persona edits and logins", () => {
   it("nicknames_are_saved_on_the_persona", async () => {
     const saved = persona("a", "Work", true, { nicknames: { rust: "Ferris" } });
     const updatePersona = vi.fn().mockResolvedValue(saved);
-    const definitions = vi
+    const personaDefinitions = vi
       .fn()
       .mockResolvedValue([specialist("docs"), specialist("rust"), specialist("stale", "specialists/stale.md: bad")]);
-    const client = await personas([persona("a", "Work", true)], { updatePersona, definitions });
+    const client = await personas([persona("a", "Work", true)], { updatePersona, personaDefinitions });
     // Only specialists that load get a field.
     expect(await screen.findByRole("textbox", { name: "rust" })).toHaveAttribute("placeholder", "none");
     expect(screen.queryByRole("textbox", { name: "stale" })).toBeNull();

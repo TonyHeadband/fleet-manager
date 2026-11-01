@@ -231,7 +231,7 @@ describe("Products: Internal resources", () => {
 
 describe("Products: review focus", () => {
   it("the_browser_offers_every_products_action", async () => {
-    const { calls } = await internal({ definitions: vi.fn().mockResolvedValue([def("specialist", "rust")]) });
+    const { calls } = await internal({ personaDefinitions: vi.fn().mockResolvedValue([def("specialist", "rust")]) });
     await click("rust");
     expect(screen.getByRole("button", { name: "Save hidden specialists" })).toBeEnabled();
     for (const name of ["New product", "+ New product", "Delete product", "Add override", "Internal resources"])

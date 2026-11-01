@@ -9,7 +9,7 @@ import { Mark } from "../ui/icons";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { SaveBar } from "../ui/SaveBar";
-import { defDirty, defKey, type DefinitionsApi } from "./definitions";
+import { defDirty, type DefinitionsApi } from "./definitions";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs: one kind's definitions, built-in or the user's, with
 // the selected one's file. A built-in is read-only until Override copies it into a draft that saves as the user's file.
@@ -34,14 +34,15 @@ const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · 
 
 export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsApi }) {
   const { st } = defs;
-  if (st.list === null) {
+  const all = kind === "pr_style" ? st.styles : st.list;
+  if (all === null) {
     return (
       <div className="tabbed-page">
         <p className="note">Loading…</p>
       </div>
     );
   }
-  const listed = st.list.filter((d) => d.kind === kind);
+  const listed = all.filter((d) => d.kind === kind);
   const selected = st.selected?.kind === kind ? st.selected.name : null;
   return (
     <ListDetail
@@ -94,7 +95,7 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
 function Editor({ kind, name, info, defs }: { kind: DefKind; name: string; info: DefInfo | undefined; defs: DefinitionsApi }) {
   const captionId = useId();
   const [confirm, setConfirm] = useState(false);
-  const key = defKey(kind, name);
+  const key = defs.key(kind, name);
   const file: DefFile | undefined = defs.st.files[key];
   const draft = defs.st.drafts[key];
   const error = defs.st.errors[key];

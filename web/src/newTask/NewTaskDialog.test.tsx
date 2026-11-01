@@ -25,7 +25,7 @@ async function openDialog(over: Parameters<typeof fakeClient>[0] = {}, opts: { r
     personas: vi.fn().mockResolvedValue({ personas: [persona("me"), persona("work")] }),
     products: vi.fn().mockResolvedValue({ products: [opts.product ?? product("p1")] }),
     repos: vi.fn().mockResolvedValue(opts.repos ?? [repoInfo("core"), repoInfo("portal")]),
-    definitions: vi.fn().mockResolvedValue([]),
+    personaDefinitions: vi.fn().mockResolvedValue([]),
     checkouts: vi.fn().mockResolvedValue([]),
     spawn: vi.fn().mockResolvedValue(started()),
     ...over,
@@ -83,13 +83,23 @@ describe("New task, as Lite's dialog", () => {
   });
 
   it("type_defaults_to_solo_and_lists_valid_orchestrators", async () => {
-    await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead"), def("broken", "bad yaml"), { ...def("rust"), kind: "specialist" }]) });
+    await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead"), def("broken", "bad yaml"), { ...def("rust"), kind: "specialist" }]) });
     expect(await picked("Type")).toBe("Solo");
     await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "lead"]));
   });
 
+  it("new_task_lists_the_dialogs_persona_definitions", async () => {
+    const personaDefinitions = vi.fn(async (p: string) => [def(p === "me" ? "lead" : "boss")]);
+    await openDialog({ personaDefinitions });
+    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "lead"]));
+    expect(personaDefinitions).toHaveBeenLastCalledWith("me");
+    await choose("Persona", "work");
+    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "boss"]));
+    expect(personaDefinitions).toHaveBeenLastCalledWith("work");
+  });
+
   it("orchestrator_type_limits_to_one_repo", async () => {
-    await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) });
+    await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
     await pick("core");
     await pick("portal");
     await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
@@ -104,7 +114,7 @@ describe("New task, as Lite's dialog", () => {
   });
 
   it("start_disabled_without_a_repo", async () => {
-    await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) });
+    await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
     await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
     await choose("Type", "lead");
     await userEvent.type(screen.getByLabelText("Goal"), "go");
@@ -113,7 +123,7 @@ describe("New task, as Lite's dialog", () => {
   });
 
   it("spawn_sends_kind_and_role", async () => {
-    const { client } = await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) });
+    const { client } = await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
     await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
     await choose("Type", "lead");
     await pick("core");
@@ -125,7 +135,7 @@ describe("New task, as Lite's dialog", () => {
   describe("the workflow line", () => {
     const withWorkflow = (workflow: RepoInfo["workflow"]) => [repoInfo("core", { workflow })];
     const asLead = async (repos: RepoInfo[]) => {
-      await openDialog({ definitions: vi.fn().mockResolvedValue([def("lead")]) }, { repos });
+      await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) }, { repos });
       await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
     };
 

@@ -50,6 +50,14 @@ export function useNewTask(
     );
   };
 
+  // The dialog's persona owns the orchestrators it offers; an answer for a persona since left is dropped.
+  const fetchDefs = (persona: string) => {
+    client.personaDefinitions(persona).then(
+      (list) => now.current.draft.persona === persona && setDefs(list),
+      () => {},
+    );
+  };
+
   const listCheckouts = (name: string, path: string) => {
     if (productId === null) return;
     const n = opening.current;
@@ -89,7 +97,7 @@ export function useNewTask(
     // As Lite's open path: the board's repos are asked for again, and the dialog's for its persona.
     reloadRepos();
     fetchRepos(persona);
-    client.definitions().then(setDefs, () => {});
+    fetchDefs(persona);
   };
 
   const changePersona = (id: string) => {
@@ -99,6 +107,8 @@ export function useNewTask(
     setDraft((d) => setPersona(d, id));
     now.current = { ...now.current, draft: { ...draft, persona: id } };
     fetchRepos(id);
+    setDefs([]);
+    fetchDefs(id);
   };
 
   const retry = (name: string, path: string) => listCheckouts(name, path);
