@@ -8,7 +8,7 @@ import type { Task } from "../api/generated/Task";
 import { ChatPane, type ChatClient } from "../chat/ChatPane";
 import { ownerSpeaker, supervisorSpeaker } from "../chat/speakers";
 import { ReplyBox } from "../components/ReplyBox";
-import { navigate, supervisorHref, useSupervisorConversation } from "../shell/routes";
+import { navigate, supervisorHref, useSupervisorConversation, useSupervisorRoom } from "../shell/routes";
 import { ErrorLine } from "../ui/ErrorLine";
 import { ConversationSelector } from "./ConversationSelector";
 import { AGENTS_BY_STATUS } from "./widgets/AgentsByStatus";
@@ -51,6 +51,8 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const named = useSupervisorConversation();
+  // The room the address opens in the Rooms widget survives the page naming its conversation.
+  const room = useSupervisorRoom();
 
   // Task marks and `live` follow the fleet: ask again when a supervisor's or a task's status moves.
   const standing = agents.map((a) => `${a.id}:${a.status}`).join(" ");
@@ -65,14 +67,14 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
   const current = blank ? null : (known ?? conversations[0]?.id ?? null);
   // An address left by another persona (or a deleted conversation) is let go once the list is known.
   useEffect(() => {
-    if (list !== null && named !== null && known === null) navigate(supervisorHref(), true);
-  }, [list, named, known]);
+    if (list !== null && named !== null && known === null) navigate(supervisorHref(null, room), true);
+  }, [list, named, known, room]);
 
   // The latest conversation, shown for an address without one, is named in it so the rest of the app can tell what is
   // on screen.
   useEffect(() => {
-    if (!blank && named === null && current !== null) navigate(supervisorHref(current), true);
-  }, [blank, named, current]);
+    if (!blank && named === null && current !== null) navigate(supervisorHref(current, room), true);
+  }, [blank, named, current, room]);
 
   const pick = (id: string) => {
     setBlank(false);

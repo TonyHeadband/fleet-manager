@@ -51,6 +51,13 @@ const SETTLE = 700;
 const settle = () => act(() => new Promise((r) => setTimeout(r, SETTLE)));
 
 describe("Rooms widget", () => {
+  it("the_room_the_address_names_opens", async () => {
+    window.location.hash = "#supervisor?c=s1&room=r2";
+    show();
+    expect(await screen.findByRole("region", { name: "Core" })).toBeInTheDocument();
+    window.location.hash = "";
+  });
+
   it("the_list_shows_rooms_with_unread_counts", async () => {
     show();
     const second = await roomButton(/Core/);
