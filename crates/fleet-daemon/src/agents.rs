@@ -797,16 +797,22 @@ fn queue_measure(
     }
 }
 
-/// Whether Claude saved a transcript for `session` in the persona's config dir (`~/.claude` when it sets none).
+/// Where Claude saved the transcript for `session` in the persona's config dir (`~/.claude` when it sets none).
 /// Matched in any project folder, so Claude's encoding of the cwd need not be reproduced.
-fn has_transcript(persona: &PersonaEnv, session: &str) -> bool {
+pub fn transcript_path(persona: &PersonaEnv, session: &str) -> Option<PathBuf> {
     let dir = persona
         .claude_dir()
         .unwrap_or_else(|| crate::config::home_dir().join(".claude"));
     let name = format!("{session}.jsonl");
     std::fs::read_dir(dir.join("projects"))
-        .map(|projects| projects.flatten().any(|p| p.path().join(&name).is_file()))
-        .unwrap_or(false)
+        .ok()?
+        .flatten()
+        .map(|p| p.path().join(&name))
+        .find(|p| p.is_file())
+}
+
+fn has_transcript(persona: &PersonaEnv, session: &str) -> bool {
+    transcript_path(persona, session).is_some()
 }
 
 /// What stopping an agent a restart could not resume needs, so the early-exit watcher never holds the service.

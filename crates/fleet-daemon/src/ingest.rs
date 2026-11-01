@@ -41,6 +41,7 @@ pub async fn ingest(
             .filter(|id| valid_session_id(id))
         {
             store.set_claude_session(agent, id).await?;
+            store.add_claude_session(agent, id, now).await?;
         }
     }
     let updated = store

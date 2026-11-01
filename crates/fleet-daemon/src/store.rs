@@ -239,7 +239,7 @@ impl Store {
         }
         // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 9] = [
+        let steps: [(i64, &'static str, &'static str); 10] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -284,6 +284,11 @@ impl Store {
                 12,
                 include_str!("../migrations/012_internal_url.sql"),
                 "PRAGMA user_version = 12",
+            ),
+            (
+                13,
+                include_str!("../migrations/013_claude_sessions.sql"),
+                "PRAGMA user_version = 13",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -1337,6 +1342,34 @@ impl Store {
             .fetch_optional(&self.pool)
             .await?;
         Ok(row.and_then(|r| r.get::<Option<String>, _>("claude_session")))
+    }
+
+    /// Records a Claude session the agent has had; one already recorded keeps its first `at`.
+    pub async fn add_claude_session(&self, id: &AgentId, session: &str, at: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "INSERT OR IGNORE INTO claude_sessions (agent_id, session, at) VALUES (?, ?, ?)",
+        )
+        .bind(&id.0)
+        .bind(session)
+        .bind(at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Every Claude session the agent has had with when it started, oldest first.
+    pub async fn claude_sessions(&self, id: &AgentId) -> Result<Vec<(String, i64)>> {
+        let rows = sqlx::query(
+            "SELECT session, at FROM claude_sessions WHERE agent_id = ? ORDER BY at, rowid",
+        )
+        .bind(&id.0)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get("session"), r.get("at")))
+            .collect())
     }
 
     /// Makes the next `n` snapshots fail as a busy database would.

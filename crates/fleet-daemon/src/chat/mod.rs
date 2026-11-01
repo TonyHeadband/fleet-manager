@@ -1,8 +1,10 @@
 //! Claude Code transcript lines → chat items.
 mod build;
+mod read;
 mod summary;
 
 pub use build::Builder;
+pub use read::Tail;
 pub use summary::{result_of, summarize, OUTPUT_BYTES, OUTPUT_LINES};
 
 use fleet_api::{ChatBody, ChatItem};

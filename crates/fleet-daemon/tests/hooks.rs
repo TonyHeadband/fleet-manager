@@ -544,3 +544,18 @@ fn settings_exclude_every_folder_above_the_task_and_deny_the_owners_claude_dir()
         .unwrap()
         .contains(&json!("Read(~/.claude/**)")));
 }
+
+#[tokio::test]
+async fn ingest_records_each_session_start() {
+    let s = store_with("a1", "tok").await;
+    let id = AgentId("a1".into());
+    for (sess, now) in [("u-1", 5), ("u-2", 9)] {
+        let body = json!({"hook_event_name": "SessionStart", "session_id": sess});
+        ingest(&s, &id, Some("tok"), body, now).await.unwrap();
+    }
+    assert_eq!(
+        s.claude_sessions(&id).await.unwrap(),
+        [("u-1".to_string(), 5), ("u-2".to_string(), 9)]
+    );
+    assert_eq!(s.claude_session(&id).await.unwrap().as_deref(), Some("u-2"));
+}

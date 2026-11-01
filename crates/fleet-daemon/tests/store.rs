@@ -981,7 +981,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 12);
+        assert_eq!(user_version(&path).await, 13);
     }
 }
 
@@ -996,7 +996,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 12);
+    assert_eq!(user_version(&fresh).await, 13);
 }
 
 #[tokio::test]
@@ -1175,6 +1175,7 @@ async fn a_repo_roster_is_dropped_and_nothing_is_hidden_after_the_upgrade() {
         .await
         .unwrap();
     for sql in [
+        "DROP TABLE claude_sessions",
         "ALTER TABLE products DROP COLUMN internal_url",
         "ALTER TABLE products DROP COLUMN hidden_specialists",
         "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
@@ -1219,6 +1220,7 @@ async fn stored_agents_from_before_the_rename_still_load() {
         "ALTER TABLE products DROP COLUMN hidden_specialists",
         "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE products DROP COLUMN internal_url",
+        "DROP TABLE claude_sessions",
     ] {
         sqlx::query(old).execute(&pool).await.unwrap();
     }
@@ -1256,6 +1258,7 @@ async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() 
         "ALTER TABLE products DROP COLUMN hidden_specialists",
         "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE products DROP COLUMN internal_url",
+        "DROP TABLE claude_sessions",
         "PRAGMA user_version = 9",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
@@ -1276,4 +1279,45 @@ async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() 
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn sessions_are_kept_in_order_without_duplicates() {
+    let s = Store::open(":memory:".as_ref()).await.unwrap();
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent("a1"), "tok").await.unwrap();
+    s.add_claude_session(&id, "u-1", 10).await.unwrap();
+    s.add_claude_session(&id, "u-2", 20).await.unwrap();
+    s.add_claude_session(&id, "u-1", 30).await.unwrap();
+    assert_eq!(
+        s.claude_sessions(&id).await.unwrap(),
+        [("u-1".to_string(), 10), ("u-2".to_string(), 20)]
+    );
+    let other = AgentId("a2".into());
+    assert!(s.claude_sessions(&other).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_migration_keeps_existing_sessions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("fleet.db");
+    {
+        let store = Store::open(&db).await.unwrap();
+        store.insert_agent(&agent("a1"), "tok").await.unwrap();
+        store
+            .set_claude_session(&AgentId("a1".into()), "u-old")
+            .await
+            .unwrap();
+    }
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    for sql in ["DROP TABLE claude_sessions", "PRAGMA user_version = 12"] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+    let store = Store::open(&db).await.unwrap();
+    let got = store.claude_sessions(&AgentId("a1".into())).await.unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].0, "u-old");
 }
