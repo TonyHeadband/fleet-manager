@@ -930,9 +930,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               schema && (
                 <>
                   {openFleet?.type === "member" && (
-                    <button type="button" className="link task-link" onClick={() => setOpenId(openFleet.lead)}>
-                      {`↳ ${openFleet.task}`}
-                    </button>
+                    // A row of its own, so it keeps the panel's final width as the panel pushes in.
+                    <div className="task-link-row">
+                      <button type="button" className="link task-link" onClick={() => setOpenId(openFleet.lead)}>
+                        {`↳ ${openFleet.task}`}
+                      </button>
+                    </div>
                   )}
                   <Details schema={schema} agent={open} now={now} />
                 </>
