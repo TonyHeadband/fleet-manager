@@ -3,9 +3,16 @@
 .icon-button[data-size="header"] { width: var(--panel-icon-button); height: var(--panel-icon-button); }
 .icon-button:hover:not(:disabled) { background: var(--raised); color: var(--text-high); }
 .icon-button[data-danger] { background: var(--tint-danger); color: var(--danger); }
-/* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. */
-.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); min-height: 100%; }
-.column { border-left: 1px solid var(--border); min-height: 100%; min-width: 0; display: flex; flex-direction: column; }
+/* Lite's board: equal columns that butt against each other, with painted 1px dividers between them. Flex, so the
+   quiet column's rail can grow and shrink with the detail panel's push and pull. */
+.board { display: flex; min-height: 100%; }
+.column { flex: 1 1 0; border-left: 1px solid var(--border); min-height: 100%; min-width: 0; display: flex; flex-direction: column; }
+/* Beside the detail panel the quiet column is a rail: its bar, count and title, read top to bottom. */
+.column[data-rail] { flex: 0 0 var(--layout-rail); overflow: hidden; }
+.column[data-rail] .column-header { flex: 1; height: auto; writing-mode: vertical-rl; justify-content: flex-start; padding: var(--column-pad-x) 0; border-bottom: none; }
+.column[data-rail] .dot { order: -2; }
+.column[data-rail] .count { order: -1; }
+.column[data-rail] .ticks { display: none; }
 .column:first-child { border-left: none; }
 /* Lite's fui::mono_label: column titles, counts, persona tags. The DOM keeps the original case for assistive tech. */
 .mono-label { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: 0.13em; text-transform: uppercase; white-space: nowrap; }

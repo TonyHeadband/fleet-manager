@@ -637,6 +637,8 @@ pub mod canvas {
     pub const CONTROL_X: f32 = 10.0;
     pub const CONTROL_Y: f32 = 5.0;
     pub const CHANGES_DOT: f32 = 5.0;
+    /// The quiet column's width while the detail panel takes its place beside the board: its bar, count and title.
+    pub const RAIL: f32 = 36.0;
     /// Letter spacing, in em: mono-caps keys and controls, and readout values.
     pub const TRACK_CAPS: f32 = 0.13;
     pub const TRACK_VALUE: f32 = 0.08;

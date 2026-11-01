@@ -222,6 +222,7 @@ describe("view entry", () => {
     go("#kanban");
     expect(detail()).toHaveAttribute("data-layout", "full");
     await userEvent.click(within(detail()).getByRole("button", { name: "Back to the board" }));
+    fireEvent.animationEnd(detail(), { animationName: "fui-narrow" });
     expect(detail().style.width).toBe(width);
   });
 

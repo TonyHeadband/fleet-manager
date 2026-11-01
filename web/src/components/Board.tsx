@@ -12,6 +12,8 @@ interface Props extends TaskActions {
   now: number;
   /** The open card's agent id. */
   selected?: string | null;
+  /** The detail panel stands beside the board: the quiet column gives it its place, unless the open card is in it. */
+  rail?: boolean;
   /** `personaTags` of the shown agents. */
   tags?: Record<string, string>;
   display?: FleetDisplay;
@@ -30,7 +32,7 @@ const TAKEN = ".card, .fleet-row, .task, .fleet, button, a, input, select, texta
  * Renders whatever columns the daemon's schema declares, with the agents grouped into tasks as Lite's board does; no
  * column or status name lives here.
  */
-export function Board({ schema, agents, onStopTask, onRestart, onEmpty, ...rest }: Props) {
+export function Board({ schema, agents, rail = false, onStopTask, onRestart, onEmpty, ...rest }: Props) {
   const groups = useMemo(() => groupsOf(agents), [agents]);
   // Folded tasks by lead id, kept here so a task keeps its fold when it moves column (Lite's `CardState` map).
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
@@ -55,19 +57,24 @@ export function Board({ schema, agents, onStopTask, onRestart, onEmpty, ...rest 
         if (!(e.target as Element).closest(TAKEN)) onEmpty?.();
       }}
     >
-      {schema.columns.map((def) => (
-        <Column
-          key={def.id}
-          def={def}
-          schema={schema}
-          groups={groups.filter((g) => columnOfGroup(schema, g)?.id === def.id)}
-          isOpen={isOpen}
-          onFold={onFold}
-          onStopTask={onStopTask}
-          onRestart={onRestart}
-          {...rest}
-        />
-      ))}
+      {schema.columns.map((def) => {
+        const mine = groups.filter((g) => columnOfGroup(schema, g)?.id === def.id);
+        const holdsOpen = mine.some((g) => [g.lead, ...g.fleet].some((a) => a.id === rest.selected));
+        return (
+          <Column
+            key={def.id}
+            def={def}
+            schema={schema}
+            groups={mine}
+            rail={rail && def.dim && !holdsOpen}
+            isOpen={isOpen}
+            onFold={onFold}
+            onStopTask={onStopTask}
+            onRestart={onRestart}
+            {...rest}
+          />
+        );
+      })}
     </div>
   );
 }
