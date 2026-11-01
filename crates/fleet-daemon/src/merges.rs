@@ -8,7 +8,8 @@ use crate::personas::Personas;
 use crate::repos::Repos;
 use crate::store::Store;
 use fleet_api::{
-    task_id, task_outcome, AgentId, EventKind, Status, Task, TaskOutcome, TaskPr, TaskState,
+    task_id, task_outcome, AgentId, AgentKind, EventKind, Status, Task, TaskOutcome, TaskPr,
+    TaskState,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -484,7 +485,9 @@ impl AgentService {
                 }
                 match store.snapshot().await {
                     Ok(snap) => {
-                        if let Some(a) = snap.agents.iter().find(|a| a.id == id) {
+                        // A supervisor conversation has no task, so no PRs to check.
+                        let found = snap.agents.iter().find(|a| a.id == id);
+                        if let Some(a) = found.filter(|a| a.kind != AgentKind::Supervisor) {
                             queue.push(Some(task_id(a).clone()));
                         }
                     }

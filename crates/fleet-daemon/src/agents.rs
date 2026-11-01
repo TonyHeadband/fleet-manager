@@ -44,7 +44,7 @@ const CLEAR_STEP: &str = "\x1b[B\x05\x15\x7f";
 const CLEAR_STEPS_PER_WRITE: usize = 4;
 const CLEAR_WRITES: usize = 4;
 const CLEAR_PAUSE: Duration = Duration::from_millis(50);
-const MAX_PROMPT_BYTES: usize = 20_000;
+pub(crate) const MAX_PROMPT_BYTES: usize = 20_000;
 /// A title longer than this is cut: it is a card's one line, not a second goal.
 pub(crate) const MAX_TITLE_CHARS: usize = 80;
 /// The prompt's file in the task folder. Not on `claude`'s command line, which any local user can read in `ps`.

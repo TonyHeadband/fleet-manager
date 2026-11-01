@@ -1,0 +1,293 @@
+mod common;
+
+use common::net::*;
+use common::*;
+use fleet_api::{Agent, AgentId, Status};
+use fleet_daemon::agents::PROMPT_FILE;
+use fleet_daemon::hooks_cfg::rule_path;
+use fleet_daemon::http::{bind_loopback, router, AppState};
+use fleet_daemon::supervisor::{folder, Supervisor};
+use serde_json::{json, Value};
+use std::net::SocketAddr;
+use std::path::Path;
+use std::time::Duration;
+
+async fn start(fx: &Fx, text: &str) -> Agent {
+    let id = Supervisor::new(fx.svc.clone())
+        .new_conversation(PERSONA, text)
+        .await
+        .unwrap();
+    agent(fx, &id).await
+}
+
+fn settings(fx: &Fx, id: &AgentId) -> Value {
+    let path = fx
+        .state_dir
+        .join("agents")
+        .join(&id.0)
+        .join("settings.json");
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_string())
+        .collect()
+}
+
+fn edit_rules(p: &Path) -> [String; 2] {
+    let p = rule_path(&p.to_string_lossy());
+    [format!("Edit(/{p}/**)"), format!("Write(/{p}/**)")]
+}
+
+#[tokio::test]
+async fn a_new_conversation_starts_a_supervisor_with_the_text_as_its_prompt() {
+    let fx = fixture().await;
+    let a = start(&fx, "what is left for the release?").await;
+    let screen = wait_screen_in(&fx.sessions, &a.session, |s| s.contains("ready")).await;
+    for line in [
+        "arg=--permission-mode",
+        "arg=auto",
+        "arg=--effort",
+        "arg=high",
+        "arg=--session-id",
+    ] {
+        assert!(screen.contains(line), "{line} missing:\n{screen}");
+    }
+    assert!(!screen.contains("arg=--model"), "{screen}");
+    let prompt =
+        std::fs::read_to_string(folder(fx.svc.config(), PERSONA).join(PROMPT_FILE)).unwrap();
+    assert_eq!(prompt.trim_end(), "what is left for the release?");
+    assert_eq!(a.kind, fleet_api::AgentKind::Supervisor);
+    assert_eq!(a.product, "");
+    assert_eq!(a.persona, PERSONA);
+    let rows = fx.store.conversations(PERSONA).await.unwrap();
+    assert_eq!(rows.iter().map(|r| &r.id).collect::<Vec<_>>(), [&a.id]);
+    let listed = Supervisor::new(fx.svc.clone()).list(PERSONA).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, a.id);
+    assert!(listed[0].live);
+    assert!(listed[0].tasks.is_empty());
+
+    let solo = spawn_ready(&fx).await;
+    let origin = a.id.clone();
+    fx.store
+        .update_task(&solo.id, |t| t.origin = Some(origin))
+        .await
+        .unwrap();
+    let listed = Supervisor::new(fx.svc.clone()).list(PERSONA).await.unwrap();
+    assert_eq!(
+        listed[0].tasks,
+        [fleet_api::TaskMark {
+            id: solo.id.clone(),
+            title: "do the thing".into(),
+            status: agent(&fx, &solo.id).await.status,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_second_conversation_writes_its_own_prompt() {
+    let fx = fixture().await;
+    start(&fx, "first").await;
+    start(&fx, "second").await;
+    let prompt =
+        std::fs::read_to_string(folder(fx.svc.config(), PERSONA).join(PROMPT_FILE)).unwrap();
+    assert_eq!(prompt.trim_end(), "second");
+    assert_eq!(fx.store.conversations(PERSONA).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn the_supervisor_runs_in_its_persona_folder_with_the_persona_config() {
+    let fx = fixture().await;
+    let a = start(&fx, "hello").await;
+    let dir = folder(fx.svc.config(), PERSONA);
+    assert_eq!(dir, fx.state_dir.join("supervisor").join(PERSONA));
+    assert_eq!(Path::new(&a.workdir), dir);
+    let cwd = fleet_fs::canonical(&dir).unwrap();
+    assert!(pane_contains(&fx, &a.id, &format!("cwd={}", cwd.display())).await);
+    let claude_dir = fixture_env(&fx).await.claude_dir().unwrap();
+    assert!(
+        pane_contains(
+            &fx,
+            &a.id,
+            &format!("claude_config={}", claude_dir.display())
+        )
+        .await
+    );
+    let md = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+    for needle in ["mcp__fleet__", "write_doc", "set_title", "start"] {
+        assert!(md.contains(needle), "{needle} missing from CLAUDE.md");
+    }
+}
+
+#[tokio::test]
+async fn settings_deny_gh_push_and_edits_outside_its_folder() {
+    let fx = fixture().await;
+    let a = start(&fx, "hello").await;
+    let s = settings(&fx, &a.id);
+    let deny = strings(&s["permissions"]["deny"]);
+    let mut want: Vec<String> = [
+        "Bash(gh:*)",
+        "Bash(gh *)",
+        "Bash(git push:*)",
+        "Bash(git * push *)",
+        "Bash(git * push)",
+    ]
+    .map(String::from)
+    .to_vec();
+    let internal = fx.svc.internal().root().to_path_buf();
+    for p in [
+        fx.state_dir.join("repos"),
+        fx.tasks_root.clone(),
+        internal.clone(),
+    ] {
+        want.extend(edit_rules(&p));
+    }
+    for rule in &want {
+        assert!(deny.contains(rule), "{rule} missing from {deny:?}");
+    }
+    // Subagents are answered by the PreToolUse hook, not denied outright.
+    assert!(
+        !deny.iter().any(|r| r == "Agent" || r == "Task"),
+        "{deny:?}"
+    );
+    let allow = strings(&s["permissions"]["allow"]);
+    for tool in fleet_daemon::hooks_cfg::SUPERVISOR_TOOLS {
+        assert!(
+            allow.iter().any(|r| r == tool),
+            "{tool} missing from {allow:?}"
+        );
+    }
+    let clone = fx.repos.clone_dir(PERSONA, PRODUCT, "core");
+    assert_eq!(
+        strings(&s["permissions"]["additionalDirectories"]),
+        [
+            clone.to_string_lossy().into_owned(),
+            internal.to_string_lossy().into_owned()
+        ]
+    );
+}
+
+struct Server {
+    addr: SocketAddr,
+    fx: Fx,
+}
+
+async fn serve(fx: Fx) -> Server {
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    Server { addr, fx }
+}
+
+async fn pre_tool_use(srv: &Server, id: &AgentId, tool: &str, input: Value) -> Value {
+    let token = srv.fx.store.agent_token(id).await.unwrap().unwrap();
+    let body = json!({
+        "session_id": "s",
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool,
+        "tool_input": input,
+        "tool_use_id": "toolu_1",
+    });
+    let (status, v) = json_of_with(
+        srv.addr,
+        &format!("/internal/hooks/{}", id.0),
+        &token,
+        &body,
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    v
+}
+
+async fn json_of_with(addr: SocketAddr, path: &str, token: &str, body: &Value) -> (u16, Value) {
+    let (status, text) = http(addr, "POST", path, &[("X-Fleet-Token", token)], Some(body)).await;
+    (status, serde_json::from_str(&text).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn a_supervisor_subagent_must_be_explore_or_plan() {
+    let fx = fixture().await;
+    let sup = start(&fx, "hello").await;
+    let mut orch = sup.clone();
+    orch.id = AgentId("orch1".into());
+    orch.session = "fleet-orch1".into();
+    orch.kind = fleet_api::AgentKind::Orchestrator;
+    orch.product = PRODUCT.into();
+    fx.store.insert_agent(&orch, "orch-token").await.unwrap();
+    let srv = serve(fx).await;
+
+    let denied = json!({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "the supervisor's subagents are read-only (Explore, Plan); start a task to change anything",
+    }});
+    for tool in ["Agent", "Task"] {
+        let v = pre_tool_use(
+            &srv,
+            &sup.id,
+            tool,
+            json!({"subagent_type": "general-purpose", "prompt": "x"}),
+        )
+        .await;
+        assert_eq!(v, denied, "{tool}");
+        let v = pre_tool_use(&srv, &sup.id, tool, json!({"prompt": "x"})).await;
+        assert_eq!(v, denied, "{tool} with no type");
+        for ok in ["Explore", "Plan"] {
+            let v = pre_tool_use(
+                &srv,
+                &sup.id,
+                tool,
+                json!({"subagent_type": ok, "prompt": "x"}),
+            )
+            .await;
+            assert_eq!(v, json!({}), "{tool} {ok}");
+        }
+    }
+    let v = pre_tool_use(&srv, &sup.id, "Bash", json!({"command": "ls"})).await;
+    assert_eq!(v, json!({}));
+    let v = pre_tool_use(
+        &srv,
+        &orch.id,
+        "Agent",
+        json!({"subagent_type": "general-purpose"}),
+    )
+    .await;
+    assert_eq!(v, json!({}));
+}
+
+#[tokio::test]
+async fn a_supervisor_is_not_a_task() {
+    let fx = fixture().await;
+    let before = fx.store.tasks().await.unwrap();
+    let a = start(&fx, "hello").await;
+    assert_eq!(a.task, None);
+    assert_eq!(fx.store.tasks().await.unwrap(), before);
+    set_status(&fx, &a.id, Status::Stopped).await;
+    assert_eq!(fx.store.tasks().await.unwrap(), before);
+    fx.store.backfill_tasks().await.unwrap();
+    assert_eq!(fx.store.tasks().await.unwrap(), before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_supervisor_does_not_trigger_a_merge_check() {
+    let fx = fixture().await;
+    let solo = spawn_ready(&fx).await;
+    let sup = start(&fx, "hello").await;
+    // A long period: only the run on start, and the stops below, could check.
+    fx.svc.start_merge_watcher(Duration::from_secs(3600));
+    assert!(wait_until(|| async { fx.svc.merge_checks_run() >= 1 }).await);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let base = fx.svc.merge_checks_run();
+
+    set_status(&fx, &sup.id, Status::Stopped).await;
+    // The watcher reads events in order, so once the solo stop below is checked the supervisor's was seen.
+    set_status(&fx, &solo.id, Status::Stopped).await;
+    assert!(wait_until(|| async { fx.svc.merge_checks_run() > base }).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(fx.svc.merge_checks_run(), base + 1);
+}

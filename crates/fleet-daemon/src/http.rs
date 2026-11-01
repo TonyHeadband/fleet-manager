@@ -28,15 +28,15 @@ use axum::{Json, Router};
 use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
-    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer,
-    AskKind, BlockedReason, ChatAsk, ChatPage, CheckoutInfo, CheckoutList, ControlRequest,
-    DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind, FieldError,
-    FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile,
-    InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct, NewRelease,
-    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
-    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse,
-    Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    AgentKind, AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
+    AskAnswer, AskKind, BlockedReason, ChatAsk, ChatPage, CheckoutInfo, CheckoutList,
+    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
+    FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
+    InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct,
+    NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product,
+    ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList,
+    RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status,
+    StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -1474,6 +1474,9 @@ async fn hook(
             .map(|tool| (tool.to_string(), tool_input(&body))),
         _ => None,
     };
+    let refusal = (event.as_deref() == Some("PreToolUse"))
+        .then(|| crate::supervisor::subagent_refusal(&body))
+        .flatten();
     let outcome = ingest(&st.store, &id, token, body, now).await?;
     if let Some((tool, input)) = ran {
         st.asks.settled(&id, &tool, &input);
@@ -1504,6 +1507,11 @@ async fn hook(
     // Held until the owner answers from the chat; dropped with the connection when Claude stops waiting.
     if let Some(held) = held {
         return Ok(Json(held.wait(st.ask_hold).await));
+    }
+    if let Some(refusal) = refusal {
+        if st.svc.agent(&id).await?.kind == AgentKind::Supervisor {
+            return Ok(Json(refusal));
+        }
     }
     Ok(Json(json!({})))
 }

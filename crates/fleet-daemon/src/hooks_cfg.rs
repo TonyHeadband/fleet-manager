@@ -48,6 +48,14 @@ pub const ORCHESTRATOR_TOOLS: [&str; 5] = [
     "mcp__fleet__open_pr",
 ];
 pub const SPECIALIST_TOOLS: [&str; 1] = ["mcp__fleet__finish_step"];
+/// The fleet MCP tools a supervisor calls, allowed for the same reason as `ALLOWED_TOOLS`.
+pub const SUPERVISOR_TOOLS: [&str; 5] = [
+    "mcp__fleet__set_title",
+    "mcp__fleet__fleet_overview",
+    "mcp__fleet__file_issue",
+    "mcp__fleet__write_doc",
+    "mcp__fleet__start_task",
+];
 
 /// Denied to every orchestrator and specialist whatever its definition says (found in a spike):
 /// the subagent tool under both its names, so all work goes through the daemon, and pushes and PRs, so `open_pr` and
@@ -84,6 +92,28 @@ impl RoleSettings {
 
     pub fn specialist(def: &ToolRules) -> RoleSettings {
         RoleSettings::fleet(&SPECIALIST_TOOLS, def)
+    }
+
+    /// A supervisor reads every checkout in `read_dirs` and changes product code only by starting a task: `gh` in
+    /// any form and `git push` are denied, and so are edits under each of `deny_edit_roots`. Its subagents are not
+    /// denied here, since a rule cannot allow only some types: the `PreToolUse` hook refuses all but Explore and Plan.
+    pub fn supervisor(read_dirs: Vec<String>, deny_edit_roots: &[PathBuf]) -> RoleSettings {
+        let push = FLEET_DENY.iter().filter(|r| r.starts_with("Bash(git "));
+        let mut deny: Vec<String> = ["Bash(gh:*)", "Bash(gh *)"]
+            .into_iter()
+            .chain(push.copied())
+            .map(String::from)
+            .collect();
+        for root in deny_edit_roots {
+            let p = rule_path(&root.to_string_lossy());
+            deny.push(format!("Edit(/{p}/**)"));
+            deny.push(format!("Write(/{p}/**)"));
+        }
+        RoleSettings {
+            allow: SUPERVISOR_TOOLS.iter().map(|t| t.to_string()).collect(),
+            deny,
+            dirs: read_dirs,
+        }
     }
 
     /// A specialist's read-only internal snapshot: readable through `additionalDirectories`, with edits denied.

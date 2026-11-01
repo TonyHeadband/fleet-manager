@@ -24,6 +24,7 @@ pub mod repos;
 pub mod session;
 pub mod status;
 pub mod store;
+pub mod supervisor;
 mod task_limits;
 pub mod tools;
 pub mod ui;

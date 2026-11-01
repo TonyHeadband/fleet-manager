@@ -867,6 +867,12 @@ impl Store {
                     .bind(serde_json::to_string(a)?)
                     .execute(&mut *tx)
                     .await?;
+                // A supervisor conversation is no task and has no record.
+                if a.kind == AgentKind::Supervisor {
+                    return self
+                        .append(tx, EventKind::AgentCreated { agent: a.clone() })
+                        .await;
+                }
                 let repos = match a
                     .workspaces
                     .iter()
@@ -1208,8 +1214,11 @@ impl Store {
 
             let mut made = 0;
             for a in &agents {
-                // An agent of another task has no record of its own: its `task` has it.
-                if task_id(a) != &a.id || tasks.iter().any(|t| t.id == a.id) {
+                // An agent of another task has no record of its own (its `task` has it), and a supervisor none at all.
+                if task_id(a) != &a.id
+                    || a.kind == AgentKind::Supervisor
+                    || tasks.iter().any(|t| t.id == a.id)
+                {
                     continue;
                 }
                 let stopped = a.status == Status::Stopped;
