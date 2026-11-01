@@ -10,7 +10,7 @@ import { stopAction, visibleActions } from "./api/schema";
 import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { Details, ReposRow } from "./panel/Details";
+import { Details } from "./panel/Details";
 import { fleetPanel, useFleetViews } from "./panel/fleetViews";
 import { Breakdown } from "./panel/Breakdown";
 import { BREAKDOWN_DECISION, pending } from "./panel/breakdown";
@@ -934,8 +934,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                       {`↳ ${openFleet.task}`}
                     </button>
                   )}
-                  <Details schema={schema} agent={open} now={now} persona={personaList.find((p) => p.id === open.persona)?.name ?? (open.persona || undefined)} />
-                  <ReposRow agent={open} />
+                  <Details schema={schema} agent={open} now={now} />
                 </>
               )
             }

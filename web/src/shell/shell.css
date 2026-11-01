@@ -22,9 +22,14 @@
 .detail-top { height: var(--layout-column-header); flex: none; display: flex; align-items: center; gap: var(--space-button-gap); padding: 0 var(--panel-margin); border-bottom: 1px solid var(--border); min-width: 0; }
 /* Lite's preview header: the path, then its icon buttons; the title block under it. */
 .detail-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.detail-title { flex: none; padding: var(--panel-title-top) var(--panel-margin) var(--panel-title-bottom); }
+.detail-title { flex: none; position: relative; display: flex; align-items: center; gap: var(--space-button-gap); padding: var(--panel-title-top) var(--panel-margin) var(--panel-title-bottom); }
+.detail-title .avatar { width: calc(var(--drawer-avatar-h) * 3 / 4); height: var(--drawer-avatar-h); --drawer-avatar-h: calc(2 * var(--size-meta) * 1.5); }
 .detail-title h2 { margin: 0; font-size: var(--size-body); font-weight: 500; color: var(--text-high); overflow-wrap: anywhere; }
-.detail-goal { margin: 0; font-size: var(--size-small); color: var(--text-low); overflow-wrap: anywhere; }
+/* The full goal behind an icon: a raised box across the panel under the title while the icon is pointed at or
+   focused, over what follows, gone on leaving. */
+.detail-title h2 { min-width: 0; }
+.goal-tip { flex: none; display: inline-flex; }
+.goal-tooltip { position: absolute; top: 100%; left: var(--panel-margin); right: var(--panel-margin); z-index: 3; padding: var(--space-button-gap) var(--space-picker-gap); background: var(--raised); border: 1px solid var(--border); font-size: var(--size-small); color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .detail-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 /* Without a reply box under it, the pane keeps its inset from the panel's bottom line too. */
 .detail-body:last-child { padding-bottom: var(--layout-pane-inset); }

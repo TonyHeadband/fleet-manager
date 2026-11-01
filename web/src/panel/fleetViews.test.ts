@@ -54,8 +54,9 @@ describe("useFleetViews", () => {
 describe("fleetPanel", () => {
   it("a_specialist_belongs_to_its_live_lead", () => {
     const o = agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "stopped" });
-    const o2 = agent({ id: "o2", kind: "orchestrator", task: "o", goal: "Fix login again" });
+    const o2 = agent({ id: "o2", kind: "orchestrator", task: "o", goal: "Fix login again: the session cookie expires early", title: "Fix login again" });
     const f = agent({ id: "f", kind: "specialist", task: "o" });
+    // Named by its lead's title: the goal can run long.
     expect(fleetPanel([o, o2, f], f)).toEqual({ type: "member", task: "Fix login again", lead: "o2" });
     expect(fleetPanel([o, o2, f], o2)).toEqual({ type: "task" });
     expect(fleetPanel([agent({ id: "s" })], agent({ id: "s" }))).toBeNull();

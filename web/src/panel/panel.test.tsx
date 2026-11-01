@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { Agent } from "../api/generated/Agent";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { agent, schema, workspace } from "../test/fixtures";
-import { Details, ReposRow } from "./Details";
+import { Details } from "./Details";
 import { workspaceTip } from "./workspaceTip";
 
 // Ported from crates/fleet-gui/tests/panels.rs; the names are Lite's.
@@ -14,10 +14,14 @@ const detailsAgent = (over: Partial<Agent> = {}) =>
 const show = (a: Agent, s: UiSchema = schema) => render(<Details schema={s} agent={a} now={NOW} />);
 
 describe("the panel's details", () => {
-  it("the_details_show_the_status_every_badge_and_the_branch", () => {
+  it("the_details_are_one_status_row_the_time_at_its_end", () => {
     show(detailsAgent({ status: "needs_you", blocked_reason: "permission" }));
-    for (const text of ["Needs you", "5m", "Permission needed", "Has changes", "Paused", "Branch", "fleet/idea"]) expect(screen.getByText(text)).toBeInTheDocument();
-    expect(screen.queryByText("core"), "the repos have their own row").toBeNull();
+    const row = document.querySelector<HTMLElement>(".details-status")!;
+    for (const text of ["Needs you", "Permission needed", "Has changes", "Paused", "5m"]) expect(within(row).getByText(text)).toBeInTheDocument();
+    // The badges come first; the time closes the row at its right end.
+    expect(row.lastElementChild).toHaveTextContent("5m");
+    // The header's path already names the repos and the branch.
+    for (const text of ["Branch", "fleet/idea", "core"]) expect(screen.queryByText(text)).toBeNull();
   });
 
   it("a_stopped_agents_details_show_its_cause_and_size", () => {
@@ -49,6 +53,11 @@ describe("the panel's details", () => {
     expect(screen.queryByText(/^Model:/)).toBeNull();
   });
 
+  it("the_model_mode_and_effort_share_one_line", () => {
+    show(detailsAgent({ kind: "specialist", model: "opus", mode: "auto", effort: "high" }));
+    expect(screen.getByText("Model: opus · Mode: auto · Effort: high")).toHaveClass("details-meta");
+  });
+
   it("panel_shows_the_mode_and_effort", () => {
     show(detailsAgent({ mode: "auto", effort: "high" }));
     expect(screen.getByText("Mode: auto · Effort: high")).toBeInTheDocument();
@@ -62,20 +71,7 @@ describe("the panel's details", () => {
   });
 });
 
-describe("the Repos row", () => {
-  it("the_repos_row_lists_workspaces_and_owned_ones_say_so", () => {
-    render(<ReposRow agent={agent({ workspaces: [workspace("core"), { ...workspace("notes"), owned: true }] })} />);
-    const row = screen.getByText("Repos").parentElement!;
-    expect(screen.getByText("Repos")).toHaveClass("mono-label");
-    expect(within(row).getByText("core")).toBeInTheDocument();
-    expect(within(row).getByText("notes")).toHaveAttribute("title", "fleet/x · created in this task");
-  });
-
-  it("the_repos_row_offers_no_add_repo", () => {
-    render(<ReposRow agent={agent()} />);
-    expect(screen.queryByRole("button")).toBeNull();
-  });
-
+describe("workspace tips", () => {
   it("workspace_tip_names_start_and_merge_route", () => {
     expect(workspaceTip({ ...workspace("core"), base: "abcdef1234", from_branch: "feat" })).toBe(
       "fleet/x, started from feat at abcdef1\n\nMerge fleet/x into feat first (a fast-forward if you did not commit there meanwhile), then merge feat as usual.",

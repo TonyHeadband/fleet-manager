@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { FleetClient } from "../api/client";
 import type { Agent } from "../api/generated/Agent";
 import type { FleetView } from "../api/generated/FleetView";
+import { title } from "../api/schema";
 import type { Notice } from "../shell/messages";
 import { groups, taskId } from "../board/groups";
 
@@ -68,5 +69,5 @@ export function fleetPanel(agents: Agent[], a: Agent): { type: "task" } | { type
   if (a.kind === "orchestrator") return { type: "task" };
   if (a.kind !== "specialist") return null;
   const lead = groups(agents).find((g) => taskId(g.lead) === taskId(a))?.lead;
-  return lead && lead.id !== a.id ? { type: "member", task: lead.goal, lead: lead.id } : null;
+  return lead && lead.id !== a.id ? { type: "member", task: title(lead), lead: lead.id } : null;
 }
