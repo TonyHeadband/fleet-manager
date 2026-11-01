@@ -324,16 +324,110 @@ pub struct Defs {
     #[allow(dead_code)]
     // Names the embedded tree; its functions are associated, so the value itself is unused.
     builtin: Builtin,
-    user: PathBuf,
+    /// Where specialists, orchestrators and skills are kept; `None` for `shared`: built-ins only.
+    persona: Option<PathBuf>,
+    /// Where PR styles are kept, for every persona.
+    fleet: PathBuf,
+}
+
+/// `<personas_dir>/<id>/fleet`: a persona's own specialists, orchestrators and skills.
+pub fn persona_defs_root(personas_dir: &Path, id: &str) -> PathBuf {
+    personas_dir.join(id).join("fleet")
 }
 
 impl Defs {
-    /// `user` is `Config.fleet_dir`; it need not exist until something is saved.
+    /// Transitional: `user` is `Config.fleet_dir`, used as both the persona root and the fleet root. Callers move to
+    /// `for_persona` / `shared`, then this goes.
     pub fn new(user: PathBuf) -> Defs {
+        Defs::for_persona(user.clone(), user)
+    }
+
+    /// Specialists, orchestrators and skills from `persona_root` over the built-ins; PR styles from `fleet_root`.
+    /// Neither folder need exist until something is saved.
+    pub fn for_persona(persona_root: PathBuf, fleet_root: PathBuf) -> Defs {
         Defs {
             builtin: Builtin,
-            user,
+            persona: Some(persona_root),
+            fleet: fleet_root,
         }
+    }
+
+    /// No persona: built-ins only for specialists, orchestrators and skills; PR styles from `fleet_root`.
+    pub fn shared(fleet_root: PathBuf) -> Defs {
+        Defs {
+            builtin: Builtin,
+            persona: None,
+            fleet: fleet_root,
+        }
+    }
+
+    /// The folder `kind` is kept in, or `None` when there is no persona for it.
+    fn root(&self, kind: DefKind) -> Option<&Path> {
+        match kind {
+            DefKind::PrStyle => Some(&self.fleet),
+            _ => self.persona.as_deref(),
+        }
+    }
+
+    fn own_file(&self, kind: DefKind, name: &str) -> Option<PathBuf> {
+        self.root(kind).map(|r| r.join(rel_path(kind, name)))
+    }
+
+    fn needs_persona(&self, kind: DefKind, name: &str) -> FleetError {
+        FleetError::Builtin(format!(
+            "{} needs a persona to be saved in",
+            rel_path(kind, name)
+        ))
+    }
+
+    /// Whether `name` exists as the other role, built in or in the persona's folder.
+    fn other_role(&self, kind: DefKind, name: &str) -> Option<DefKind> {
+        let other = match kind {
+            DefKind::Orchestrator => DefKind::Specialist,
+            DefKind::Specialist => DefKind::Orchestrator,
+            _ => return None,
+        };
+        let has = Builtin::get(&rel_path(other, name)).is_some()
+            || self.own_file(other, name).is_some_and(|p| p.is_file());
+        has.then_some(other)
+    }
+
+    /// Moves `name` from one role to the other within the persona folder, all or nothing.
+    pub fn move_role(&self, from: DefKind, to: DefKind, name: &str) -> Result<DefInfo, FleetError> {
+        let roles = [DefKind::Orchestrator, DefKind::Specialist];
+        if from == to || !roles.contains(&from) || !roles.contains(&to) {
+            return Err(invalid(
+                &rel_path(from, name),
+                "only an orchestrator and a specialist can swap roles",
+            ));
+        }
+        self.check_name_safe(from, name)?;
+        let source = self
+            .own_file(from, name)
+            .ok_or_else(|| self.needs_persona(from, name))?;
+        let (text, user) = self.text(from, name)?;
+        if !user {
+            return Err(FleetError::Builtin(format!(
+                "{} is built in; override it before changing its role",
+                rel_path(from, name)
+            )));
+        }
+        if Builtin::get(&rel_path(to, name)).is_some()
+            || self.own_file(to, name).is_some_and(|p| p.exists())
+        {
+            return Err(invalid(
+                &rel_path(to, name),
+                format!("`{name}` is already the {}", kind_word(to)),
+            ));
+        }
+        let info = self.write_unchecked(to, name, &text)?;
+        if let Err(e) = std::fs::remove_file(&source) {
+            if let Some(target) = self.own_file(to, name) {
+                let _ = std::fs::remove_file(target);
+            }
+            return Err(io(&source)(e));
+        }
+        Ok(info)
     }
 
     pub fn orchestrator(&self, name: &str) -> Result<OrchestratorDef, FleetError> {
@@ -355,11 +449,13 @@ impl Defs {
     pub fn skill_dir(&self, name: &str) -> Result<SkillSource, FleetError> {
         let (text, _) = self.text(DefKind::Skill, name)?;
         parse_skill(name, &text)?;
-        let user = self.user.join("skills").join(name);
+        let user = self
+            .root(DefKind::Skill)
+            .map(|r| r.join("skills").join(name));
         Ok(SkillSource {
             name: name.to_string(),
             builtin: Builtin::get(&rel_path(DefKind::Skill, name)).is_some(),
-            user: user.join("SKILL.md").is_file().then_some(user),
+            user: user.filter(|u| u.join("SKILL.md").is_file()),
         })
     }
 
@@ -374,7 +470,7 @@ impl Defs {
             names.dedup();
             for name in names {
                 let is_builtin = builtin.contains(&name);
-                let user = self.user.join(rel_path(kind, &name)).is_file();
+                let user = self.own_file(kind, &name).is_some_and(|p| p.is_file());
                 let (summary, model, mode, effort, error) = match self.summary(kind, &name) {
                     Ok((s, m, mode, effort)) => (s, m, mode, effort, None),
                     Err(e) => (String::new(), None, None, None, Some(e.to_string())),
@@ -408,6 +504,28 @@ impl Defs {
     /// Validates `text` as the file it would become, then saves it as the user's copy. For a skill, only `SKILL.md`.
     pub fn write(&self, kind: DefKind, name: &str, text: &str) -> Result<DefInfo, FleetError> {
         self.check_name_safe(kind, name)?;
+        if self.root(kind).is_none() {
+            return Err(self.needs_persona(kind, name));
+        }
+        if let Some(other) = self.other_role(kind, name) {
+            return Err(invalid(
+                &rel_path(kind, name),
+                format!("`{name}` is already the {}", kind_word(other)),
+            ));
+        }
+        self.write_unchecked(kind, name, text)
+    }
+
+    /// `write` without the role-uniqueness check, which `move_role` has already done.
+    fn write_unchecked(
+        &self,
+        kind: DefKind,
+        name: &str,
+        text: &str,
+    ) -> Result<DefInfo, FleetError> {
+        let path = self
+            .own_file(kind, name)
+            .ok_or_else(|| self.needs_persona(kind, name))?;
         match kind {
             DefKind::Orchestrator => {
                 self.parse_orchestrator(name, text)?;
@@ -422,7 +540,6 @@ impl Defs {
                 self.parse_pr_style(name, text)?;
             }
         }
-        let path = self.user.join(rel_path(kind, name));
         let dir = path.parent().expect("a definition path has a parent");
         std::fs::create_dir_all(dir).map_err(io(dir))?;
         // Through a temporary file, so a crash never leaves half a definition that would then fail to load.
@@ -448,7 +565,9 @@ impl Defs {
     pub fn reset(&self, kind: DefKind, name: &str) -> Result<(), FleetError> {
         self.check_name_safe(kind, name)?;
         let rel = rel_path(kind, name);
-        let path = self.user.join(&rel);
+        let path = self
+            .own_file(kind, name)
+            .ok_or_else(|| self.needs_persona(kind, name))?;
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -484,11 +603,12 @@ impl Defs {
     fn text(&self, kind: DefKind, name: &str) -> Result<(String, bool), FleetError> {
         self.check_name_safe(kind, name)?;
         let rel = rel_path(kind, name);
-        let path = self.user.join(&rel);
-        match std::fs::read_to_string(&path) {
-            Ok(t) => return Ok((t, true)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io(&path)(e)),
+        if let Some(path) = self.own_file(kind, name) {
+            match std::fs::read_to_string(&path) {
+                Ok(t) => return Ok((t, true)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io(&path)(e)),
+            }
         }
         let f = Builtin::get(&rel).ok_or_else(|| FleetError::NotFound {
             kind,
@@ -561,7 +681,9 @@ impl Defs {
         for s in skills {
             let found = is_safe_dir_name(s)
                 && (Builtin::get(&rel_path(DefKind::Skill, s)).is_some()
-                    || self.user.join(rel_path(DefKind::Skill, s)).is_file());
+                    || self
+                        .own_file(DefKind::Skill, s)
+                        .is_some_and(|p| p.is_file()));
             if !found {
                 return Err(invalid(file, format!("skill `{s}` not found")));
             }
@@ -570,7 +692,10 @@ impl Defs {
     }
 
     fn user_names(&self, kind: DefKind) -> Vec<String> {
-        let dir = self.user.join(match kind {
+        let Some(root) = self.root(kind) else {
+            return Vec::new();
+        };
+        let dir = root.join(match kind {
             DefKind::Orchestrator => "orchestrators",
             DefKind::Specialist => "specialists",
             DefKind::Skill => "skills",
@@ -587,7 +712,7 @@ impl Defs {
                     DefKind::Skill => file,
                     _ => file.strip_suffix(".md")?.to_string(),
                 };
-                let ok = is_safe_dir_name(&name) && self.user.join(rel_path(kind, &name)).is_file();
+                let ok = is_safe_dir_name(&name) && root.join(rel_path(kind, &name)).is_file();
                 ok.then_some(name)
             })
             .collect()

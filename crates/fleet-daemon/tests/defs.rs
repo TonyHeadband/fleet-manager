@@ -733,3 +733,198 @@ fn orchestrators_land_steps_without_merge_commits() {
         );
     }
 }
+
+fn persona(tmp: &Path, id: &str) -> Defs {
+    Defs::for_persona(tmp.join(id).join("fleet"), tmp.join("fleet"))
+}
+
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    builtin_files(dir, &mut out);
+    out
+}
+
+fn specialist_text(name: &str, summary: &str) -> String {
+    format!("---\nname: {name}\nsummary: {summary}\n---\nBody.\n")
+}
+
+#[test]
+fn a_persona_file_wins_over_the_builtin() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (persona(t.path(), "a"), persona(t.path(), "b"));
+    let shared = Defs::shared(t.path().join("fleet"));
+    let builtin = b.specialist("rust").unwrap().summary;
+    a.write(
+        DefKind::Specialist,
+        "rust",
+        &specialist_text("rust", "A's rust"),
+    )
+    .unwrap();
+    assert_eq!(a.specialist("rust").unwrap().summary, "A's rust");
+    assert_eq!(b.specialist("rust").unwrap().summary, builtin);
+    assert_eq!(shared.specialist("rust").unwrap().summary, builtin);
+    assert!(t.path().join("a/fleet/specialists/rust.md").is_file());
+    assert!(!t.path().join("b").exists());
+}
+
+#[test]
+fn builtins_are_never_copied() {
+    let t = tempfile::tempdir().unwrap();
+    let d = persona(t.path(), "a");
+    d.list();
+    d.read(DefKind::Specialist, "rust").unwrap();
+    d.specialist("rust").unwrap();
+    d.orchestrator("direct").unwrap();
+    d.skill_dir("brainstorming").unwrap();
+    assert!(files_under(t.path()).is_empty());
+}
+
+#[test]
+fn pr_styles_read_the_fleet_root_for_every_persona() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (persona(t.path(), "a"), persona(t.path(), "b"));
+    let text = pr_style_with("name: house\nsummary: House rules\n");
+    a.write(DefKind::PrStyle, "house", &text).unwrap();
+    assert!(t.path().join("fleet/pr-styles/house.md").is_file());
+    assert_eq!(b.pr_style("house").unwrap().summary, "House rules");
+    assert_eq!(
+        Defs::shared(t.path().join("fleet"))
+            .pr_style("house")
+            .unwrap()
+            .summary,
+        "House rules"
+    );
+}
+
+#[test]
+fn reset_deletes_only_the_personas_copy() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (persona(t.path(), "a"), persona(t.path(), "b"));
+    for d in [&a, &b] {
+        d.write(
+            DefKind::Specialist,
+            "rust",
+            &specialist_text("rust", "Mine"),
+        )
+        .unwrap();
+    }
+    a.reset(DefKind::Specialist, "rust").unwrap();
+    assert!(a.read(DefKind::Specialist, "rust").unwrap().builtin);
+    assert_eq!(b.specialist("rust").unwrap().summary, "Mine");
+}
+
+#[test]
+fn skills_resolve_through_the_persona() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (persona(t.path(), "a"), persona(t.path(), "b"));
+    a.write(
+        DefKind::Skill,
+        "x",
+        "---\nname: x\ndescription: An x\n---\n",
+    )
+    .unwrap();
+    let text = "---\nname: styler\nsummary: Styles\nskills: [x]\n---\nBody.\n";
+    a.write(DefKind::Specialist, "styler", text).unwrap();
+    assert!(a.skill_dir("x").unwrap().user.is_some());
+    let err = b.write(DefKind::Specialist, "styler", text).unwrap_err();
+    assert!(err.to_string().contains("skill `x` not found"), "{err}");
+}
+
+#[test]
+fn a_name_is_a_specialist_or_an_orchestrator_never_both() {
+    let t = tempfile::tempdir().unwrap();
+    let d = persona(t.path(), "a");
+    d.write(
+        DefKind::Specialist,
+        "poet",
+        &specialist_text("poet", "Verse"),
+    )
+    .unwrap();
+    let err = d
+        .write(
+            DefKind::Orchestrator,
+            "poet",
+            &specialist_text("poet", "Verse"),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("already the specialist"), "{err}");
+    assert!(!t.path().join("a/fleet/orchestrators/poet.md").exists());
+    let err = d
+        .write(
+            DefKind::Specialist,
+            "direct",
+            &specialist_text("direct", "x"),
+        )
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("already the orchestrator"),
+        "{err}"
+    );
+}
+
+#[test]
+fn shared_refuses_to_save_a_persona_kind() {
+    let t = tempfile::tempdir().unwrap();
+    let d = Defs::shared(t.path().join("fleet"));
+    let err = d
+        .write(
+            DefKind::Specialist,
+            "poet",
+            &specialist_text("poet", "Verse"),
+        )
+        .unwrap_err();
+    assert!(matches!(err, FleetError::Builtin(m) if m.contains("needs a persona")));
+    assert!(files_under(t.path()).is_empty());
+}
+
+#[test]
+fn move_role_moves_the_file_or_changes_nothing() {
+    let t = tempfile::tempdir().unwrap();
+    let d = persona(t.path(), "a");
+    let root = t.path().join("a/fleet");
+    let text = specialist_text("poet", "Verse");
+    d.write(DefKind::Specialist, "poet", &text).unwrap();
+
+    let info = d
+        .move_role(DefKind::Specialist, DefKind::Orchestrator, "poet")
+        .unwrap();
+    assert_eq!(
+        (info.kind, info.name.as_str()),
+        (DefKind::Orchestrator, "poet")
+    );
+    assert!(!root.join("specialists/poet.md").exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("orchestrators/poet.md")).unwrap(),
+        text
+    );
+
+    // The target already has the name as the persona's own file.
+    d.write(
+        DefKind::Specialist,
+        "bard",
+        &specialist_text("bard", "Song"),
+    )
+    .unwrap();
+    std::fs::write(root.join("orchestrators/bard.md"), "other").unwrap();
+    assert!(d
+        .move_role(DefKind::Specialist, DefKind::Orchestrator, "bard")
+        .is_err());
+    assert!(root.join("specialists/bard.md").is_file());
+    assert_eq!(
+        std::fs::read_to_string(root.join("orchestrators/bard.md")).unwrap(),
+        "other"
+    );
+
+    // The target has it as a built-in: a specialist override named like a built-in orchestrator cannot exist, so
+    // write the file by hand.
+    std::fs::write(
+        root.join("specialists/direct.md"),
+        specialist_text("direct", "x"),
+    )
+    .unwrap();
+    assert!(d
+        .move_role(DefKind::Specialist, DefKind::Orchestrator, "direct")
+        .is_err());
+    assert!(root.join("specialists/direct.md").is_file());
+    assert!(!root.join("orchestrators/direct.md").exists());
+}
