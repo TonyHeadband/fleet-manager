@@ -607,7 +607,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   };
   // Kanban enters once its columns and cards have arrived; every other view as it opens.
   const entry = { key: route, ...useEntry(route, route !== "kanban" || (loaded && !!schema), !!open) };
-  const footer = <Footer connected={connected} agents={snapshot.agents} messages={messages} onClick={click} onSelect={openAgent} onOpenLog={() => navigate(settingsHref("log"))} />;
+  const footer = <Footer connected={connected} agents={workAgents} messages={messages} onClick={click} onSelect={openAgent} onOpenLog={() => navigate(settingsHref("log"))} />;
   // egui's wizard over the board while no persona is ready; it cannot be dismissed, and New task waits for it.
   const setup = personas.state === "ready" && !personas.value.some((p) => p.ready) && (
     <PersonaSetup
@@ -754,7 +754,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                   <Overview
                     products={products}
                     tasks={tasks?.tasks ?? []}
-                    agents={snapshot.agents}
+                    agents={workAgents}
                     active={product}
                     onActive={pickProduct}
                     shown={overviewShown}

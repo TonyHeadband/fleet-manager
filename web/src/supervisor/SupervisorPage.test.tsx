@@ -169,6 +169,22 @@ describe("Supervisor page", () => {
     expect(screen.queryByText("supervising")).toBeNull();
   });
 
+  it("supervisor_agents_do_not_count_in_the_footer", async () => {
+    window.location.hash = "#kanban";
+    render(<App client={fakeClient()} eventSource={factory} nowSeconds={() => NOW} />);
+    await screen.findByRole("region", { name: "Working" });
+    act(() =>
+      FakeEventSource.for("/api/events").emit(
+        "snapshot",
+        { seq: 1, agents: [agent({ id: "s1", kind: "supervisor", status: "needs_you" }), agent({ id: "a1", goal: "fix the tests" })] },
+        "1",
+      ),
+    );
+    await screen.findByText("fix the tests");
+    expect(screen.getByLabelText("Status")).toHaveTextContent("Agents01");
+    expect(screen.queryByText("Need you")).toBeNull();
+  });
+
   it("supervisor_css_uses_tokens_only", () => {
     const css = readFileSync("src/supervisor/supervisor.css", "utf8");
     expect(css).toContain(".supervisor");
