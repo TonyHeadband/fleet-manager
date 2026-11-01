@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AVATAR_H, AVATAR_W, avatar, type AvatarArt, type AvatarKind, type AvatarShape } from "./avatarArt";
+import { AVATAR_H, AVATAR_W, avatar, supervisorSeed, type AvatarArt, type AvatarKind, type AvatarShape } from "./avatarArt";
 
 // The generator behind every persona and specialist picture. The same seed must draw the same picture forever, in
 // both themes and on every machine, so these tests pin both its invariants and, for a few seeds, its exact output.
@@ -141,5 +141,16 @@ describe("avatar", () => {
       "persona:landing": "4967b986",
       "specialist:landing": "3f83ecf1",
     });
+  });
+});
+
+describe("the supervisor avatar", () => {
+  it("draws_the_personas_scan_art_for_its_seed", () => {
+    for (const seed of PLAIN.slice(0, 20)) expect(avatar("supervisor", seed).shapes).toEqual(avatar("persona", seed).shapes);
+  });
+
+  it("the_supervisor_seed_differs_from_the_persona_seed", () => {
+    expect(supervisorSeed("work")).toBe("supervisor:work");
+    expect(avatar("supervisor", supervisorSeed("work")).shapes).not.toEqual(avatar("persona", "work").shapes);
   });
 });

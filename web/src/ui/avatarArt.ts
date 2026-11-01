@@ -7,7 +7,8 @@
  * The output for a seed is a compatibility promise: changing anything here changes every avatar in the fleet.
  */
 
-export type AvatarKind = "persona" | "specialist";
+/** A supervisor is the persona figure with a square head: the same scan art, a different silhouette. */
+export type AvatarKind = "persona" | "specialist" | "supervisor";
 /** `main` paints at --avatar-l, `dim` at --avatar-l2. */
 export type Ink = "main" | "dim";
 export type AvatarShape =
@@ -51,8 +52,11 @@ function rng(seed: string): () => number {
 export function avatar(kind: AvatarKind, seed: string): AvatarArt {
   const hue = Math.floor((fnv("hue:" + seed) / 4294967296) * 360);
   const r = rng(seed);
-  return { kind, hue, shapes: kind === "persona" ? scan(r) : traces(r) };
+  return { kind, hue, shapes: kind === "specialist" ? traces(r) : scan(r) };
 }
+
+/** Each persona's supervisor has its own stable picture, distinct from the persona's own. */
+export const supervisorSeed = (persona: string) => `supervisor:${persona}`;
 
 const SCAN_WIDTHS = [0.5, 0.75, 1.1];
 const SCAN_OPACITIES = [1, 0.7, 0.45];

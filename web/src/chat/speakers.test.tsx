@@ -62,7 +62,7 @@ describe("a chat names who said each message", () => {
     show([reply("hello")], "supervisor");
     const said = screen.getByText("hello").closest(".chat-reply")!;
     expect(said.querySelector(".chat-speaker-name")).toHaveTextContent(/^Supervisor$/);
-    expect(said.querySelector(".avatar")).toHaveAttribute("data-kind", "specialist");
+    expect(said.querySelector(".avatar")).toHaveAttribute("data-kind", "supervisor");
     expect(said.querySelector(".avatar")).toHaveAttribute("data-seed", "supervisor:me");
   });
 });

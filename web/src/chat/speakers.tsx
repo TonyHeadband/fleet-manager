@@ -4,6 +4,7 @@ import type { ChatItem } from "../api/generated/ChatItem";
 import type { Persona } from "../api/generated/Persona";
 import { nickname } from "../board/groups";
 import { Avatar } from "../ui/Avatar";
+import { supervisorSeed } from "../ui/avatarArt";
 
 /** Who said a message: `id` tells one speaker from another, for collapsing a run under one header. */
 export interface Speaker {
@@ -41,7 +42,7 @@ export function agentSpeaker(a: Agent, personas: Persona[]): Speaker {
 
 /** The supervisor of a persona: one each, drawn as a specialist seeded by the persona. */
 export function supervisorSpeaker(persona: string | null): Speaker {
-  return { id: "supervisor", name: "Supervisor", avatar: <Avatar kind="specialist" seed={persona && `supervisor:${persona}`} title="supervisor" /> };
+  return { id: "supervisor", name: "Supervisor", avatar: <Avatar kind="supervisor" seed={persona && supervisorSeed(persona)} title="supervisor" /> };
 }
 
 /** Who said a one-to-one chat's item; calls, markers, events and system lines have no speaker. */

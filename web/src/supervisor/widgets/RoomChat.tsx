@@ -11,6 +11,7 @@ import { Entry } from "../../chat/ChatPane";
 import { grouper, type Speaker } from "../../chat/speakers";
 import { ReplyBox } from "../../components/ReplyBox";
 import { Avatar } from "../../ui/Avatar";
+import { supervisorSeed } from "../../ui/avatarArt";
 import { Button } from "../../ui/Button";
 import { ChoiceMenu } from "../../ui/ChoiceMenu";
 import { ErrorLine } from "../../ui/ErrorLine";
@@ -151,7 +152,7 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
     if (p.sender === "owner") return { id: "owner", name: p.sender_name, avatar: <Avatar seed={persona} title={persona} /> };
     const sender = agentFor(agentOf(p.sender));
     const id = agentOf(p.sender) ?? p.sender_name;
-    if (sender?.kind === "supervisor") return { id, name: p.sender_name, avatar: <Avatar kind="specialist" seed={`supervisor:${persona}`} title="supervisor" /> };
+    if (sender?.kind === "supervisor") return { id, name: p.sender_name, avatar: <Avatar kind="supervisor" seed={supervisorSeed(persona)} title="supervisor" /> };
     const role = sender?.role;
     return { id, name: p.sender_name, avatar: role ? <Avatar kind="specialist" seed={role} title={role} /> : <Avatar /> };
   };
