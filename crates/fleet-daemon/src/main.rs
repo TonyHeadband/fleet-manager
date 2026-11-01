@@ -119,8 +119,8 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         }
     }
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
-    opts.daemon_exe =
-        std::env::current_exe().map_err(|e| format!("cannot find the daemon binary: {e}"))?;
+    opts.daemon_exe = fleet_daemon::agents::daemon_exe()
+        .map_err(|e| format!("cannot find the daemon binary: {e}"))?;
     opts.claude = cfg.claude_command.clone();
     // Test seam for the real-binary test, which points the forge at a fake API. The persona tokens are sent to
     // whatever this names, so only a loopback http address is taken.

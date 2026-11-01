@@ -179,8 +179,22 @@ impl ServiceOptions {
                 vec!["claude".into()],
             ),
             forge: Arc::new(crate::forge::ForgeConfig { api_override: None }),
-            daemon_exe: std::env::current_exe().unwrap_or_else(|_| "fleet-daemon".into()),
+            daemon_exe: daemon_exe().unwrap_or_else(|_| "fleet-daemon".into()),
         }
+    }
+}
+
+/// The daemon binary, which git runs as the credential helper.
+pub fn daemon_exe() -> std::io::Result<PathBuf> {
+    std::env::current_exe().map(without_deleted)
+}
+
+/// On Linux, once the binary is replaced under a running daemon (a rebuild), `current_exe` names the old file with
+/// " (deleted)" appended; the new binary is at the path itself.
+fn without_deleted(exe: PathBuf) -> PathBuf {
+    match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+        Some(live) => PathBuf::from(live),
+        None => exe,
     }
 }
 
@@ -3103,7 +3117,8 @@ pub(crate) fn reads_text(a: &Agent) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::one_line;
+    use super::{one_line, without_deleted};
+    use std::path::PathBuf;
 
     #[test]
     fn one_line_turns_control_characters_and_newlines_into_single_spaces() {
@@ -3112,5 +3127,17 @@ mod tests {
         assert_eq!(one_line("x\x1b[2J\x03y\tz"), "x [2J y z");
         assert_eq!(one_line("  \u{7f}  "), "");
         assert_eq!(one_line("fine: été"), "fine: été");
+    }
+
+    #[test]
+    fn a_replaced_binary_is_named_by_its_path() {
+        assert_eq!(
+            without_deleted(PathBuf::from("/opt/fleet/fleet-daemon (deleted)")),
+            PathBuf::from("/opt/fleet/fleet-daemon")
+        );
+        assert_eq!(
+            without_deleted(PathBuf::from("/opt/fleet/fleet-daemon")),
+            PathBuf::from("/opt/fleet/fleet-daemon")
+        );
     }
 }
