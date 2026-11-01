@@ -150,9 +150,32 @@ async fn overview_lists_the_personas_tasks_across_products() {
     );
 }
 
+/// Points `core`'s origin at a GitHub repo; nothing fetches it, `file_issue` only reads the URL.
+fn github_origin(srv: &Server) {
+    git(
+        &srv.fx.repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/core.git",
+        ],
+    );
+}
+
+fn issue_posts(srv: &Server) -> Vec<common::fake_forge::Recorded> {
+    srv.fx
+        .forge
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "POST" && r.path_and_query == "/repos/acme/core/issues")
+        .collect()
+}
+
 #[tokio::test]
-async fn file_issue_runs_gh_as_the_persona() {
+async fn file_issue_posts_to_the_forge_as_the_persona() {
     let srv = start().await;
+    github_origin(&srv);
     let sup = conversation(&srv).await;
     let (text, err) = call(
         &srv,
@@ -162,17 +185,23 @@ async fn file_issue_runs_gh_as_the_persona() {
     )
     .await;
     assert!(!err, "{text}");
-    assert_eq!(text, "https://example.test/issue/1");
-    let log = std::fs::read_to_string(gh_dir(&srv).join("argv.log")).unwrap();
-    let line = log.lines().find(|l| l.starts_with("issue create")).unwrap();
-    for part in [
-        "--title It breaks",
-        "--body Steps: 1",
-        "--label kind/bug",
-        "--label ui",
-    ] {
-        assert!(line.contains(part), "{part} missing: {line}");
-    }
+    assert!(
+        text.starts_with("https://github.com/acme/core/issues/"),
+        "{text}"
+    );
+    let posts = issue_posts(&srv);
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].auth, "Bearer ghp_fake");
+    assert_eq!(
+        posts[0].body,
+        json!({"title": "It breaks", "body": "Steps: 1", "labels": ["kind/bug", "ui"]})
+    );
+    let calls = srv.fx.store.forge_calls(10).await.unwrap();
+    let row = calls.iter().find(|c| c.op == "create_issue").unwrap();
+    assert_eq!(
+        (row.agent.as_ref(), row.repo.as_str(), row.ok),
+        (Some(&sup), "github.com/acme/core", true)
+    );
     let (text, err) = call(
         &srv,
         &sup,
@@ -181,6 +210,42 @@ async fn file_issue_runs_gh_as_the_persona() {
     )
     .await;
     assert!(err && text.contains("nope"), "{text}");
+}
+
+#[tokio::test]
+async fn file_issue_works_for_a_pat_only_persona() {
+    let srv = start().await;
+    github_origin(&srv);
+    let store = &srv.fx.store;
+    let mut row = store.persona(PERSONA).await.unwrap().unwrap();
+    row.github_auth = fleet_api::GithubAuth::Pat;
+    store.update_persona(&row).await.unwrap();
+    std::fs::remove_dir_all(gh_dir(&srv)).unwrap();
+    let sup = conversation(&srv).await;
+    let (text, err) = call(
+        &srv,
+        &sup,
+        "file_issue",
+        json!({"product": PRODUCT, "repo": "core", "title": "t", "body": "b"}),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert_eq!(issue_posts(&srv).len(), 1);
+}
+
+#[tokio::test]
+async fn file_issue_refuses_a_repo_with_no_forge_origin() {
+    let srv = start().await;
+    let sup = conversation(&srv).await;
+    let (text, err) = call(
+        &srv,
+        &sup,
+        "file_issue",
+        json!({"product": PRODUCT, "repo": "core", "title": "t", "body": "b"}),
+    )
+    .await;
+    assert!(err && text.contains("no GitHub owner and repo"), "{text}");
+    assert!(issue_posts(&srv).is_empty());
 }
 
 #[tokio::test]

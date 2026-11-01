@@ -1,17 +1,18 @@
 //! The fleet tools a supervisor conversation calls over MCP. Each returns the tool's text and whether it failed.
 use crate::agents::AgentService;
+use crate::forge::log::{recorded, said, CallCtx};
+use crate::forge::{self, RepoRef};
+use crate::git;
+use crate::store::RepoRow;
 use fleet_api::{task_id, Actor, AgentId, AgentKind, RepoPick, SpawnRequest, StepState, TaskState};
 use serde_json::Value;
-use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command;
 use tracing::info;
 
 pub const NAMES: [&str; 4] = ["fleet_overview", "file_issue", "write_doc", "start_task"];
 
 const PATH_REFUSAL: &str = "path must be specs/<name>.md or plans/<name>.md";
-const GH_TIMEOUT: Duration = Duration::from_secs(60);
+const FORGE_TIMEOUT: Duration = Duration::from_secs(60);
 
 type Reply = Result<String, String>;
 
@@ -25,7 +26,7 @@ pub async fn call(svc: &AgentService, id: &AgentId, name: &str, args: &Value) ->
     let persona = agent.persona;
     let reply = match name {
         "fleet_overview" => overview(svc, &persona).await,
-        "file_issue" => file_issue(svc, &persona, args).await,
+        "file_issue" => file_issue(svc, id, &persona, args).await,
         "write_doc" => write_doc(svc, args).await,
         "start_task" => start_task(svc, id, &persona, args).await,
         _ => Err(format!("unknown tool: {name}")),
@@ -108,53 +109,84 @@ async fn known_product(svc: &AgentService, product: &str) -> Result<(), String> 
     }
 }
 
-async fn file_issue(svc: &AgentService, persona: &str, args: &Value) -> Reply {
+async fn file_issue(svc: &AgentService, id: &AgentId, persona: &str, args: &Value) -> Reply {
     let (product, repo) = (str_arg(args, "product")?, str_arg(args, "repo")?);
     let (title, body) = (str_arg(args, "title")?, str_arg(args, "body")?);
+    let labels = args
+        .get("labels")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|l| l.as_str().map(str::to_string))
+        .collect::<Option<Vec<String>>>()
+        .ok_or("`labels` must be strings")?;
     known_product(svc, product).await?;
     let row = match svc.store.repo(product, repo).await {
         Ok(Some(r)) => r,
         Ok(None) => return Err(format!("unknown repo: {repo} (product {product})")),
         Err(e) => return Err(e.to_string()),
     };
-    // The persona's own clone is the checkout `gh` reads the remote from; a path-only repo has no other.
-    let clone = svc.repos.clone_dir(persona, product, repo);
-    let dir: PathBuf = if clone.exists() {
-        clone
-    } else {
-        row.path
-            .filter(|p| p.exists())
-            .ok_or_else(|| format!("{repo} has no checkout on this machine"))?
-    };
-    let env = svc
+    let target = issue_repo(svc, persona, product, &row).await?;
+    let token = svc
         .personas()
-        .gh_env(persona)
+        .token(persona)
         .await
         .map_err(|e| e.to_string())?;
-    let mut gh = Command::new(&svc.config().gh_command);
-    crate::git::harden(gh.as_std_mut(), &env.vars);
-    gh.args(["issue", "create", "--title", title, "--body", body]);
-    for label in args
-        .get("labels")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let label = label.as_str().ok_or("`labels` must be strings")?;
-        gh.args(["--label", label]);
-    }
-    gh.current_dir(dir).stdin(Stdio::null()).kill_on_drop(true);
-    match tokio::time::timeout(GH_TIMEOUT, gh.output()).await {
-        Ok(Ok(o)) if o.status.success() => {
-            Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    let host = svc
+        .personas()
+        .get(persona)
+        .await
+        .map_err(|e| e.to_string())?
+        .host;
+    let forge = forge::github(&host, token, &svc.options().forge, FORGE_TIMEOUT);
+    let ctx = CallCtx {
+        persona: persona.into(),
+        task: None,
+        agent: Some(id.clone()),
+    };
+    let (title, body) = (title.to_string(), body.to_string());
+    let issue_of = target.clone();
+    recorded(
+        &svc.store,
+        &ctx,
+        "github",
+        &target,
+        "create_issue",
+        move || forge.create_issue(&issue_of, &title, &body, &labels),
+    )
+    .await
+    .map(|issue| issue.url)
+    .map_err(|e| said(&e))
+}
+
+/// The forge repo issues go to: the row's URL, or the `origin` of its checkout (the persona's clone, else the pinned
+/// folder).
+async fn issue_repo(
+    svc: &AgentService,
+    persona: &str,
+    product: &str,
+    row: &RepoRow,
+) -> Result<RepoRef, String> {
+    let url = match &row.url {
+        Some(url) => Some(url.clone()),
+        None => {
+            let clone = svc.repos.clone_dir(persona, product, &row.name);
+            let dir = if clone.exists() {
+                clone
+            } else {
+                row.path
+                    .clone()
+                    .filter(|p| p.exists())
+                    .ok_or_else(|| format!("{} has no checkout on this machine", row.name))?
+            };
+            git::configured_remote_url(&dir, "origin")
+                .await
+                .map_err(|e| e.to_string())?
         }
-        Ok(Ok(o)) => Err(format!(
-            "gh issue create failed: {}",
-            String::from_utf8_lossy(&o.stderr).trim()
-        )),
-        Ok(Err(e)) => Err(format!("gh cannot run: {e}")),
-        Err(_) => Err("gh issue create timed out".into()),
-    }
+    };
+    url.as_deref()
+        .and_then(RepoRef::from_url)
+        .ok_or_else(|| format!("the origin of {} names no GitHub owner and repo", row.name))
 }
 
 /// `specs/<name>.md` or `plans/<name>.md`: one level, so nothing can climb out or reach another folder.

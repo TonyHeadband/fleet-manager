@@ -1,6 +1,6 @@
 //! GitHub and GitHub Enterprise over REST.
 
-use super::{parse_timestamp, Forge, ForgeConfig, ForgeError, NewPr, PrInfo, RepoRef};
+use super::{parse_timestamp, Forge, ForgeConfig, ForgeError, IssueInfo, NewPr, PrInfo, RepoRef};
 use fleet_api::PrState;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -181,5 +181,29 @@ impl Forge for GitHub {
         let path = format!("/repos/{}/{}/issues/{number}/labels", repo.owner, repo.name);
         self.send("POST", &path, Some(json!({"labels": labels})))
             .map(|_| ())
+    }
+
+    fn create_issue(
+        &self,
+        repo: &RepoRef,
+        title: &str,
+        body: &str,
+        labels: &[String],
+    ) -> Result<IssueInfo, ForgeError> {
+        let path = format!("/repos/{}/{}/issues", repo.owner, repo.name);
+        let reply = self.send(
+            "POST",
+            &path,
+            Some(json!({"title": title, "body": body, "labels": labels})),
+        )?;
+        match (reply["html_url"].as_str(), reply["number"].as_u64()) {
+            (Some(url), Some(number)) => Ok(IssueInfo {
+                url: url.into(),
+                number,
+            }),
+            _ => Err(ForgeError::Transport(
+                "unreadable reply: no issue URL or number".into(),
+            )),
+        }
     }
 }

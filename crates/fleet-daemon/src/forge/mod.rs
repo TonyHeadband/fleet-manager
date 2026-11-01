@@ -1,4 +1,5 @@
-//! What the daemon asks a code forge: who the token is, and the PRs of a branch. GitHub is the only forge so far.
+//! What the daemon asks a code forge: who the token is, the PRs of a branch, and new issues. GitHub is the only forge
+//! so far.
 
 mod github;
 pub mod log;
@@ -51,6 +52,12 @@ pub struct PrInfo {
     pub merged_at: Option<i64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IssueInfo {
+    pub url: String,
+    pub number: u64,
+}
+
 pub struct NewPr<'a> {
     pub head: &'a str,
     pub base: &'a str,
@@ -101,6 +108,13 @@ pub trait Forge: Send + Sync {
         body: &str,
     ) -> Result<(), ForgeError>;
     fn add_labels(&self, repo: &RepoRef, number: u64, labels: &[String]) -> Result<(), ForgeError>;
+    fn create_issue(
+        &self,
+        repo: &RepoRef,
+        title: &str,
+        body: &str,
+        labels: &[String],
+    ) -> Result<IssueInfo, ForgeError>;
 }
 
 #[derive(Clone, Debug, Default)]

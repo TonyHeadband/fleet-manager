@@ -165,6 +165,27 @@ fn update_and_labels_hit_their_endpoints() {
 }
 
 #[test]
+fn create_issue_posts_title_body_and_labels() {
+    let fake = FakeForge::start();
+    let made = client(&fake, Duration::from_secs(5))
+        .create_issue(&repo(), "T", "B", &["kind/bug".into()])
+        .unwrap();
+    assert_eq!(
+        made.url,
+        format!("https://github.com/acme/core/issues/{}", made.number)
+    );
+    let r = &fake.requests()[0];
+    assert_eq!(
+        (r.method.as_str(), r.path_and_query.as_str()),
+        ("POST", "/repos/acme/core/issues")
+    );
+    assert_eq!(
+        r.body,
+        json!({"title": "T", "body": "B", "labels": ["kind/bug"]})
+    );
+}
+
+#[test]
 fn a_401_is_unauthorized_and_a_422_carries_githubs_message() {
     let fake = FakeForge::start();
     let c = client(&fake, Duration::from_secs(5));

@@ -196,6 +196,13 @@ async fn handle(
         }
         ("PATCH", ["repos", _, _, "pulls", _]) => axum::Json(json!({})).into_response(),
         ("POST", ["repos", _, _, "issues", _, "labels"]) => axum::Json(json!([])).into_response(),
+        ("POST", ["repos", o, r, "issues"]) => {
+            s.next_number += 1;
+            let n = s.next_number;
+            let issue =
+                json!({"html_url": format!("https://github.com/{o}/{r}/issues/{n}"), "number": n});
+            (StatusCode::CREATED, axum::Json(issue)).into_response()
+        }
         _ => (
             StatusCode::NOT_FOUND,
             axum::Json(json!({"message": "Not Found"})),
