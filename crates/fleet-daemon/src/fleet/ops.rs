@@ -2150,6 +2150,7 @@ impl AgentService {
                 warn!(task = %p.id.0, error = %e, "cannot store the PR's event");
             }
         }
+        self.announce_migrations(&p, wt, &from, &tested).await;
         let labels: Vec<String> = p.pr_rules.iter().flat_map(|r| r.labels.clone()).collect();
         if !labels.is_empty() {
             // A label the remote lacks is no reason to lose the PR, so a failure is only logged.
@@ -2189,6 +2190,34 @@ impl AgentService {
 }
 
 impl AgentService {
+    /// Announces in the product room the migrations the task branch adds. A failure is only logged.
+    async fn announce_migrations(&self, p: &Task, wt: &Path, from: &str, tested: &str) {
+        if p.product.is_empty() {
+            return;
+        }
+        let added = match git::added_files(wt, from, tested, &[]).await {
+            Ok(a) => a,
+            Err(e) => {
+                warn!(task = %p.id.0, error = %e, "cannot list the migrations the branch adds");
+                return;
+            }
+        };
+        let files: Vec<String> = added
+            .into_iter()
+            .filter(|f| f.split('/').rev().skip(1).any(|d| d == "migrations"))
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        let title = p.title.clone().filter(|t| !t.is_empty());
+        let title = title.as_deref().unwrap_or(&p.name);
+        if let Err(e) =
+            crate::rooms::announce::migrations_taken(&self.store, &p.product, title, &files).await
+        {
+            warn!(task = %p.id.0, error = %e, "cannot announce the migrations in the product room");
+        }
+    }
+
     /// Checks the title and body against the task's PR rules, before any step runs. Returns the passing `pr` step
     /// for the run; a miss stores a run of that step alone and refuses, or refuses with the limit once the
     /// orchestrator has used its `max_pr_attempts` on rules it fixes itself.

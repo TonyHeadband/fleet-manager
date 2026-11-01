@@ -462,6 +462,32 @@ pub async fn changed_files(
         .collect())
 }
 
+/// Files added (not modified, renamed or deleted) between `from` and `to`, limited to `pathspecs`.
+pub async fn added_files(
+    repo: &Path,
+    from: &str,
+    to: &str,
+    pathspecs: &[String],
+) -> Result<Vec<String>, GitError> {
+    let mut args = vec![
+        "diff",
+        "--name-only",
+        "--diff-filter=A",
+        "--no-renames",
+        "-z",
+        from,
+        to,
+        "--",
+    ];
+    args.extend(pathspecs.iter().map(String::as_str));
+    Ok(git_raw(repo, &args, &[])
+        .await?
+        .split('\0')
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// The URL `remote` points at, or None when the repo has no such remote.
 pub async fn remote_url(repo: &Path, remote: &str) -> Result<Option<String>, GitError> {
     if !has_remote(repo, remote).await? {

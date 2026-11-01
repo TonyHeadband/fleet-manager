@@ -304,6 +304,16 @@ impl MergeChecker {
                     {
                         warn!(task = %t.id.0, error = %e, "cannot store the PR's event");
                     }
+                    if !t.product.is_empty() {
+                        let title = t.title.clone().filter(|x| !x.is_empty());
+                        let title = title.as_deref().unwrap_or(&t.name);
+                        if let Err(e) =
+                            crate::rooms::announce::landed(&self.store, &t.product, title, &url)
+                                .await
+                        {
+                            warn!(task = %t.id.0, error = %e, "cannot announce the landing in the product room");
+                        }
+                    }
                 }
                 if finished {
                     info!(task = %t.id.0, "task's PRs merged");

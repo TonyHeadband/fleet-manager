@@ -161,6 +161,52 @@ async fn merged_pr_marks_task_done() {
     assert_eq!(pr_lists(&fx).len(), 1);
 }
 
+/// What the daemon said in the product room, oldest first.
+async fn daemon_announcements(fx: &Fx) -> Vec<String> {
+    let room = format!("product:{PRODUCT}");
+    fx.store
+        .posts_after(&room, fleet_api::MemberRef::Owner.key(), 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|p| p.sender == fleet_api::MemberRef::Daemon)
+        .map(|p| {
+            assert_eq!(p.kind, fleet_api::PostKind::Announcement);
+            p.text
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_pr_is_announced_in_the_product_room() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    reply_merged(&fx);
+    fx.svc.check_merges().await;
+    assert_eq!(
+        daemon_announcements(&fx).await,
+        ["landed: t1 · https://ghe.example.com/acme/core/pull/7"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_pr_is_announced_once() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    reply_merged(&fx);
+    fx.svc.check_merges().await;
+    // The record is rewound, so the same merge is seen as new again.
+    fx.store
+        .update_task(&id, |t| {
+            t.prs.clear();
+            t.done_at = None;
+        })
+        .await
+        .unwrap();
+    fx.svc.check_merges().await;
+    assert_eq!(daemon_announcements(&fx).await.len(), 1);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn gh_failure_changes_nothing() {
     let fx = fixture().await;
