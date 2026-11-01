@@ -104,9 +104,10 @@ fn column_for_uses_schema_status_mapping() {
 #[test]
 fn visible_actions_follows_conditions() {
     let schema = default_ui_schema();
+    // A live agent can be messaged from the reply box in any live status, Working included.
     assert_eq!(
         ids(&schema, &agent(Status::Working, false)),
-        ["pause", "stop"]
+        ["answer", "pause", "stop"]
     );
     // No Pause on a Needs you card: Escape would deny the pending request.
     assert_eq!(
@@ -115,7 +116,7 @@ fn visible_actions_follows_conditions() {
     );
     assert_eq!(
         ids(&schema, &agent(Status::Review, true)),
-        ["resume", "stop"]
+        ["answer", "resume", "stop"]
     );
     // A stopped agent has nothing left to stop.
     assert!(ids(&schema, &agent(Status::Stopped, false)).is_empty());
