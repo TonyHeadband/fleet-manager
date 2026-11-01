@@ -8,7 +8,7 @@ const LINE = { strokeLinecap: "square", strokeLinejoin: "miter", fill: "none" } 
  * An avatar in the app's portrait shape, 3:4: a picture generated from `seed` (a persona's figure or a specialist's
  * traces) over the sunken frame, or the empty frame without a seed. Each place sizes it; `title` names whose it is.
  */
-export function Avatar({ title, kind = "persona", seed }: { title?: string; kind?: AvatarKind; seed?: string }) {
+export function Avatar({ title, kind = "persona", seed }: { title?: string; kind?: AvatarKind; seed?: string | null }) {
   const art = useMemo(() => (seed ? avatar(kind, seed) : null), [kind, seed]);
   // Unique per instance: the same persona is drawn on many cards at once, and a shared id clips one to another.
   // useId's characters (colons, guillemets) are not all safe inside url(#…), so keep only the word characters.
@@ -18,7 +18,7 @@ export function Avatar({ title, kind = "persona", seed }: { title?: string; kind
     figure = `${id}-figure`;
   const { head, shoulders } = FIGURE;
   return (
-    <span className="avatar" title={title} aria-hidden="true" data-kind={kind} data-seed={seed}>
+    <span className="avatar" title={title} aria-hidden="true" data-kind={kind} data-seed={seed ?? undefined}>
       <svg viewBox={`0 0 ${AVATAR_W} ${AVATAR_H}`}>
         <defs>
           <clipPath id={frame}>

@@ -8,6 +8,7 @@ import { specialistLabel } from "../board/groups";
 import { prUrl } from "./fleetViews";
 import { Button } from "../ui/Button";
 import { approvalText, failedStep, gateText, stateText, stepLine } from "./breakdown";
+import { Avatar } from "../ui/Avatar";
 
 interface Props {
   view: FleetView;
@@ -111,7 +112,12 @@ function Version({ v, agents, nicknames, onOpen }: { v: BreakdownVersion; agents
                 <tr key={s.n}>
                   <td>{s.n}</td>
                   <td>{s.title}</td>
-                  <td>{specialistLabel(nicknames[s.specialist], s.specialist)}</td>
+                  <td>
+                    <span className="step-specialist">
+                      <Avatar kind="specialist" seed={s.specialist} title={s.specialist} />
+                      {specialistLabel(nicknames[s.specialist], s.specialist)}
+                    </span>
+                  </td>
                   <td>{s.depends_on.length > 0 ? s.depends_on.join(", ") : "—"}</td>
                   {/* The daemon refuses a step that loosens its specialist's mode, so a mode named here tightens it. */}
                   <td>{s.mode ? `${s.mode} (stricter)` : "—"}</td>

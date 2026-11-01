@@ -182,6 +182,8 @@ describe("Shell", () => {
     // The label sits above the selector, outside it; the selector holds the avatar and the name only.
     expect(picker).toHaveTextContent(/^me$/);
     expect(picker.querySelector(".avatar")).not.toBeNull();
+    expect(picker.querySelector(".avatar")).toHaveAttribute("data-seed", "me");
+    expect(picker.querySelector(".avatar")).toHaveAttribute("title", "me");
     const caption = picker.closest(".filter-menu")!.querySelector(".filter-caption");
     expect(caption).toHaveTextContent("Persona");
     expect(caption!.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

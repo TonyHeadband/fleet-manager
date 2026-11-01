@@ -38,6 +38,9 @@
 .steps th { text-align: left; font-weight: 400; color: var(--text-low); }
 .steps th, .steps td { padding: var(--panel-grid-y) var(--panel-grid-x) var(--panel-grid-y) 0; vertical-align: baseline; white-space: nowrap; }
 .steps td:nth-child(2) { white-space: normal; }
+/* A step's specialist: its generated traces before the label, a line tall, 3 wide for 4 tall. */
+.step-specialist { display: inline-flex; align-items: center; gap: var(--space-chip-gap); }
+.steps .avatar { width: calc(var(--size-small) * 1.5 * 3 / 4); height: calc(var(--size-small) * 1.5); }
 .steps tbody tr:nth-child(odd) { background: var(--raised); }
 .steps a { color: var(--accent-text); }
 .step-state, .gate-head, .gate-pr { display: inline-flex; align-items: center; gap: var(--panel-gap-s); }

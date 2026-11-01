@@ -65,7 +65,7 @@ export function Drawer({
             value={persona}
             placeholder="Pick a persona"
             onPick={onPersona}
-            lead={<Avatar title={ready.find((p) => p.id === persona)?.name} />}
+            lead={<Avatar title={ready.find((p) => p.id === persona)?.name} seed={persona} />}
           />
         )}
         {listed.length > 0 && (

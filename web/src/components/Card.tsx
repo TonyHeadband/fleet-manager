@@ -167,7 +167,7 @@ export function Card({ schema, agent, now, selected = false, tag, repos: showRep
     >
       <EdgeMotion agent={agent} tone={tone} />
       <div className="card-in">
-        <Avatar title={tag} />
+        <Avatar title={tag} seed={agent.persona} />
         <div className="card-row" data-row="title">
           <span className="card-left">
             {lead && <Mark name="orchestrator" label="Orchestrator" />}
