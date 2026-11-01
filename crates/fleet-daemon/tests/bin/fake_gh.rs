@@ -88,57 +88,6 @@ fn main() {
             eprintln!("no token on stdin");
             exit(1);
         }
-        // The PR open_pr asks for; the argv in argv.log is what a test checks. A `pr-empty` file in the config dir
-        // makes it succeed without printing the URL; a `pr-exists` file makes it fail like gh does when the branch
-        // already has a PR (two stderr lines, the PR's URL last).
-        ("pr", "create") => {
-            if has("pr-exists") {
-                let value = |flag: &str| {
-                    args.windows(2)
-                        .find(|w| w[0] == flag)
-                        .map(|w| w[1].clone())
-                        .unwrap_or_default()
-                };
-                eprintln!(
-                    "a pull request for branch \"{}\" into branch \"{}\" already exists:",
-                    value("--head"),
-                    value("--base")
-                );
-                eprintln!("https://example.test/pr/1");
-                exit(1);
-            }
-            if !has("pr-empty") {
-                println!("https://example.test/pr/1");
-            }
-            exit(0);
-        }
-        // The URL of the branch's PR; a `pr-view-fail` file makes it fail, a `pr-view-empty` file print nothing.
-        ("pr", "view") => {
-            if has("pr-view-fail") {
-                eprintln!("no pull requests found for branch");
-                exit(1);
-            }
-            if !has("pr-view-empty") {
-                println!("https://example.test/pr/1");
-            }
-            exit(0);
-        }
-        // A label named `missing` is one the remote does not have; any other is added. A `pr-edit-fail` file makes
-        // the edit of a title (the update of an open PR) fail.
-        ("pr", "edit") => {
-            if has("pr-edit-fail") && args.iter().any(|x| x.starts_with("--title=")) {
-                eprintln!("GraphQL: Could not resolve to a PullRequest");
-                exit(1);
-            }
-            if args
-                .windows(2)
-                .any(|w| w[0] == "--add-label" && w[1] == "missing")
-            {
-                eprintln!("could not add label: 'missing' not found");
-                exit(1);
-            }
-            exit(0);
-        }
         // The merge watcher's query: replies with `pr-list.json` from the config dir (no PR when it is missing), and
         // fails like a GitHub outage when a `pr-fail` file is there. `pr-list-<repo>.json` and `pr-fail-<repo>`,
         // keyed by the last part of `-R`, do the same for that repo only and win over the shared ones. A `pr-hang`

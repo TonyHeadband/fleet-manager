@@ -304,7 +304,7 @@ pub async fn fetch(repo: &Path, env: &[(String, String)]) -> Result<(), GitError
         .map(|_| ())
 }
 
-/// How long a call that talks to a remote (fetch, push, `gh pr create`) may take. None can prompt, so only a stuck
+/// How long a call that talks to a remote (fetch, push, a forge call) may take. None can prompt, so only a stuck
 /// network gets this far.
 pub const REMOTE_TIMEOUT: Duration = Duration::from_secs(300);
 

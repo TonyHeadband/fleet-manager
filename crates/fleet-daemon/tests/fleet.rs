@@ -59,7 +59,23 @@ const BUILTIN_SPECIALISTS: [&str; 5] = [
 
 /// `fx` made ready for an orchestrated task: an origin whose `main` has a workflow.
 async fn ready_for_fleet(fx: &Fx) {
-    add_origin_with_workflow(fx, &one_step("true"));
+    let bare = add_origin_with_workflow(fx, &one_step("true"));
+    on_github(fx, &bare);
+}
+
+/// `core`'s origin as `open_pr` reads it, so the PR calls go to `acme/core` on the fake forge.
+const GITHUB_ORIGIN: &str = "https://github.com/acme/core";
+
+/// Names `core`'s origin by its GitHub URL; `insteadOf` keeps every fetch and push on the local `bare`.
+fn on_github(fx: &Fx, bare: &Path) {
+    git(&fx.repo, &["remote", "set-url", "origin", GITHUB_ORIGIN]);
+    let rewrite = format!("url.{}.insteadOf", file_url(bare));
+    git(&fx.repo, &["config", &rewrite, GITHUB_ORIGIN]);
+}
+
+/// The URL the fake forge gives the `n`th PR it opens.
+fn opened_url(n: u64) -> String {
+    format!("{GITHUB_ORIGIN}/pull/{}", 100 + n)
 }
 
 /// A fixture whose `core` repo is ready for an orchestrated task.
@@ -1713,21 +1729,21 @@ fn commit_lib(a: &fleet_api::Agent, file: &str) -> (PathBuf, String) {
     (wt, a.workspaces[0].branch.clone())
 }
 
-/// The fixture persona's gh config dir, where the fake gh logs its calls.
-async fn gh_dir(fx: &Fx) -> PathBuf {
-    let env = fixture_env(fx).await;
-    let dir = &env
-        .vars
-        .iter()
-        .find(|(k, _)| k == "GH_CONFIG_DIR")
-        .unwrap()
-        .1;
-    PathBuf::from(dir)
+/// Every request the fake forge got about a repo (the persona checks ask `/user` only).
+fn pr_calls(fx: &Fx) -> Vec<common::fake_forge::Recorded> {
+    fx.forge
+        .requests()
+        .into_iter()
+        .filter(|r| r.path_and_query.starts_with("/repos/"))
+        .collect()
 }
 
-/// Every call the fake gh got under the fixture's persona, one per line.
-async fn gh_calls(fx: &Fx) -> String {
-    std::fs::read_to_string(gh_dir(fx).await.join("argv.log")).unwrap_or_default()
+/// The requests of `pr_calls` with this method whose path contains `part`.
+fn calls_to(fx: &Fx, method: &str, part: &str) -> Vec<common::fake_forge::Recorded> {
+    pr_calls(fx)
+        .into_iter()
+        .filter(|r| r.method == method && r.path_and_query.contains(part))
+        .collect()
 }
 
 fn gate_failure(err: &ServiceError) -> &fleet_api::GateRun {
@@ -1754,7 +1770,7 @@ async fn gate_failure_pushes_nothing() {
     assert_eq!(run.steps[0].command, "echo boom; exit 3");
     assert_eq!(run.pr_url, None);
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs, vec![run.clone()]);
     assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
@@ -1829,7 +1845,7 @@ async fn a_rule_miss_refuses_before_the_steps_run() {
     assert!(err.to_string().contains("title does not match"), "{err}");
     assert!(!marker.exists());
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs, vec![run.clone()]);
 }
@@ -1851,12 +1867,9 @@ async fn a_fixed_title_passes_and_opens_the_pr() {
         .await
         .unwrap()
         .to_string();
-    assert_eq!(url, "https://example.test/pr/1");
-    let calls = gh_calls(&fx).await;
-    assert!(
-        calls.contains(&format!("--title={GOOD_TITLE} --body=")),
-        "{calls}"
-    );
+    assert_eq!(url, opened_url(1));
+    let created = calls_to(&fx, "POST", "/pulls");
+    assert_eq!(created[0].body["title"], GOOD_TITLE);
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let names: Vec<&str> = p.gate_runs[1]
         .steps
@@ -1964,54 +1977,50 @@ async fn breaking_path_detected_from_the_diff() {
 }
 
 #[tokio::test]
-async fn draft_and_labels_are_passed() {
+async fn draft_rules_open_a_draft() {
     let fx = fleet_fixture().await;
     let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     let mut rules = strict_rules();
     rules.draft = true;
-    rules.labels = vec!["fleet".into(), "bot".into()];
     set_rules(&fx, &a, Some(rules)).await;
-    let url = fx
-        .svc
-        .open_pr(&a.id, GOOD_TITLE, GOOD_BODY)
-        .await
-        .unwrap()
-        .to_string();
-    let calls = gh_calls(&fx).await;
-    assert!(calls.contains("--draft"), "{calls}");
-    for l in ["fleet", "bot"] {
-        assert!(
-            calls.contains(&format!("pr edit {url} --add-label {l}")),
-            "{calls}"
-        );
-    }
+    fx.svc.open_pr(&a.id, GOOD_TITLE, GOOD_BODY).await.unwrap();
+    let created = calls_to(&fx, "POST", "/pulls");
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].body["draft"], true);
 }
 
 #[tokio::test]
-async fn a_missing_label_warns_and_keeps_the_pr() {
+async fn labels_go_in_one_call_and_a_failure_is_only_logged() {
     let fx = fleet_fixture().await;
     let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     let mut rules = strict_rules();
     rules.labels = vec!["missing".into(), "bot".into()];
     set_rules(&fx, &a, Some(rules)).await;
+    fx.forge
+        .fail_next_on("POST", "/labels", 422, "Label does not exist");
     let url = fx
         .svc
         .open_pr(&a.id, GOOD_TITLE, GOOD_BODY)
         .await
         .unwrap()
         .to_string();
-    let calls = gh_calls(&fx).await;
-    assert!(!calls.contains("--draft"), "{calls}");
-    assert!(
-        calls.contains(&format!("pr edit {url} --add-label bot")),
-        "{calls}"
+    let labelled = calls_to(&fx, "POST", "/labels");
+    assert_eq!(labelled.len(), 1);
+    assert_eq!(
+        labelled[0].path_and_query,
+        "/repos/acme/core/issues/101/labels"
     );
+    assert_eq!(labelled[0].body, json!({"labels": ["missing", "bot"]}));
     assert_eq!(
         log_lines(&fx, &a.id, "label ").await,
-        ["label missing not added: could not add label: 'missing' not found"]
+        [
+            "label missing not added: Label does not exist",
+            "label bot not added: Label does not exist"
+        ]
     );
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.prs[0].url, url);
+    assert_eq!(agent(&fx, &a.id).await.status, Status::Review);
 }
 
 #[tokio::test]
@@ -2028,7 +2037,8 @@ async fn a_task_without_rules_opens_as_before() {
         .map(|s| s.name.as_str())
         .collect();
     assert_eq!(names, ["test"]);
-    assert!(!gh_calls(&fx).await.contains("pr edit"));
+    assert!(calls_to(&fx, "PATCH", "/pulls").is_empty());
+    assert!(calls_to(&fx, "POST", "/labels").is_empty());
 }
 
 #[tokio::test]
@@ -2179,15 +2189,16 @@ async fn gate_pass_pushes_and_opens_pr() {
         .await
         .unwrap()
         .to_string();
-    assert_eq!(url, "https://example.test/pr/1");
+    assert_eq!(url, opened_url(1));
     assert_eq!(git(&bare, &["branch", "--list", &branch]), branch);
-    let calls = gh_calls(&fx).await;
-    assert!(
-        calls.contains(&format!(
-            "pr create --head {branch} --base main --title=Add the api --body=both steps"
-        )),
-        "{calls}"
+    let created = calls_to(&fx, "POST", "/pulls");
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].path_and_query, "/repos/acme/core/pulls");
+    assert_eq!(
+        created[0].body,
+        json!({"head": branch, "base": "main", "title": "Add the api", "body": "both steps", "draft": false})
     );
+    assert_eq!(created[0].auth, "Bearer ghp_fake");
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert!(
         p.log.iter().any(|l| l.text == format!("PR opened: {url}")),
@@ -2232,7 +2243,7 @@ async fn push_failure_keeps_the_run() {
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     let text = fleet_refusal(&err);
     assert!(text.starts_with("push failed: "), "{text}");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     assert_eq!(p.gate_runs.len(), 1);
     assert!(p.gate_runs[0].passed());
@@ -2313,7 +2324,7 @@ async fn a_branch_that_moves_during_the_tests_is_not_pushed() {
         "the branch moved while the tests ran; call open_pr again"
     );
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
 }
 
 #[tokio::test]
@@ -2345,86 +2356,139 @@ async fn the_tests_run_without_the_personas_git_identity_or_protocol_limit() {
     assert!(got.is_ok(), "{got:?}: {tail}");
 }
 
-#[tokio::test]
-async fn gh_without_a_url_is_a_failure() {
-    let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
-    std::fs::write(gh_dir(&fx).await.join("pr-empty"), "").unwrap();
-    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
-    assert_eq!(
-        fleet_refusal(&err),
-        "push failed: the branch is pushed, but gh pr create printed no URL"
+/// The fake forge holds one PR of `branch` in `state`, number 7; returns its URL.
+fn pr_on_branch(fx: &Fx, branch: &str, state: &str) -> String {
+    let url = format!("{GITHUB_ORIGIN}/pull/7");
+    fx.forge.set_prs(
+        "acme",
+        "core",
+        vec![
+            json!({"html_url": url, "number": 7, "state": state, "merged_at": null,
+            "head": {"ref": branch}}),
+        ],
     );
-    let p = fx.store.task(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.gate_runs[0].pr_url, None);
-    assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
+    url
 }
 
 #[tokio::test]
-async fn an_open_pr_is_updated_instead_of_refused() {
+async fn a_closed_pr_on_the_branch_gets_a_new_one() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
-    std::fs::write(gh_dir(&fx).await.join("pr-exists"), "").unwrap();
+    let (a, _, branch, _) = done_task(&fx, &one_step("true")).await;
+    pr_on_branch(&fx, &branch, "closed");
+    let got = fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    // An opened PR reads as its bare URL, an updated one as `PR updated: <url>`.
+    assert_eq!(got.to_string(), opened_url(1));
+    assert_eq!(calls_to(&fx, "POST", "/pulls").len(), 1);
+    assert!(calls_to(&fx, "PATCH", "/pulls").is_empty());
+}
+
+#[tokio::test]
+async fn an_open_pr_is_updated_not_duplicated() {
+    let fx = fleet_fixture().await;
+    let (a, _, branch, _) = done_task(&fx, &one_step("true")).await;
+    let open = pr_on_branch(&fx, &branch, "open");
     let got = fx
         .svc
         .open_pr(&a.id, "new title", "new body")
         .await
         .unwrap();
-    assert_eq!(got.to_string(), "PR updated: https://example.test/pr/1");
-    assert_eq!(got.url(), "https://example.test/pr/1");
+    assert_eq!(got.to_string(), format!("PR updated: {open}"));
+    assert_eq!(got.url(), open);
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
-    assert_eq!(
-        p.gate_runs[0].pr_url.as_deref(),
-        Some("https://example.test/pr/1")
-    );
+    assert_eq!(p.gate_runs[0].pr_url.as_deref(), Some(open.as_str()));
     assert_eq!(p.prs.len(), 1);
     assert_eq!(agent(&fx, &a.id).await.status, Status::Review);
-    let calls = gh_calls(&fx).await;
-    assert!(calls.contains("pr view"), "{calls}");
-    assert!(
-        calls.contains("pr edit https://example.test/pr/1 --title=new title --body=new body"),
-        "{calls}"
+    assert!(calls_to(&fx, "POST", "/pulls").is_empty());
+    let edits = calls_to(&fx, "PATCH", "/pulls");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].path_and_query, "/repos/acme/core/pulls/7");
+    assert_eq!(
+        edits[0].body,
+        json!({"title": "new title", "body": "new body"})
     );
     assert_eq!(
         log_lines(&fx, &a.id, "PR ").await,
-        ["PR updated: https://example.test/pr/1"]
+        [format!("PR updated: {open}")]
     );
 }
 
 #[tokio::test]
 async fn a_failed_pr_edit_keeps_the_link_but_refuses() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
-    let dir = gh_dir(&fx).await;
-    std::fs::write(dir.join("pr-exists"), "").unwrap();
-    std::fs::write(dir.join("pr-edit-fail"), "").unwrap();
+    let (a, _, branch, _) = done_task(&fx, &one_step("true")).await;
+    let open = pr_on_branch(&fx, &branch, "open");
+    fx.forge
+        .fail_next_on("PATCH", "/pulls/7", 422, "Validation Failed");
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
         fleet_refusal(&err),
-        "push failed: the branch is pushed and https://example.test/pr/1 is open, but its title and body were not updated; gh pr edit said: GraphQL: Could not resolve to a PullRequest"
+        format!(
+            "push failed: the branch is pushed and {open} is open, but its title and body were not updated; \
+             GitHub said: Validation Failed"
+        )
     );
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
-    assert_eq!(
-        p.gate_runs[0].pr_url.as_deref(),
-        Some("https://example.test/pr/1")
-    );
+    assert_eq!(p.gate_runs[0].pr_url.as_deref(), Some(open.as_str()));
     assert_eq!(p.prs.len(), 1);
 }
 
 #[tokio::test]
-async fn a_pr_that_cannot_be_viewed_is_a_failure() {
+async fn a_refused_token_refuses_open_pr() {
     let fx = fleet_fixture().await;
-    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
-    let dir = gh_dir(&fx).await;
-    std::fs::write(dir.join("pr-exists"), "").unwrap();
-    std::fs::write(dir.join("pr-view-empty"), "").unwrap();
+    let (a, _, branch, bare) = done_task(&fx, &one_step("true")).await;
+    // The persona check before the gate asks `/user`; the first PR call is the one refused.
+    fx.forge
+        .fail_next_on("GET", "/pulls", 401, "Bad credentials");
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    let refusal = fleet_refusal(&err);
+    assert!(
+        refusal.starts_with("push failed: the branch is pushed, but GitHub said: "),
+        "{refusal}"
+    );
+    assert!(refusal.contains("the token was refused"), "{refusal}");
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), branch);
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert!(p.prs.is_empty());
+    assert_eq!(p.gate_runs[0].pr_url, None);
+    assert_ne!(agent(&fx, &a.id).await.status, Status::Review);
+}
+
+#[tokio::test]
+async fn an_origin_without_owner_and_repo_refuses_open_pr() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, bare) = done_task(&fx, &one_step("true")).await;
+    git(&fx.repo, &["remote", "set-url", "origin", &file_url(&bare)]);
     let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
     assert_eq!(
         fleet_refusal(&err),
-        "push failed: the branch is pushed, but gh pr view printed no URL"
+        "push failed: the branch is pushed, but its origin names no GitHub owner and repo"
     );
-    let p = fx.store.task(&a.id).await.unwrap().unwrap();
-    assert_eq!(p.gate_runs[0].pr_url, None);
+    assert!(pr_calls(&fx).is_empty());
+}
+
+#[tokio::test]
+async fn open_pr_records_its_forge_calls() {
+    let fx = fleet_fixture().await;
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
+    let rows: Vec<_> = fx
+        .store
+        .forge_calls(50)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.op != "whoami")
+        .collect();
+    let mut ops: Vec<&str> = rows.iter().map(|r| r.op.as_str()).collect();
+    ops.sort();
+    assert_eq!(ops, ["create_pr", "open_pr_of"]);
+    for r in &rows {
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.repo, "github.com/acme/core");
+        assert_eq!(r.persona, PERSONA);
+        assert_eq!(r.task.as_ref(), Some(&a.id));
+        assert_eq!(r.agent.as_ref(), Some(&a.id));
+    }
 }
 
 #[tokio::test]
@@ -2433,7 +2497,7 @@ async fn files_the_tests_leave_do_not_block_the_pr() {
     let (a, wt, branch, bare) = done_task(&fx, &one_step("echo built > build.log")).await;
     let tested = git(&wt, &["rev-parse", "HEAD"]);
     let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap().to_string();
-    assert_eq!(url, "https://example.test/pr/1");
+    assert_eq!(url, opened_url(1));
     assert!(wt.join("build.log").exists());
     assert_eq!(git(&bare, &["rev-parse", &branch]), tested);
 }
@@ -2485,7 +2549,7 @@ async fn gate_stops_at_the_first_failure() {
     assert_eq!(gate_failure(&err).steps.len(), 1);
     assert!(!wt.join("ran-b").exists());
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
 }
 
 #[tokio::test]
@@ -2881,7 +2945,7 @@ async fn a_failed_step_does_not_block_the_pr() {
     git(&wt, &["commit", "-q", "-m", "merged"]);
 
     let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap().to_string();
-    assert_eq!(url, "https://example.test/pr/1");
+    assert_eq!(url, opened_url(1));
     let branch = &a.workspaces[0].branch;
     assert_eq!(git(&bare, &["branch", "--list", branch]), *branch);
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
@@ -3130,7 +3194,7 @@ async fn open_pr_refuses_to_push_for_a_lead_that_stopped() {
     let err = call.await.unwrap().unwrap_err();
     assert!(matches!(err, ServiceError::NotRunning), "{err:?}");
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
 }
 
 /// A service whose breakdown hold runs out quickly, served over HTTP so hooks go through the real route.
@@ -4527,7 +4591,7 @@ async fn open_pr_merges_internal_notes() {
     let p = fx.store.task(&a.id).await.unwrap().unwrap();
     let gate_files = format!("{:?}", p.gate_runs);
     assert!(!gate_files.contains("plan.md"), "{gate_files}");
-    assert!(!gh_calls(&fx).await.contains("plan.md"));
+    assert!(!format!("{:?}", fx.forge.requests()).contains("plan.md"));
 }
 
 /// Connects the fixture's product to an empty bare internal remote under its default persona; returns the bare.
@@ -4698,7 +4762,7 @@ async fn open_pr_without_internal_folder_logs_nothing() {
         ],
     );
     let url = fx.svc.open_pr(&a.id, "t", "b").await.unwrap().to_string();
-    assert_eq!(url, "https://example.test/pr/1");
+    assert_eq!(url, opened_url(1));
     assert!(log_lines(&fx, &a.id, "internal notes").await.is_empty());
 }
 
@@ -5038,7 +5102,8 @@ async fn done_task_with_env(
     fx: &Fx,
     gate_step: impl FnOnce(&Path) -> String,
 ) -> (fleet_api::Agent, PathBuf, PathBuf) {
-    add_origin_with_workflow(fx, &format!("{}{TARGET_ENV}", one_step("true")));
+    let bare = add_origin_with_workflow(fx, &format!("{}{TARGET_ENV}", one_step("true")));
+    on_github(fx, &bare);
     let (a, task, _) = approved_task(fx).await;
     finish_steps(fx, &a).await;
     without_rules(fx, &a).await;
@@ -5255,7 +5320,7 @@ async fn open_pr_refuses_a_commit_that_misses_the_pattern_and_accepts_it_reworde
         assert!(err.to_string().contains(want.as_str()), "{err}");
     }
     assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
-    assert!(!gh_calls(&fx).await.contains("pr "));
+    assert!(pr_calls(&fx).is_empty());
 
     git(
         &wt,
@@ -5273,7 +5338,7 @@ async fn open_pr_refuses_a_commit_that_misses_the_pattern_and_accepts_it_reworde
         .await
         .unwrap()
         .to_string();
-    assert_eq!(url, "https://example.test/pr/1");
+    assert_eq!(url, opened_url(1));
     assert!(!git(&bare, &["branch", "--list", &branch]).is_empty());
 }
 

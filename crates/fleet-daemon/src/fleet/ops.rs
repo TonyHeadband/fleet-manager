@@ -15,13 +15,15 @@ use crate::agents::{
 };
 use crate::archive::remove_whole;
 use crate::config::{GateBuild, LimitValues};
+use crate::forge::log::{recorded, CallCtx};
+use crate::forge::{self, Forge, ForgeError, NewPr, RepoRef};
 use crate::git;
 use crate::hooks_cfg::{write_mcp_config, write_settings, RoleSettings};
 use crate::internal::{Internal, MergeOutcome, MergeReport, PushOutcome};
 use crate::overrides;
 use crate::personas::{gh_agent_dir, PersonaEnv};
 use crate::repos::Resolved;
-use crate::store::StoreError;
+use crate::store::{Store, StoreError};
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
     DecideBreakdown, DefKind, Effort, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
@@ -30,10 +32,8 @@ use fleet_api::{
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
 use tracing::{info, warn};
 
@@ -1681,6 +1681,36 @@ impl Drop for Gating<'_> {
     }
 }
 
+/// What a refusal says of a failed forge call.
+fn said(e: &ForgeError) -> String {
+    match e {
+        ForgeError::TimedOut => "the GitHub call timed out".into(),
+        e => format!("GitHub said: {e}"),
+    }
+}
+
+/// `open_pr`'s calls on one repo, each recorded for the task and its orchestrator.
+struct PrCalls<'a> {
+    store: &'a Store,
+    ctx: CallCtx,
+    forge: Arc<dyn Forge>,
+    repo: RepoRef,
+}
+
+impl PrCalls<'_> {
+    async fn call<T: Send + 'static>(
+        &self,
+        op: &'static str,
+        f: impl FnOnce(&dyn Forge, &RepoRef) -> Result<T, ForgeError> + Send + 'static,
+    ) -> Result<T, ForgeError> {
+        let (forge, repo) = (self.forge.clone(), self.repo.clone());
+        recorded(self.store, &self.ctx, "github", &self.repo, op, move || {
+            f(&*forge, &repo)
+        })
+        .await
+    }
+}
+
 fn last_line(text: &str) -> String {
     text.lines()
         .map(str::trim)
@@ -1720,7 +1750,8 @@ impl AgentService {
     /// The orchestrator's `open_pr`, once no step of the approved plan is pending or running: runs the steps of the
     /// repo's workflow (read from `origin/<base>`) that the change needs, in its worktree, on the task branch, with
     /// the persona's env, and records the run. Only if every step passes is the task branch pushed and the PR
-    /// opened with the persona's `gh`, or, when the branch already has one, updated with the new title and body.
+    /// opened with the persona's token, or, when the branch already has an open one, updated with the new title and
+    /// body.
     #[tracing::instrument(skip_all, fields(agent_id = %orchestrator.0))]
     pub async fn open_pr(
         &self,
@@ -1728,7 +1759,7 @@ impl AgentService {
         title: &str,
         body: &str,
     ) -> Result<PrOutcome, ServiceError> {
-        // Trimmed once, so the rules check and `gh pr create` see the same text.
+        // Trimmed once, so the rules check and the PR see the same text.
         let (title, body) = (title.trim(), body.trim());
         let a = self.find(orchestrator).await?;
         if a.kind != AgentKind::Orchestrator {
@@ -1960,47 +1991,72 @@ impl AgentService {
             }
             Err(_) => return Err(refuse("push failed: timed out")),
         }
-        let mut gh = Command::new(&self.cfg.gh_command);
-        git::harden(gh.as_std_mut(), &persona.vars);
-        gh.args(["pr", "create", "--head", &w.branch, "--base", &base]);
-        if p.pr_rules.as_ref().is_some_and(|r| r.draft) {
-            gh.arg("--draft");
-        }
-        // One argv element each, so a title or body starting with `-` is never read as an option.
-        gh.args([format!("--title={title}"), format!("--body={body}")])
-            .current_dir(wt)
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        // The branch is up by now; the text says so, as the orchestrator may otherwise push again.
-        let (url, updated) = match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
-            Ok(Ok(o))
-                if o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty() =>
-            {
-                (last_line(&String::from_utf8_lossy(&o.stdout)), false)
-            }
-            Ok(Ok(o)) if o.status.success() => {
-                return Err(refuse(
-                    "push failed: the branch is pushed, but gh pr create printed no URL",
-                ))
-            }
-            Ok(Ok(o)) if String::from_utf8_lossy(&o.stderr).contains("already exists") => {
-                (self.existing_pr(wt, &persona, &w.branch).await?, true)
-            }
-            Ok(Ok(o)) => {
-                return Err(refuse(format!(
-                    "push failed: the branch is pushed, but gh pr create said: {}",
-                    last_line(&String::from_utf8_lossy(&o.stderr))
-                )))
-            }
-            Ok(Err(e)) => {
-                return Err(refuse(format!(
-                    "push failed: the branch is pushed, but gh cannot run: {e}"
-                )))
-            }
-            Err(_) => {
-                return Err(refuse(
-                    "push failed: the branch is pushed, but gh pr create timed out",
-                ))
+        // As configured: an `insteadOf` rewrite can turn it into a file:// or scp-style URL.
+        let repo = git::configured_remote_url(wt, "origin")
+            .await?
+            .as_deref()
+            .and_then(RepoRef::from_url)
+            .ok_or_else(|| {
+                refuse("push failed: the branch is pushed, but its origin names no GitHub owner and repo")
+            })?;
+        // The branch is up by now; every refusal says so, as the orchestrator may otherwise push again.
+        let token = self
+            .personas()
+            .token(&persona.id)
+            .await
+            .map_err(|e| refuse(format!("push failed: the branch is pushed, but {e}")))?;
+        let gh = PrCalls {
+            store: &self.store,
+            ctx: CallCtx {
+                persona: persona.id.clone(),
+                task: Some(p.id.clone()),
+                agent: Some(lead.id.clone()),
+            },
+            forge: Arc::from(forge::github(
+                &persona.host,
+                token,
+                &self.opts.forge,
+                git::REMOTE_TIMEOUT,
+            )),
+            repo,
+        };
+        let pushed_but = |e: ForgeError| {
+            refuse(format!(
+                "push failed: the branch is pushed, but {}",
+                said(&e)
+            ))
+        };
+        let branch = w.branch.clone();
+        let open = gh
+            .call("open_pr_of", move |f, r| f.open_pr_of(r, &branch))
+            .await
+            .map_err(pushed_but)?;
+        let (url, number, updated) = match open {
+            Some(pr) => (pr.url, pr.number, true),
+            None => {
+                let draft = p.pr_rules.as_ref().is_some_and(|r| r.draft);
+                let (head, base, title, body) = (
+                    w.branch.clone(),
+                    base.clone(),
+                    title.to_string(),
+                    body.to_string(),
+                );
+                let pr = gh
+                    .call("create_pr", move |f, r| {
+                        f.create_pr(
+                            r,
+                            &NewPr {
+                                head: &head,
+                                base: &base,
+                                title: &title,
+                                body: &body,
+                                draft,
+                            },
+                        )
+                    })
+                    .await
+                    .map_err(pushed_but)?;
+                (pr.url, pr.number, false)
             }
         };
 
@@ -2023,16 +2079,36 @@ impl AgentService {
             .await?;
         if updated {
             // The PR exists either way; a failed edit is refused only after the link is recorded.
-            self.update_pr_text(wt, &persona, &url, title, body).await?;
+            let (title, body) = (title.to_string(), body.to_string());
+            if let Err(e) = gh
+                .call("update_pr_text", move |f, r| {
+                    f.update_pr_text(r, number, &title, &body)
+                })
+                .await
+            {
+                return Err(refuse(format!(
+                    "push failed: the branch is pushed and {url} is open, but its title and body were not \
+                     updated; {}",
+                    said(&e)
+                )));
+            }
         }
         let verb = if updated { "updated" } else { "opened" };
         info!(url = %url, "PR {verb}");
         self.log_task(&p.id, format!("PR {verb}: {url}")).await;
-        for label in p.pr_rules.iter().flat_map(|r| &r.labels) {
-            if let Err(why) = self.add_label(wt, &persona, &url, label).await {
-                warn!(label = %label, why = %why, "label not added");
-                self.log_task(&p.id, format!("label {label} not added: {why}"))
-                    .await;
+        let labels: Vec<String> = p.pr_rules.iter().flat_map(|r| r.labels.clone()).collect();
+        if !labels.is_empty() {
+            // A label the remote lacks is no reason to lose the PR, so a failure is only logged.
+            let sent = labels.clone();
+            if let Err(why) = gh
+                .call("add_labels", move |f, r| f.add_labels(r, number, &sent))
+                .await
+            {
+                for label in &labels {
+                    warn!(label = %label, why = %why, "label not added");
+                    self.log_task(&p.id, format!("label {label} not added: {why}"))
+                        .await;
+                }
             }
         }
         self.merge_internal_notes(&p).await;
@@ -2055,70 +2131,6 @@ impl AgentService {
         } else {
             PrOutcome::Opened(url)
         })
-    }
-
-    /// The URL of the open PR of `branch`, for an `open_pr` that `gh pr create` refused because it exists.
-    async fn existing_pr(
-        &self,
-        wt: &Path,
-        persona: &PersonaEnv,
-        branch: &str,
-    ) -> Result<String, ServiceError> {
-        let mut gh = Command::new(&self.cfg.gh_command);
-        git::harden(gh.as_std_mut(), &persona.vars);
-        gh.args(["pr", "view", branch, "--json", "url", "-q", ".url"])
-            .current_dir(wt)
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
-            Ok(Ok(o)) if o.status.success() => {
-                let out = String::from_utf8_lossy(&o.stdout);
-                if out.trim().is_empty() {
-                    Err(refuse(
-                        "push failed: the branch is pushed, but gh pr view printed no URL",
-                    ))
-                } else {
-                    Ok(last_line(&out))
-                }
-            }
-            Ok(Ok(o)) => Err(refuse(format!(
-                "push failed: the branch is pushed, but gh pr view said: {}",
-                last_line(&String::from_utf8_lossy(&o.stderr))
-            ))),
-            Ok(Err(e)) => Err(refuse(format!(
-                "push failed: the branch is pushed, but gh cannot run: {e}"
-            ))),
-            Err(_) => Err(refuse(
-                "push failed: the branch is pushed, but gh pr view timed out",
-            )),
-        }
-    }
-
-    /// Sends the new title and body to the PR that `gh pr create` found already open.
-    async fn update_pr_text(
-        &self,
-        wt: &Path,
-        persona: &PersonaEnv,
-        url: &str,
-        title: &str,
-        body: &str,
-    ) -> Result<(), ServiceError> {
-        let mut gh = Command::new(&self.cfg.gh_command);
-        git::harden(gh.as_std_mut(), &persona.vars);
-        gh.args(["pr", "edit", url])
-            .args([format!("--title={title}"), format!("--body={body}")])
-            .current_dir(wt)
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        let said = match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
-            Ok(Ok(o)) if o.status.success() => return Ok(()),
-            Ok(Ok(o)) => last_line(&String::from_utf8_lossy(&o.stderr)),
-            Ok(Err(e)) => format!("gh cannot run: {e}"),
-            Err(_) => "gh pr edit timed out".to_string(),
-        };
-        Err(refuse(format!(
-            "push failed: the branch is pushed and {url} is open, but its title and body were not updated; gh pr edit said: {said}"
-        )))
     }
 }
 
@@ -2243,36 +2255,6 @@ impl AgentService {
             run,
             release_note_missing,
         })
-    }
-
-    /// `gh pr edit --add-label` for one label; the error is gh's last line. A label the remote lacks is no reason to
-    /// lose the PR, so the caller only logs it.
-    async fn add_label(
-        &self,
-        wt: &Path,
-        persona: &PersonaEnv,
-        url: &str,
-        label: &str,
-    ) -> Result<(), String> {
-        let mut gh = Command::new(&self.cfg.gh_command);
-        git::harden(gh.as_std_mut(), &persona.vars);
-        gh.args(["pr", "edit", url, "--add-label", label])
-            .current_dir(wt)
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-        match tokio::time::timeout(git::REMOTE_TIMEOUT, gh.output()).await {
-            Ok(Ok(o)) if o.status.success() => Ok(()),
-            Ok(Ok(o)) => {
-                let line = last_line(&String::from_utf8_lossy(&o.stderr));
-                Err(if line.is_empty() {
-                    format!("gh {}", o.status)
-                } else {
-                    line
-                })
-            }
-            Ok(Err(e)) => Err(format!("gh cannot run: {e}")),
-            Err(_) => Err("timed out".into()),
-        }
     }
 
     /// Merges the task's internal notes into the product's, once its PR exists. The PR is already open, so a

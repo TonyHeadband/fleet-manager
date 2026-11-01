@@ -26,6 +26,7 @@ struct State_ {
     requests: Vec<Recorded>,
     prs: HashMap<(String, String), Vec<Value>>,
     fail: Option<(u16, String)>,
+    fail_on: Option<(String, String, u16, String)>,
     delay: Option<Duration>,
     next_number: u64,
 }
@@ -83,6 +84,12 @@ impl FakeForge {
         self.state.lock().unwrap().fail = Some((status, message.into()));
     }
 
+    /// The next `method` request whose path contains `path_part` answers `{ "message": message }` with this status.
+    pub fn fail_next_on(&self, method: &str, path_part: &str, status: u16, message: &str) {
+        self.state.lock().unwrap().fail_on =
+            Some((method.into(), path_part.into(), status, message.into()));
+    }
+
     /// The next request waits this long before answering.
     pub fn delay_next(&self, d: Duration) {
         self.state.lock().unwrap().delay = Some(d);
@@ -119,7 +126,18 @@ async fn handle(
             user_agent: header(&headers, "user-agent"),
             body: body.clone(),
         });
-        (s.fail.take(), s.delay.take())
+        let matched = s
+            .fail_on
+            .as_ref()
+            .is_some_and(|(m, part, ..)| m == method.as_str() && path.contains(part.as_str()));
+        let fail = if matched {
+            s.fail_on
+                .take()
+                .map(|(_, _, status, message)| (status, message))
+        } else {
+            s.fail.take()
+        };
+        (fail, s.delay.take())
     };
     if let Some(d) = delay {
         tokio::time::sleep(d).await;
