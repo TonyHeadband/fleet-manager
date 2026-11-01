@@ -138,6 +138,14 @@ describe("StatusTimeline", () => {
     expect(screen.getAllByRole("rowheader")).toHaveLength(3);
   });
 
+  it("states_sharing_a_tone_each_get_a_legend_entry", () => {
+    motionOff();
+    const l = [{ label: "x", bands: [{ from: 0, to: 40, tone: "muted" as const, label: "idle" }, { from: 40, to: 80, tone: "muted" as const, label: "offline" }] }];
+    const { container } = render(<StatusTimeline label="A" from={0} to={100} lanes={l} />);
+    size(W);
+    expect(Array.from(container.querySelectorAll(".chart-legend li")).map((i) => i.textContent)).toEqual(["idle", "offline"]);
+  });
+
   it("tick_labels_go_when_tiny", () => {
     motionOff();
     const { container } = render(<StatusTimeline label="A" from={0} to={100} lanes={lanes} />);

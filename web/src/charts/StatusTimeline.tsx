@@ -49,7 +49,7 @@ export function StatusTimeline({ label, from, to, lanes, formatX = clockFormat }
   const showLabels = whole >= layout.chartTiny;
 
   const states: { label: string; tone: Tone }[] = [];
-  for (const b of shown.flat()) if (!states.some((s) => s.tone === b.tone)) states.push({ label: b.label, tone: b.tone });
+  for (const b of shown.flat()) if (!states.some((s) => s.tone === b.tone && s.label === b.label)) states.push({ label: b.label, tone: b.tone });
   const showLegend = states.length >= 2 && whole >= layout.chartCompact;
 
   const range = (b: Shown) => `${formatX(b.start)} – ${b.open ? "now" : formatX(b.end)}`;
