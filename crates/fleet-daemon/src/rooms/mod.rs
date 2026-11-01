@@ -155,13 +155,15 @@ pub async fn sync(store: &Store, at: i64) -> Result<(), StoreError> {
         live.insert(t.id.clone());
         apply(store, at, t).await?;
     }
-    // A task whose record is gone (a start that was undone) must not hold a room open.
-    let conversations: HashSet<_> = store
+    // A task whose record is gone (a start that was undone) must not hold a room open. Supervisor conversations
+    // stay: a supervisor joins the rooms of its persona it looks in.
+    let mut conversations: HashSet<_> = store
         .rooms()
         .await?
         .into_iter()
         .filter_map(|r| r.conversation)
         .collect();
+    conversations.extend(supervisors(store).await?);
     for r in store.rooms().await? {
         for m in store.room_members(&r.id).await? {
             if m.left_at.is_none() {
@@ -199,9 +201,22 @@ async fn retire(store: &Store, at: i64, id: &AgentId) -> Result<(), StoreError> 
     Ok(())
 }
 
-/// Archives each open operation room that had tasks and has none left; its conversation, the owner and the
-/// daemon do not hold it open.
+/// Every supervisor conversation: members that are not tasks.
+async fn supervisors(store: &Store) -> Result<HashSet<AgentId>, StoreError> {
+    Ok(store
+        .snapshot()
+        .await?
+        .agents
+        .into_iter()
+        .filter(|a| a.kind == AgentKind::Supervisor)
+        .map(|a| a.id)
+        .collect())
+}
+
+/// Archives each open operation room that had tasks and has none left; supervisor conversations, the owner and
+/// the daemon do not hold it open.
 async fn archive_emptied(store: &Store, at: i64) -> Result<(), StoreError> {
+    let conversations = supervisors(store).await?;
     for r in store.rooms().await? {
         if r.kind != RoomKind::Operation || r.archived_at.is_some() {
             continue;
@@ -209,7 +224,8 @@ async fn archive_emptied(store: &Store, at: i64) -> Result<(), StoreError> {
         let members = store.room_members(&r.id).await?;
         let tasks = || {
             members.iter().filter(|m| {
-                matches!(MemberRef::from_key(&m.member), MemberRef::Agent(a) if Some(&a) != r.conversation.as_ref())
+                matches!(MemberRef::from_key(&m.member), MemberRef::Agent(a)
+                    if Some(&a) != r.conversation.as_ref() && !conversations.contains(&a))
             })
         };
         if tasks().next().is_some() && tasks().all(|m| m.left_at.is_some()) {

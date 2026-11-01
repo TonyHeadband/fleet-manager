@@ -6,6 +6,7 @@ use fleet_api::{
     TaskPr, TaskState,
 };
 use fleet_daemon::agents::AgentService;
+use fleet_daemon::rooms::posts::NO_ANSWER_YET;
 use fleet_daemon::session::SessionHost;
 use fleet_daemon::supervisor::Supervisor;
 use fleet_daemon::{mcp, rooms};
@@ -635,6 +636,8 @@ async fn an_ask_survives_a_daemon_restart_and_its_answer_arrives_as_a_notice() {
         "still open"
     );
 
+    // At its input box, not mid-turn: only then is a notice typed.
+    set_status(&fx, &a, Status::Review).await;
     let answered = tool(
         &svc,
         &sup,
@@ -672,6 +675,7 @@ async fn a_held_ask_times_out_to_no_answer_yet_and_stays_open() {
     assert_eq!(fx.store.post(ask).await.unwrap().unwrap().answered_at, None);
 
     // With the call gone, the answer is typed as a notice instead.
+    set_status(&fx, &a, Status::Review).await;
     assert!(svc
         .room_answer(&MemberRef::Owner, ask, "port 7070")
         .await
@@ -702,4 +706,130 @@ fn the_room_tools_go_to_orchestrators_and_supervisors() {
     );
     assert!(names(AgentKind::Solo).is_empty());
     assert!(names(AgentKind::Specialist).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_while_the_asker_is_working_types_nothing() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let svc = with_hold(&fx, Duration::from_millis(300));
+    let reply = tool(
+        &svc,
+        &a,
+        "room_ask",
+        json!({ "to": "owner", "text": "which port?" }),
+    )
+    .await;
+    assert_eq!(reply.0, NO_ANSWER_YET);
+    let ask = wait_ask(&fx, &op_room(&sup)).await;
+    assert_eq!(agent(&fx, &a).await.status, Status::Working);
+
+    assert!(svc
+        .room_answer(&MemberRef::Owner, ask, "port 7070")
+        .await
+        .unwrap());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(NOTICE),
+        "typed into a running turn"
+    );
+    // It is not lost: the answer waits in the room.
+    let read = tool(&svc, &a, "room_read", json!({})).await.0;
+    assert!(read.contains("[answer] port 7070"), "{read}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_supervisor_reaches_every_room_of_its_persona() {
+    let fx = fixture().await;
+    let me = conversation(&fx).await;
+    let other = conversation(&fx).await;
+    let a = direct(&fx, &other).await;
+    let theirs = op_room(&other);
+    let product = format!("product:{PRODUCT}");
+
+    let said = posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "announcement", "text": "migration 017 is mine" }),
+        )
+        .await,
+    );
+    let read = tool(&fx.svc, &me, "room_read", json!({ "room": theirs })).await;
+    assert_eq!(
+        read,
+        (
+            format!("{said} {} → all: [announcement] migration 017 is mine", a.0),
+            false
+        )
+    );
+    assert_eq!(
+        tool(&fx.svc, &me, "room_read", json!({ "room": theirs }))
+            .await
+            .0,
+        "nothing new",
+        "its reads are tracked once it is a member"
+    );
+
+    let hello = posted_id(
+        &tool(
+            &fx.svc,
+            &me,
+            "room_post",
+            json!({ "kind": "announcement", "text": "hello product", "room": product }),
+        )
+        .await,
+    );
+    let read = tool(&fx.svc, &a, "room_read", json!({ "room": product }))
+        .await
+        .0;
+    assert_eq!(
+        read,
+        format!("{hello} {} → all: [announcement] hello product", me.0)
+    );
+    assert_eq!(
+        tool(&fx.svc, &me, "room_read", json!({ "room": product }))
+            .await
+            .0,
+        "nothing new"
+    );
+
+    // Looking in neither keeps it a member past a sync nor holds the operation room open.
+    rooms::sync(&fx.store, 20).await.unwrap();
+    assert!(members(&fx, &product)
+        .await
+        .contains(&MemberRef::Agent(me.clone())));
+    assert!(members(&fx, &theirs)
+        .await
+        .contains(&MemberRef::Agent(me.clone())));
+    set_prs(&fx, &a, PrState::Merged).await;
+    rooms::sync(&fx.store, 30).await.unwrap();
+    assert_eq!(
+        fx.store.room(&theirs).await.unwrap().unwrap().archived_at,
+        Some(30)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rooms_of_another_persona_or_task_are_refused() {
+    let fx = fixture().await;
+    let me = conversation(&fx).await;
+    let a = direct(&fx, &me).await;
+    let foreign = rooms::operation_room(&fx.store, &AgentId("elsewhere".into()), "someone-else")
+        .await
+        .unwrap();
+    let (text, failed) = tool(&fx.svc, &me, "room_read", json!({ "room": foreign })).await;
+    assert!(
+        failed && text.contains("not one of your persona's"),
+        "{text}"
+    );
+    assert!(!members(&fx, &foreign)
+        .await
+        .contains(&MemberRef::Agent(me.clone())));
+
+    // An orchestrator stays in its own rooms.
+    let (text, failed) = tool(&fx.svc, &a, "room_read", json!({ "room": foreign })).await;
+    assert!(failed && text.contains("not in room"), "{text}");
 }

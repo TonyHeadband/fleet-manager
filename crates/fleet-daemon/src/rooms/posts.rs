@@ -7,7 +7,7 @@
 use crate::agents::{one_line, AgentService, ServiceError};
 use crate::fleet::ops::detached;
 use crate::store::RoomRow;
-use fleet_api::{task_id, AgentId, AgentKind, MemberRef, Post, PostKind};
+use fleet_api::{task_id, Agent, AgentId, AgentKind, MemberRef, Post, PostKind, RoomKind, Status};
 use std::sync::Arc;
 
 /// What a held `room_ask` came back with.
@@ -55,22 +55,52 @@ fn refuse(text: impl Into<String>) -> ServiceError {
 }
 
 impl AgentService {
-    /// The member the agent is in rooms as.
-    async fn member_of(&self, caller: &AgentId) -> Result<(AgentKind, MemberRef), ServiceError> {
+    /// The agent, and the member it is in rooms as.
+    async fn member_of(&self, caller: &AgentId) -> Result<(Agent, MemberRef), ServiceError> {
         let a = self.find(caller).await?;
         let id = match a.kind {
             AgentKind::Supervisor => a.id.clone(),
             _ => task_id(&a).clone(),
         };
-        Ok((a.kind, MemberRef::Agent(id)))
+        Ok((a, MemberRef::Agent(id)))
     }
 
-    /// `room` if the member is in it, else the member's operation room, else its product room.
-    async fn room_of(&self, me: &MemberRef, room: Option<&str>) -> Result<RoomRow, ServiceError> {
+    /// The room `who` (as `me`) means: `room` if it may use it, else its own operation room, else (an orchestrator)
+    /// its product room. An orchestrator may use only the rooms it is in. A supervisor may use every room of its
+    /// persona, each product room and its conversations' operation rooms, and joins one the first time it does, so
+    /// its reads are tracked there too.
+    async fn room_of(
+        &self,
+        who: &Agent,
+        me: &MemberRef,
+        room: Option<&str>,
+    ) -> Result<RoomRow, ServiceError> {
         let mine = self.store.rooms_of(me.key()).await?;
+        let supervisor = who.kind == AgentKind::Supervisor;
         let id = match room {
             Some(r) if mine.iter().any(|m| m == r) => r.to_string(),
+            Some(r) if supervisor => {
+                let found = self.store.room(r).await?;
+                let theirs = found.as_ref().is_some_and(|f| match f.kind {
+                    RoomKind::Product => true,
+                    RoomKind::Operation => f.persona.as_deref() == Some(who.persona.as_str()),
+                });
+                if !theirs {
+                    return Err(refuse(format!("room {r} is not one of your persona's")));
+                }
+                // Not `rooms::join`: a supervisor looking in must not reopen an archived room.
+                self.store
+                    .add_member(r, me.key(), self.opts.clock.now())
+                    .await?;
+                r.to_string()
+            }
             Some(r) => return Err(refuse(format!("you are not in room {r}"))),
+            None if supervisor => {
+                let own = format!("operation:{}", who.id.0);
+                mine.contains(&own)
+                    .then_some(own)
+                    .ok_or_else(|| refuse("you have no operation room yet; name a room"))?
+            }
             None => mine
                 .iter()
                 .find(|r| r.starts_with("operation:"))
@@ -176,8 +206,8 @@ impl AgentService {
         if !matches!(kind, PostKind::Announcement | PostKind::Message) {
             return Err(refuse("room_post sends an announcement or a message"));
         }
-        let (_, me) = self.member_of(caller).await?;
-        let room = self.room_of(&me, room).await?;
+        let (who, me) = self.member_of(caller).await?;
+        let room = self.room_of(&who, &me, room).await?;
         let mut p = self.new_post(&room, me, kind, text)?;
         p.to = self.recipient(&room, to.unwrap_or("all")).await?;
         Ok(self.publish(&room, p).await?.id)
@@ -189,8 +219,8 @@ impl AgentService {
         caller: &AgentId,
         room: Option<&str>,
     ) -> Result<(RoomRow, Vec<Post>), ServiceError> {
-        let (_, me) = self.member_of(caller).await?;
-        let room = self.room_of(&me, room).await?;
+        let (who, me) = self.member_of(caller).await?;
+        let room = self.room_of(&who, &me, room).await?;
         let upto = self
             .store
             .room_members(&room.id)
@@ -219,14 +249,14 @@ impl AgentService {
         text: &str,
         room: Option<&str>,
     ) -> Result<(i64, AskOutcome), ServiceError> {
-        let (kind, me) = self.member_of(caller).await?;
-        if kind == AgentKind::Supervisor {
+        let (who, me) = self.member_of(caller).await?;
+        if who.kind == AgentKind::Supervisor {
             return Err(refuse(SUPERVISOR_ASKS));
         }
         if !matches!(to, "supervisor" | "owner") {
             return Err(refuse("an ask goes to the supervisor or the owner"));
         }
-        let room = self.room_of(&me, room).await?;
+        let room = self.room_of(&who, &me, room).await?;
         let mut p = self.new_post(&room, me, PostKind::Ask, text)?;
         p.to = self.recipient(&room, to).await?;
         // Detached, so a client that hangs up cannot stop it between storing the ask and registering its call.
@@ -327,13 +357,21 @@ impl AgentService {
             q.id,
             one_line(&answer.text)
         );
+        // Never into a running turn: a Working agent gets it from Task 4's queue instead.
         let typed = match self.find(&live).await {
-            Ok(a) => self.type_line(&a, &line).await,
-            Err(_) => false,
+            Ok(a) if a.status != Status::Working => self.type_line(&a, &line).await,
+            _ => false,
         };
         if !typed {
-            tracing::info!(agent_id = %live.0, ask = q.id, "answer not typed; it waits in the room");
+            self.undelivered_notice(&live, q.id, &line);
         }
+    }
+
+    /// A notice the asker could not take now. It is not lost: the answer is in the room for its `room_read`.
+    // Task 4 queues this: route it into the agent's pending queue (typed when it next reaches Review) and the
+    // task's `inbox` for `wait_for_fleet`.
+    fn undelivered_notice(&self, agent: &AgentId, ask: i64, line: &str) {
+        tracing::info!(agent_id = %agent.0, ask, %line, "answer not typed; it waits in the room");
     }
 }
 
