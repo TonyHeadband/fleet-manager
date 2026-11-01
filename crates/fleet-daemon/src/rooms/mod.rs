@@ -16,8 +16,7 @@ mod watch;
 
 use crate::store::{RoomRow, Store, StoreError};
 use fleet_api::{
-    task_outcome, Agent, AgentId, AgentKind, MemberRef, Room, RoomKind, RoomMember, Task,
-    TaskOutcome,
+    Agent, AgentId, AgentKind, MemberRef, PrState, Room, RoomKind, RoomMember, Task, TaskState,
 };
 use std::collections::HashSet;
 
@@ -260,10 +259,20 @@ async fn title_with(store: &Store, r: &RoomRow, agents: &[Agent]) -> Result<Stri
     })
 }
 
-/// Whether the task is over, as its release counts it: merged, dropped or done by hand. A task at Review with an
-/// open PR, with none yet, with a PR closed unmerged, or with a changed repo still unmerged is not.
+/// Whether the task is over: archived, done, or its PRs merged or closed. A PR still open keeps it; so does a changed
+/// repo with no PR. A task whose branch changed nothing is over once its one repo has a PR and none is open.
 pub(crate) fn ended(t: &Task) -> bool {
-    task_outcome(t) != TaskOutcome::Open
+    if t.state == TaskState::Archived || t.done_by_hand || t.done_at.is_some() {
+        return true;
+    }
+    if t.prs.iter().any(|p| p.state == PrState::Open) {
+        return false;
+    }
+    let mut changed = t.repos.iter().filter(|w| w.changed).peekable();
+    if changed.peek().is_none() {
+        return t.repos.len() == 1 && !t.prs.is_empty();
+    }
+    changed.all(|w| t.prs.iter().any(|p| p.repo == w.repo))
 }
 
 /// Brings the one task's rooms in line with the record: joined while it runs, left once it has ended.

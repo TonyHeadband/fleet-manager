@@ -839,6 +839,16 @@ async fn propose_breakdown_schema_offers_mode_and_effort() {
         .as_str()
         .unwrap()
         .contains("stricter"));
+    let answer = v["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "room_answer")
+        .unwrap();
+    assert!(answer["description"]
+        .as_str()
+        .unwrap()
+        .contains("breakdown's ask (`breakdown vN: …`) is the person's decision"));
 }
 
 async fn call_as(srv: &Server, id: &AgentId, name: &str, args: Value) -> (String, bool) {

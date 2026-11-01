@@ -202,15 +202,32 @@ async fn the_operation_room_archives_when_every_task_has_ended() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_pr_closed_unmerged_does_not_end_the_task() {
+async fn a_closed_pr_ends_the_task_too() {
     let fx = fixture().await;
     let sup = conversation(&fx).await;
     let task = orchestrator(&fx, Some(&sup)).await;
     set_prs(&fx, &task, PrState::Closed).await;
     rooms::sync(&fx.store, 20).await.unwrap();
-    let op = &room_of(&fx, RoomKind::Operation).await[0];
-    assert_eq!(op.archived_at, None);
-    assert!(members(&fx, &op.id).await.contains(&MemberRef::Agent(task)));
+    assert_eq!(
+        room_of(&fx, RoomKind::Operation).await[0].archived_at,
+        Some(20)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_done_task_leaves_its_rooms() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let task = orchestrator(&fx, Some(&sup)).await;
+    fx.store
+        .update_task(&task, |t| t.done_at = Some(15))
+        .await
+        .unwrap();
+    rooms::sync(&fx.store, 20).await.unwrap();
+    assert_eq!(
+        room_of(&fx, RoomKind::Operation).await[0].archived_at,
+        Some(20)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1175,6 +1192,39 @@ async fn a_message_to_an_exited_supervisor_resumes_it() {
     );
 }
 
+/// R9: a product room nudges a supervisor conversation only while it is live. An exited one is not resumed; the
+/// post is a chat row in it instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_product_room_post_does_not_resume_an_exited_supervisor() {
+    let fx = fixture().await;
+    rooms::product_room(&fx.store, PRODUCT).await.unwrap();
+    let sup = conversation(&fx).await;
+    let session = ready_conversation(&fx, &sup).await;
+    look_in(&fx, &sup, &product_room()).await;
+    fx.svc.stop(&sup).await.unwrap();
+    assert!(wait_until(|| async { !fx.sessions.alive(&session) }).await);
+    let a = direct_from(&fx, None).await;
+
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase on main" }),
+        )
+        .await,
+    );
+    let rows = events_of(&fx, &sup, TaskEventKind::RoomMessage).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].text.contains("rebase on main"), "{rows:?}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !fx.sessions.alive(&session),
+        "resumed by a product-room post"
+    );
+    assert_eq!(agent(&fx, &sup).await.status, Status::Stopped);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_to_a_working_supervisor_waits_for_review() {
     let fx = fixture().await;
@@ -1838,6 +1888,8 @@ async fn a_message_to_an_orchestrator_held_in_propose_breakdown_waits_for_review
         (card.status, card.blocked_reason),
         (Status::NeedsYou, Some(fleet_api::BlockedReason::Breakdown))
     );
+    // The hold counts, not the status: a flip to Review (a late hook) does not let the line through.
+    set_status(&fx, &a, Status::Review).await;
 
     let line = message_to(&fx, &sup, &a).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1854,6 +1906,52 @@ async fn a_message_to_an_orchestrator_held_in_propose_breakdown_waits_for_review
     set_status(&fx, &a, Status::Working).await;
     set_status(&fx, &a, Status::Review).await;
     assert!(pane_contains(&fx, &a, &line).await);
+}
+
+/// The nudge a decision types for a lead whose `propose_breakdown` hold ran out is queued, like a room notice, while
+/// the lead waits in a `room_ask`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_decision_nudge_waits_out_a_held_room_ask() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let short = with_hold(&fx, Duration::from_millis(200));
+    let gave_up = short.propose_breakdown(&a, two_drafts()).await;
+    assert!(
+        matches!(gave_up, Err(ServiceError::BreakdownNoAnswerYet)),
+        "{gave_up:?}"
+    );
+    set_status(&fx, &a, Status::Review).await;
+    let held = ask_in_background(&fx.svc, &a, "owner", "which port?");
+    assert!(wait_until(|| async { asks(&fx, &room).await.len() == 2 }).await);
+    let ask = asks(&fx, &room).await.pop().unwrap();
+    assert_eq!(ask.breakdown_version, None);
+
+    fx.svc
+        .decide_breakdown(&a, decision(true, None))
+        .await
+        .unwrap();
+    let line = "Fleet Manager: breakdown v1 decided; call wait_for_fleet";
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(line),
+        "typed into the held turn"
+    );
+
+    assert!(fx
+        .svc
+        .room_answer(&MemberRef::Owner, ask.id, "port 7070")
+        .await
+        .unwrap());
+    tokio::time::timeout(Duration::from_secs(10), held)
+        .await
+        .unwrap()
+        .unwrap();
+    set_status(&fx, &a, Status::Working).await;
+    set_status(&fx, &a, Status::Review).await;
+    assert!(pane_contains(&fx, &a, line).await);
 }
 
 #[tokio::test(flavor = "multi_thread")]

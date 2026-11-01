@@ -1122,7 +1122,7 @@ impl AgentService {
         // A lead whose turn ended makes no further call, so it would never read the inbox: one line tells it to.
         // Only from Review: Working reaches `wait_for_fleet` on its own, and Needs you may have a prompt up.
         if let Some(a) = stored.filter(|x| x.status == Status::Review) {
-            self.type_line(
+            self.type_or_queue(
                 &a,
                 &format!("Fleet Manager: breakdown v{n} decided; call wait_for_fleet"),
             )
@@ -1139,6 +1139,15 @@ impl AgentService {
             breakdowns: p.breakdowns,
             gate_runs: p.gate_runs,
         })
+    }
+
+    /// Whether the orchestrator is waiting in `propose_breakdown`: an entry whose call hung up does not count.
+    pub(crate) fn holds_breakdown(&self, id: &AgentId) -> bool {
+        self.breakdown_waiters
+            .lock()
+            .expect("waiters poisoned")
+            .get(&id.0)
+            .is_some_and(|tx| !tx.is_closed())
     }
 
     /// Hands the decision to the held call; false when there is none any more (gone, timed out, stopped).

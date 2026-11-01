@@ -268,7 +268,8 @@ fn room_tools(ask: bool) -> Vec<Value> {
     }
     list.push(tool(
         "room_answer",
-        "Answer an ask by its id. The first answer wins: returns `answered`, or `already answered`.",
+        "Answer an ask by its id. The first answer wins: returns `answered`, or `already answered`. A breakdown's ask \
+            (`breakdown vN: …`) is the person's decision: relay it to them, never answer it.",
         json!({
             "ask": { "type": "integer" },
             "text": { "type": "string" },

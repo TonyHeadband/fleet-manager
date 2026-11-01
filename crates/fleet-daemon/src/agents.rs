@@ -2171,6 +2171,10 @@ impl AgentService {
             debug!(agent_id = %a.id.0, status = ?a.status, blocked_reason = ?a.blocked_reason, %line, "not typing into agent, a dialog may be up");
             return false;
         }
+        if self.in_held_call(&a.id) {
+            debug!(agent_id = %a.id.0, %line, "not typing into agent, a held call is its running turn");
+            return false;
+        }
         if !self.sessions.alive(&a.session) {
             return false;
         }
@@ -2183,6 +2187,19 @@ impl AgentService {
             return false;
         }
         true
+    }
+
+    /// `type_line`, or, while a held call is the agent's running turn, the line queued with its room notices: the
+    /// delivery watcher types it at its next Review.
+    pub(crate) async fn type_or_queue(&self, a: &Agent, line: &str) {
+        if !self.type_line(a, line).await && self.in_held_call(&a.id) {
+            self.notices.push(&a.id, line.to_string());
+        }
+    }
+
+    /// Whether the agent waits in a `room_ask` or `propose_breakdown`: its turn runs, whatever its status says.
+    pub(crate) fn in_held_call(&self, id: &AgentId) -> bool {
+        self.asks.holding(id) || self.holds_breakdown(id)
     }
 
     /// The attach behind `attach_repo` and `grant_repo`, which tell the agent in different ways.
@@ -2439,7 +2456,7 @@ impl AgentService {
             if let Some(warn) = &warning {
                 line.push_str(&format!(" Warning: {warn}"));
             }
-            self.type_line(&before, &line).await;
+            self.type_or_queue(&before, &line).await;
         }
         Ok(w)
     }
@@ -2461,7 +2478,7 @@ impl AgentService {
         self.log_task(id, format!("repo request refused: {reason}"))
             .await;
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
-            self.type_line(
+            self.type_or_queue(
                 &before,
                 &format!("{NOTICE_PREFIX}refused {}: {reason}", request.repo),
             )

@@ -2,8 +2,9 @@
 //!
 //! A notice is never typed into a running turn, and a held tool call counts as one. An orchestrator hears of a post
 //! from `wait_for_fleet` (its task's inbox) and from one line typed when it is at its input box; a supervisor
-//! conversation from a message, which resumes it if it has exited. An agent that cannot take the line now keeps it in
-//! its pending queue until it next reaches Review, when everything queued is typed as one line.
+//! conversation from a message, which resumes it if it has exited, though only its operation room does that: a
+//! product room post for an exited one is a chat row in it instead. An agent that cannot take the line now keeps it
+//! in its pending queue until it next reaches Review, when everything queued is typed as one line.
 //!
 //! The queue is in memory. A daemon restart ends every session, so a queued line has nobody to be typed into; what it
 //! said is not lost: the post stays in the room for `room_read`, an orchestrator's inbox is stored with its task, and
@@ -14,7 +15,7 @@ use crate::store::{RoomRow, StoreError};
 use crate::supervisor::{route_with, Supervisor};
 use fleet_api::{
     Agent, AgentId, AgentKind, EventKind, FleetEvent, FleetEventKind, MemberRef, Post, PostKind,
-    Status, TaskEventKind,
+    RoomKind, Status, TaskEventKind,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -41,7 +42,7 @@ pub struct Notices {
 }
 
 impl Notices {
-    fn push(&self, agent: &AgentId, line: String) {
+    pub(crate) fn push(&self, agent: &AgentId, line: String) {
         let mut q = self.queue.lock().expect("notices poisoned");
         let lines = q.entry(agent.clone()).or_default();
         // Two posts of one kind from one sender in one room read the same: once is enough.
@@ -134,15 +135,29 @@ pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), Service
             ids
         }
     };
+    // A product room resumes no exited conversation; the post becomes a chat row instead. An operation room's
+    // own conversation is resumed, as the spec has it.
+    let mut parked = false;
     for id in &recipients {
+        if room.kind == RoomKind::Product
+            && supervisors.contains(id)
+            && agents
+                .iter()
+                .any(|a| &a.id == id && a.status == Status::Stopped)
+        {
+            parked = true;
+            continue;
+        }
         if let Err(e) = notify(svc, id, &text).await {
             warn!(agent_id = %id.0, post = post.id, error = %one_line(&e.to_string()), "cannot wake a post's recipient; it is in the room");
         }
     }
     let to_supervisor = matches!(&post.to, Some(MemberRef::Agent(a)) if supervisors.contains(a));
     let kind = match post.kind {
-        PostKind::Message if post.to == Some(MemberRef::Owner) => Some(TaskEventKind::RoomMessage),
-        PostKind::Ask if post.to == Some(MemberRef::Owner) || to_supervisor => {
+        PostKind::Message if post.to == Some(MemberRef::Owner) || parked => {
+            Some(TaskEventKind::RoomMessage)
+        }
+        PostKind::Ask if post.to == Some(MemberRef::Owner) || to_supervisor || parked => {
             Some(TaskEventKind::RoomAsk)
         }
         _ => None,
@@ -233,8 +248,8 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
     }
     // Only its input box at Review takes a line. A held tool call is a running turn: a waiting `room_ask`, a pending
     // `propose_breakdown` or a permission prompt (both NeedsYou) would get the line in the held turn or as a dialog's
-    // answer.
-    if a.status != Status::Review || svc.asks.holding(&a.id) {
+    // answer. The holds are read as well as the status, which a late hook can flip back to Review.
+    if a.status != Status::Review || svc.in_held_call(&a.id) {
         return;
     }
     let lines = svc.notices.take(id);
