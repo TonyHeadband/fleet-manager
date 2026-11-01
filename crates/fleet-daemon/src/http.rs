@@ -29,14 +29,14 @@ use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AgentKind, AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
-    AskAnswer, AskKind, BlockedReason, ChatAsk, ChatPage, CheckoutInfo, CheckoutList,
-    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind,
-    FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
-    InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct,
-    NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product,
-    ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList,
-    RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status,
-    StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    AskAnswer, AskKind, BlockedReason, ChatAsk, ChatItem, ChatPage, CheckoutInfo, CheckoutList,
+    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, Event,
+    EventKind, FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut,
+    InternalBranches, InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona,
+    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
+    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo,
+    RepoList, RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status,
+    StopTaskResponse, Task, TaskEvent, TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -1799,18 +1799,56 @@ async fn terminal(
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
 }
 
-/// Every Claude session the agent has had, and the time its chat ended when it is Stopped.
-async fn chat_sources(
-    st: &AppState,
-    agent: &Agent,
-) -> Result<(Vec<(String, i64)>, Option<i64>), ApiError> {
+/// What a chat step reads: every Claude session the agent has had, a supervisor's task events after
+/// `Chat::last_event`, and the time its chat ended when it is Stopped.
+struct ChatSources {
+    sessions: Vec<(String, i64)>,
+    events: Vec<TaskEvent>,
+    ended: Option<i64>,
+}
+
+async fn chat_sources(st: &AppState, agent: &Agent, chat: &Chat) -> Result<ChatSources, ApiError> {
     let sessions = st
         .store
         .claude_sessions(&agent.id)
         .await
         .map_err(internal)?;
+    let events = if agent.kind == AgentKind::Supervisor {
+        st.store
+            .task_events(&agent.id, chat.last_event())
+            .await
+            .map_err(internal)?
+    } else {
+        Vec::new()
+    };
     let ended = (agent.status == Status::Stopped).then_some(agent.status_since);
-    Ok((sessions, ended))
+    Ok(ChatSources {
+        sessions,
+        events,
+        ended,
+    })
+}
+
+async fn chat_step(chat: Chat, src: ChatSources) -> Option<(Chat, Vec<ChatItem>)> {
+    chat::step(chat, src.sessions, src.events, src.ended).await
+}
+
+/// Returns when a task event for `conversation` is stored, or when events were missed; never without `live`.
+async fn task_event_for(live: &mut Option<broadcast::Receiver<Event>>, conversation: &AgentId) {
+    let Some(rx) = live else {
+        return std::future::pending().await;
+    };
+    loop {
+        match rx.recv().await {
+            Ok(Event {
+                kind: EventKind::SupervisorEvent { event },
+                ..
+            }) if event.conversation.as_ref() == Some(conversation) => return,
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Lagged(_)) => return,
+            Err(broadcast::error::RecvError::Closed) => std::future::pending().await,
+        }
+    }
 }
 
 fn chat_event<T: serde::Serialize>(kind: &str, data: &T) -> Option<SseEvent> {
@@ -1824,14 +1862,16 @@ async fn chat_stream(
     Path(id): Path<String>,
 ) -> Result<SseStream, ApiError> {
     let agent = st.svc.agent(&AgentId(id)).await?;
-    // Subscribed before the first read, so a hook landing during it is not missed.
+    // Subscribed before the first read, so a hook or a task event landing during it is not missed.
     let mut wake = st.chat_wake.subscribe();
     let mut asks = st.asks.subscribe();
-    let (sessions, ended) = chat_sources(&st, &agent).await?;
+    let mut live = (agent.kind == AgentKind::Supervisor).then(|| st.store.subscribe());
     let chat = Chat::open(&st.svc, &agent).await;
+    let src = chat_sources(&st, &agent, &chat).await?;
+    let ended = src.ended;
     let (tx, rx) = mpsc::channel(16);
     tokio::spawn(async move {
-        let Some((mut chat, _)) = chat::step(chat, sessions, ended).await else {
+        let Some((mut chat, _)) = chat_step(chat, src).await else {
             return;
         };
         let Some(page) = chat_event("page", &chat.page(None, chat::PAGE)) else {
@@ -1856,6 +1896,7 @@ async fn chat_stream(
             tokio::select! {
                 _ = tx.closed() => return,
                 _ = chat::woken(&mut wake, &agent.id) => {}
+                _ = task_event_for(&mut live, &agent.id) => {}
                 _ = tokio::time::sleep(chat::POLL) => {}
                 change = asks.recv() => {
                     // Each change is sent as it was, so an answered ask shows even when it clears straight after.
@@ -1887,11 +1928,11 @@ async fn chat_stream(
             if now.status != Status::Stopped && !sent_ask.send(&tx, current_ask(&st, &now)).await {
                 return;
             }
-            let Ok((sessions, end)) = chat_sources(&st, &now).await else {
+            let Ok(src) = chat_sources(&st, &now, &chat).await else {
                 continue;
             };
-            ended = end;
-            let Some((next, fresh)) = chat::step(chat, sessions, ended).await else {
+            ended = src.ended;
+            let Some((next, fresh)) = chat_step(chat, src).await else {
                 return;
             };
             chat = next;
@@ -1950,9 +1991,9 @@ async fn chat_history(
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<ChatPage>, ApiError> {
     let agent = st.svc.agent(&AgentId(id)).await?;
-    let (sessions, ended) = chat_sources(&st, &agent).await?;
     let chat = Chat::open(&st.svc, &agent).await;
-    let (chat, _) = chat::step(chat, sessions, ended)
+    let src = chat_sources(&st, &agent, &chat).await?;
+    let (chat, _) = chat_step(chat, src)
         .await
         .ok_or_else(|| internal("cannot read the chat"))?;
     let limit = q.limit.unwrap_or(chat::PAGE).min(HISTORY_MAX);

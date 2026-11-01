@@ -13,6 +13,9 @@
 /* A line: what the owner did not type, a marker, the end of the session. */
 .chat-line { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-low); }
 .chat-line[data-from="system"] { font-size: var(--size-code); letter-spacing: normal; text-transform: none; }
+.chat-line[data-event] { display: flex; align-items: center; gap: var(--space-item); }
+.chat-line[data-event] .chat-mark { flex: none; }
+.chat-event-title { color: var(--text-high); }
 .chat-line[data-marker="compacted"] { text-align: center; }
 .chat-line[data-marker="new_session"],
 .chat-line[data-marker="session_ended"] { padding-top: var(--panel-gap-m); border-top: 1px solid var(--border); }
@@ -42,6 +45,8 @@
 .chat-mark { width: var(--layout-bar-w); height: var(--layout-bar-h); background: var(--tone-done); }
 .chat-mark[data-status="failed"] { background: var(--danger); }
 .chat-mark[data-status="running"] { background: var(--tone-active); }
+.chat-mark[data-tone="accent"] { background: var(--fill); }
+.chat-mark[data-tone="danger"] { background: var(--danger); }
 .chat-calls { display: flex; flex-direction: column; border-top: 1px dashed var(--dashed); }
 .chat-calls > * + * { border-top: 1px solid var(--border); }
 .chat-call { display: flex; align-items: baseline; gap: var(--space-item); padding: var(--layout-list-row-y) var(--layout-list-row-x); font-family: var(--font-mono); font-size: var(--size-code); }

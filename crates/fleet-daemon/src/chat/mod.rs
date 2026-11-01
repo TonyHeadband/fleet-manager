@@ -5,7 +5,7 @@ mod read;
 pub mod stream;
 mod summary;
 
-pub use build::Builder;
+pub use build::{line_at, Builder};
 pub use read::Tail;
 pub use summary::{result_of, summarize, OUTPUT_BYTES, OUTPUT_LINES};
 

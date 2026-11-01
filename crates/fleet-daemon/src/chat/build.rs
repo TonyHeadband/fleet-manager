@@ -1,12 +1,20 @@
 use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
 use crate::chat::summary::{result_of, summarize};
 use crate::forge::parse_timestamp;
-use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom};
+use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom, TaskEvent};
 use serde_json::Value;
 use std::collections::HashMap;
 
 /// Claude Code's note after Esc (`[Request interrupted by user]`, `… for tool use]`), recorded as a user line.
 const INTERRUPT_PREFIX: &str = "[Request interrupted by user";
+
+/// A transcript line's time, None when it has none (or is not JSON).
+pub fn line_at(line: &str) -> Option<i64> {
+    let rec = serde_json::from_str::<Value>(line).ok()?;
+    rec.get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(parse_timestamp)
+}
 
 /// A `tool_use` still waiting for its `tool_result`.
 struct OpenCall {
@@ -68,6 +76,18 @@ impl Builder {
 
     pub fn marker(&mut self, kind: MarkerKind, at: i64) -> ChatItem {
         self.mint(at, ChatBody::Marker { kind })
+    }
+
+    pub fn event(&mut self, e: &TaskEvent) -> ChatItem {
+        self.mint(
+            e.at,
+            ChatBody::Event {
+                task: e.task.clone(),
+                task_title: e.task_title.clone(),
+                kind: e.kind,
+                text: e.text.clone(),
+            },
+        )
     }
 
     pub fn new_session(&mut self, at: i64) -> ChatItem {

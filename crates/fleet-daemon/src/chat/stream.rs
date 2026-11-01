@@ -1,8 +1,9 @@
 //! An agent's whole chat: every Claude session it has had, built once and then followed as the last one grows.
 use crate::agents::{transcript_path, AgentService, PROMPT_FILE};
-use crate::chat::{blocks_before, Builder, Tail};
+use crate::chat::{blocks_before, line_at, Builder, Tail};
 use crate::personas::PersonaEnv;
-use fleet_api::{Agent, AgentId, AgentKind, ChatItem, ChatPage, MarkerKind, PromptFrom};
+use fleet_api::{Agent, AgentId, AgentKind, ChatItem, ChatPage, MarkerKind, PromptFrom, TaskEvent};
+use std::collections::VecDeque;
 use std::path::Path;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -58,6 +59,9 @@ pub struct Chat {
     sessions: Vec<Session>,
     items: Vec<ChatItem>,
     ended: bool,
+    /// A supervisor's task events read in this step, by time, each going in before the first line dated after it.
+    pending: VecDeque<TaskEvent>,
+    last_event: i64,
 }
 
 impl Chat {
@@ -72,6 +76,8 @@ impl Chat {
             sessions: Vec::new(),
             items: Vec::new(),
             ended: false,
+            pending: VecDeque::new(),
+            last_event: 0,
         }
     }
 
@@ -92,9 +98,18 @@ impl Chat {
         Chat::new(env, prompt, from)
     }
 
-    /// Reads what the agent's `sessions` (oldest first) added since the last call; returns the new and updated items.
-    /// A session not seen before ends the one before it with a `NewSession` divider. Blocking file IO.
-    pub fn advance(&mut self, sessions: &[(String, i64)]) -> Vec<ChatItem> {
+    /// The id of the newest task event in the chat (0 for none), for `Store::task_events`.
+    pub fn last_event(&self) -> i64 {
+        self.last_event
+    }
+
+    /// Reads what the agent's `sessions` (oldest first) added since the last call, and adds `events` (a supervisor's
+    /// task events after `last_event`) among the lines by time; returns the new and updated items. A session not seen
+    /// before ends the one before it with a `NewSession` divider. Blocking file IO.
+    pub fn advance(&mut self, sessions: &[(String, i64)], events: Vec<TaskEvent>) -> Vec<ChatItem> {
+        self.last_event = events.iter().map(|e| e.id).fold(self.last_event, i64::max);
+        self.pending.extend(events);
+        self.pending.make_contiguous().sort_by_key(|e| e.at);
         let mut fresh = Vec::new();
         for (id, at) in sessions {
             if self.sessions.iter().any(|s| &s.id == id) {
@@ -103,6 +118,7 @@ impl Chat {
             if !self.sessions.is_empty() {
                 fresh.extend(self.read_last());
                 fresh.extend(self.builder.close_open());
+                fresh.extend(self.events_before(*at));
                 fresh.push(self.builder.new_session(*at));
             }
             self.sessions.push(Session {
@@ -111,8 +127,19 @@ impl Chat {
             });
         }
         fresh.extend(self.read_last());
+        // What the transcript has so far is read: an event newer than all of it goes after it.
+        fresh.extend(self.events_before(i64::MAX));
         self.merge(&fresh);
         fresh
+    }
+
+    fn events_before(&mut self, at: i64) -> Vec<ChatItem> {
+        let mut out = Vec::new();
+        while self.pending.front().is_some_and(|e| e.at < at) {
+            let e = self.pending.pop_front().expect("checked");
+            out.push(self.builder.event(&e));
+        }
+        out
     }
 
     /// Closes the chat of a stopped agent: its open calls fail and a `SessionEnded` marker dated `at` follows. Once.
@@ -152,13 +179,21 @@ impl Chat {
         let Some(tail) = session.tail.as_mut() else {
             return Vec::new();
         };
-        match tail.read_new() {
-            Ok(lines) => lines.iter().flat_map(|l| self.builder.line(l)).collect(),
+        let lines = match tail.read_new() {
+            Ok(lines) => lines,
             Err(e) => {
                 warn!(session = %session.id, error = %e, "cannot read the transcript");
-                Vec::new()
+                return Vec::new();
             }
+        };
+        let mut fresh = Vec::new();
+        for line in &lines {
+            if let Some(at) = line_at(line) {
+                fresh.extend(self.events_before(at));
+            }
+            fresh.extend(self.builder.line(line));
         }
+        fresh
     }
 
     /// Seqs are minted in order from 0, so an item's seq is its index; an update replaces the item it names.
@@ -179,10 +214,11 @@ impl Chat {
 pub async fn step(
     mut chat: Chat,
     sessions: Vec<(String, i64)>,
+    events: Vec<TaskEvent>,
     ended_at: Option<i64>,
 ) -> Option<(Chat, Vec<ChatItem>)> {
     tokio::task::spawn_blocking(move || {
-        let mut fresh = chat.advance(&sessions);
+        let mut fresh = chat.advance(&sessions, events);
         if let Some(at) = ended_at {
             fresh.extend(chat.end(at));
         }

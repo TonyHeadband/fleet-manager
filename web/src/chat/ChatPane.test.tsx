@@ -94,6 +94,29 @@ describe("ChatPane", () => {
     expect(screen.getByText("New session")).toHaveClass("chat-line");
   });
 
+  it("event_rows_render_as_system_lines_with_their_tone", () => {
+    start();
+    const event = (kind: "needs_you" | "checks_passed" | "checks_failed" | "pr_opened" | "pr_merged", text: string) =>
+      item({ type: "event", task: "t1", task_title: "Build X", kind, text });
+    page([
+      prompt("Resume the task", "system"),
+      event("needs_you", "needs you · approve the plan"),
+      event("checks_failed", "checks failed"),
+      event("checks_passed", "checks passed"),
+      event("pr_opened", "PR opened"),
+      event("pr_merged", "PR merged"),
+    ]);
+    const rows = [...feed().querySelectorAll(".chat-line[data-event]")];
+    expect(rows.map((r) => r.getAttribute("data-from"))).toEqual(Array(5).fill("system"));
+    expect(rows[0]!.querySelector(".chat-event-title")).toHaveTextContent("Build X");
+    expect(rows[0]).toHaveTextContent("Build X needs you · approve the plan");
+    expect(rows.map((r) => r.querySelector(".chat-mark")!.getAttribute("data-tone"))).toEqual(["accent", "danger", "done", "done", "done"]);
+    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.chat-event-title \{[^}]*color: var\(--text-high\);/);
+    expect(css).toMatch(/\.chat-mark\[data-tone="accent"\] \{[^}]*background: var\(--fill\);/);
+    expect(css).toMatch(/\.chat-mark\[data-tone="danger"\] \{[^}]*background: var\(--danger\);/);
+  });
+
   it("sections_fold_and_open", async () => {
     start();
     page([
