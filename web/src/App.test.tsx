@@ -639,7 +639,7 @@ describe("App", () => {
     await userEvent.click(await screen.findByRole("button", { name: "core" }));
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(screen.getByRole("button", { name: "Start task" }));
-    expect(spawn).toHaveBeenCalledWith({ ...spawnRequest("p1", "me", ["core"], "go"), release: null, title: null, kind: "solo", role: null });
+    expect(spawn).toHaveBeenCalledWith({ ...spawnRequest("p1", "me", ["core"], "go"), release: null, title: null, kind: "orchestrator", role: "direct" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     localStorage.clear();
   });
@@ -657,6 +657,7 @@ describe("App", () => {
     const newTask = await screen.findByRole("button", { name: "New task" });
     await waitFor(() => expect(newTask).toBeEnabled());
     await userEvent.click(newTask);
+    await userEvent.click(await screen.findByRole("button", { name: "core" }));
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(screen.getByRole("button", { name: "Start task" }));
     const footer = screen.getByRole("contentinfo");

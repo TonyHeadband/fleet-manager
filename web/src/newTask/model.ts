@@ -18,12 +18,9 @@ export interface Draft {
   title: string;
   /** A release of the product; null is the backlog. */
   release: number | null;
-  /** The orchestrator type; null is Solo. */
-  role: string | null;
+  /** The task's one repo, once picked. */
   chosen: string[];
   starts: Record<string, Start>;
-  /** Why repos picked under Solo were dropped on the switch to an orchestrator type. */
-  dropped: string | null;
   /** The goal the last spawn sent: a success clears the dialog only while it still holds this text. */
   sent: string | null;
   busy: boolean;
@@ -37,25 +34,11 @@ export type Listing = { state: "loading" } | { state: "ready"; checkouts: Checko
 export type Listings = Record<string, Listing>;
 
 export function emptyDraft(): Draft {
-  return { persona: "", prompt: "", title: "", release: null, role: null, chosen: [], starts: {}, dropped: null, sent: null, busy: false, error: null, refusal: null };
+  return { persona: "", prompt: "", title: "", release: null, chosen: [], starts: {}, sent: null, busy: false, error: null, refusal: null };
 }
 
-/** `null` is Solo. An orchestrated task has one repo: the first pick is kept and the others are dropped, which the dialog says. */
-export function setType(d: Draft, role: string | null): Draft {
-  if (role === null) return { ...d, role: null, dropped: null };
-  if (d.chosen.length <= 1) return { ...d, role, dropped: null };
-  const rest = d.chosen.slice(1);
-  const verb = rest.length === 1 ? "was" : "were";
-  return { ...d, role, chosen: d.chosen.slice(0, 1), dropped: `An orchestrated task takes one repo: ${rest.join(", ")} ${verb} dropped.` };
-}
-
-/** After a pick under an orchestrator type: the newest pick replaces the old one. */
-export function keepOneRepo(d: Draft, before: string[]): Draft {
-  const newest = [...d.chosen].reverse().find((c) => !before.includes(c));
-  const chosen = newest === undefined ? d.chosen : [newest];
-  const changed = chosen.length !== before.length || chosen.some((c, i) => c !== before[i]);
-  return { ...d, chosen, dropped: changed ? null : d.dropped };
-}
+/** A task has one repo: a pick replaces the one before, and picking it again unticks it. */
+export const toggleRepo = (d: Draft, name: string): Draft => ({ ...d, chosen: d.chosen.includes(name) ? [] : [name] });
 
 /** Moves the dialog to another persona: the picks go, and the repos are fetched again. */
 export function setPersona(d: Draft, id: string): Draft {
@@ -63,7 +46,7 @@ export function setPersona(d: Draft, id: string): Draft {
 }
 
 /** Forgets the per-task picks once a task started. */
-export const sentOk = (d: Draft): Draft => ({ ...d, dropped: null, release: null, starts: {} });
+export const sentOk = (d: Draft): Draft => ({ ...d, release: null, starts: {} });
 
 /** On each opening: the backlog, and each repo from its default start. */
 export const resetChoices = (d: Draft): Draft => ({ ...d, release: null, starts: {} });
@@ -107,8 +90,9 @@ export function personaBlocker(personas: Persona[], persona: string): string | n
   return personas.some((p) => p.ready) ? "Pick a persona" : "Set up a persona first";
 }
 
-/** Why an orchestrated task cannot start yet. The workflow line never blocks: creation fetches and refuses. */
-export const fleetBlocker = (d: Draft): string | null => (d.role !== null && d.chosen.length === 0 ? "Pick a repo" : null);
+/** Why the task cannot start yet: every task is orchestrated, so it needs its repo. The workflow line never blocks:
+ * creation fetches and refuses. */
+export const fleetBlocker = (d: Draft): string | null => (d.chosen.length === 0 ? "Pick a repo" : null);
 
 /** What a repo's workflow state says, and whether it is a problem to show (not a block: creation decides). */
 export function workflowLine(repo: string, w: WorkflowState): { text: string; blocks: boolean } {

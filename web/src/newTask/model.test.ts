@@ -3,8 +3,7 @@ import type { CheckoutInfo } from "../api/generated/CheckoutInfo";
 import type { Product } from "../api/generated/Product";
 import { persona, product, repoInfo } from "../test/fixtures";
 import {
-  checkoutLabel, emptyDraft, fleetBlocker, keepOneRepo, keptRelease, openReleases, personaBlocker, picks, setPersona, setType,
-  shortPath, startBlocker, startOf, toolErrorText, wantsLocal, workflowLine, type Draft, type Listings,
+  checkoutLabel, emptyDraft, fleetBlocker, keptRelease, openReleases, personaBlocker, picks, setPersona, shortPath, startBlocker, startOf, toolErrorText, wantsLocal, workflowLine, type Draft, type Listings,
 } from "./model";
 
 // Ported from crates/fleet-gui/src/components/new_task.rs and tests/app.rs; the names are Lite's.
@@ -17,14 +16,6 @@ const repos = [
 ];
 
 describe("New task's rules, as Lite's SpawnState", () => {
-  it("orchestrator_type_limits_to_one_repo", () => {
-    expect(setType(draft({ chosen: ["a", "b"] }), "lead")).toMatchObject({ role: "lead", chosen: ["a"], dropped: "An orchestrated task takes one repo: b was dropped." });
-    expect(setType(draft({ chosen: ["a", "b", "c"] }), "lead").dropped).toBe("An orchestrated task takes one repo: b, c were dropped.");
-    expect(setType(draft({ chosen: ["a"], role: "lead", dropped: "x" }), null)).toMatchObject({ role: null, chosen: ["a"], dropped: null });
-    // Under an orchestrator type the newest pick replaces the old one.
-    expect(keepOneRepo(draft({ role: "lead", chosen: ["a", "b"], dropped: "x" }), ["a"])).toMatchObject({ chosen: ["b"], dropped: null });
-  });
-
   it("start_choice_offered_only_with_path_and_url", () => {
     expect(wantsLocal(repos, draft(), "both"), "a repo with a URL starts from it by default").toBe(false);
     expect(wantsLocal(repos, draft({ starts: { both: "/src/both" } }), "both")).toBe(true);
@@ -94,9 +85,8 @@ describe("New task's rules, as Lite's SpawnState", () => {
     expect(personaBlocker([persona("me")], "me")).toBeNull();
     expect(personaBlocker([persona("me"), persona("draft", false)], "draft")).toBe("Pick a persona");
     expect(personaBlocker([persona("draft", false)], "draft")).toBe("Set up a persona first");
-    expect(fleetBlocker(draft({ role: "lead" }))).toBe("Pick a repo");
-    expect(fleetBlocker(draft({ role: "lead", chosen: ["a"] }))).toBeNull();
-    expect(fleetBlocker(draft())).toBeNull();
+    expect(fleetBlocker(draft()), "every task is orchestrated, so every task needs its repo").toBe("Pick a repo");
+    expect(fleetBlocker(draft({ chosen: ["a"] }))).toBeNull();
   });
 
   it("a_new_persona_drops_the_picks", () => {

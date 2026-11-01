@@ -11,7 +11,7 @@ import { Chip } from "../ui/Chip";
 import { SmallIconButton } from "../ui/SmallIconButton";
 import { Select } from "../ui/Select";
 import {
-  checkoutLabel, fleetBlocker, keepOneRepo, openReleases, personaBlocker, setType, startBlocker, startOf, toolErrorText, wantsLocal, workflowLine,
+  checkoutLabel, fleetBlocker, openReleases, personaBlocker, startBlocker, startOf, toggleRepo, toolErrorText, wantsLocal, workflowLine,
   type Draft, type Listings,
 } from "./model";
 
@@ -23,8 +23,6 @@ interface Props {
   onDraft: (d: Draft) => void;
   personas: Persona[];
   product: Product | undefined;
-  /** The orchestrator types that load, in the daemon's order. */
-  orchestrators: string[];
   /** The product's repos, as last fetched for the dialog's persona. */
   repos: RepoInfo[];
   reposError: string | null;
@@ -38,28 +36,22 @@ interface Props {
 }
 
 /**
- * Lite's New task dialog (`new_task_dialog`): the goal, title, type, persona and release, the repos and where each
- * starts, an orchestrated task's workflow, the daemon's refusal, and Start. Closing by any route keeps what was typed.
+ * Lite's New task dialog (`new_task_dialog`): the goal, title, persona and release, the task's repo and where it
+ * starts, its workflow, the daemon's refusal, and Start. Every task is a direct orchestrator: no type to pick. Closing
+ * by any route keeps what was typed.
  */
-export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators, repos, reposError, listings, onPersona, onRetry, onStart, onClose, onWizard }: Props) {
-  const ids = { goal: useId(), title: useId(), type: useId(), persona: useId(), release: useId(), repos: useId() };
+export function NewTaskDialog({ draft, onDraft, personas, product, repos, reposError, listings, onPersona, onRetry, onStart, onClose, onWizard }: Props) {
+  const ids = { goal: useId(), title: useId(), persona: useId(), release: useId(), repos: useId() };
   const goal = useRef<HTMLTextAreaElement>(null);
   // The goal takes the focus on each opening only.
   useEffect(() => goal.current?.focus(), []);
 
-  const orchestrated = draft.role !== null;
   const ready = personas.filter((p) => p.ready);
   const labels = personaLabels(ready, ready.map((p) => p.id));
   const blocked = personaBlocker(personas, draft.persona);
   const why = blocked ?? fleetBlocker(draft) ?? startBlocker(repos, draft, listings);
   const canStart = !draft.busy && draft.prompt.trim() !== "" && why === null;
   const start = () => canStart && onStart();
-
-  const toggle = (name: string) => {
-    const before = draft.chosen;
-    const next = { ...draft, chosen: before.includes(name) ? before.filter((c) => c !== name) : [...before, name] };
-    onDraft(orchestrated ? keepOneRepo(next, before) : next);
-  };
 
   return (
     <Modal label="New task" className="dialog new-task" onClose={onClose}>
@@ -85,14 +77,6 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
       <label className="caption" htmlFor={ids.title}>Title</label>
       <input id={ids.title} type="text" placeholder="Optional: the agent names the task when this is empty" value={draft.title} onChange={(e) => onDraft({ ...draft, title: e.target.value })} />
 
-      <label className="caption" htmlFor={ids.type}>Type</label>
-      <Select
-        id={ids.type}
-        value={draft.role ?? ""}
-        options={[{ value: "", label: "Solo" }, ...orchestrators.map((o) => ({ value: o, label: o }))]}
-        onChange={(v) => onDraft(setType(draft, v === "" ? null : v))}
-      />
-
       <label className="caption" htmlFor={ids.persona}>Persona</label>
       <Select
         id={ids.persona}
@@ -112,24 +96,23 @@ export function NewTaskDialog({ draft, onDraft, personas, product, orchestrators
       />
 
       <div className="new-task-repos" role="group" aria-labelledby={ids.repos}>
-        <span className="caption" id={ids.repos}>{orchestrated ? "Repo" : "Repos (optional)"}</span>
+        <span className="caption" id={ids.repos}>Repo</span>
         {repos.length === 0 ? (
           <p className="note">This product has no repos; add them in Products</p>
         ) : (
           <div className="chips">
             {repos.map((r) => (
-              <Chip key={r.name} selected={draft.chosen.includes(r.name)} onClick={() => toggle(r.name)}>
+              <Chip key={r.name} selected={draft.chosen.includes(r.name)} onClick={() => onDraft(toggleRepo(draft, r.name))}>
                 {r.name}
               </Chip>
             ))}
           </div>
         )}
       </div>
-      {draft.dropped && <p className="note">{draft.dropped}</p>}
       {reposError && <p className="danger">{reposError}</p>}
 
       <Starts draft={draft} onDraft={onDraft} repos={repos} listings={listings} onRetry={onRetry} />
-      {orchestrated && <Fleet draft={draft} repos={repos} />}
+      <Fleet draft={draft} repos={repos} />
 
       {draft.refusal ? (
         <div className="new-task-refusal">
@@ -221,7 +204,7 @@ function Starts({ draft, onDraft, repos, listings, onRetry }: Pick<Props, "draft
   );
 }
 
-/** An orchestrated task's repo workflow (`fleet_section`). Its specialists are every one the product does not hide. */
+/** The task's repo workflow (`fleet_section`). Its specialists are every one the product does not hide. */
 function Fleet({ draft, repos }: Pick<Props, "draft" | "repos">) {
   const name = draft.chosen[0];
   if (name === undefined) return null;

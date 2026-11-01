@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ON_WEB, VIEWS, routeFromHash, supervisorHref } from "./routes";
+import { FLEET_TABS, ON_WEB, VIEWS, fleetTabFromHash, routeFromHash, supervisorHref } from "./routes";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -24,5 +24,15 @@ describe("routes", () => {
   it("supervisorHref_carries_the_conversation", () => {
     expect(supervisorHref()).toBe("#supervisor");
     expect(supervisorHref("a1")).toBe("#supervisor?c=a1");
+  });
+});
+
+describe("fleet tabs", () => {
+  it("the_old_orchestrators_address_opens_specialists", () => {
+    expect(FLEET_TABS.map((t) => t.id)).not.toContain("orchestrators");
+    expect(fleetTabFromHash("#fleet?tab=orchestrators")).toBe("specialists");
+    expect(fleetTabFromHash("#fleet?tab=skills")).toBe("skills");
+    expect(fleetTabFromHash("#fleet?tab=nothing")).toBe("overview");
+    expect(fleetTabFromHash("#fleet")).toBe("overview");
   });
 });

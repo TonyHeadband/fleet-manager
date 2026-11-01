@@ -52,7 +52,7 @@ describe("Fleet", () => {
     expect(selected("Fleet tabs")).toBe("Agents");
     expect(window.location.hash).toBe("#fleet?tab=agents");
     await click("Definitions");
-    expect(names("Fleet tabs")).toEqual(["Instructions", "Orchestrators", "Specialists", "Skills", "PR styles"]);
+    expect(names("Fleet tabs")).toEqual(["Instructions", "Specialists", "Skills", "PR styles"]);
   });
 
   it("the_group_row_reads_as_mono_headings", async () => {

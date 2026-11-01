@@ -5,13 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { FleetError } from "../api/client";
 import type { CheckoutInfo } from "../api/generated/CheckoutInfo";
-import type { DefInfo } from "../api/generated/DefInfo";
 import type { Product } from "../api/generated/Product";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import { agent, choose, factory, fakeClient, optionsOf, persona, picked, product, repoInfo } from "../test/fixtures";
 
 // Ported from crates/fleet-gui/tests/app.rs (the New task dialog); the names are Lite's.
-const def = (name: string, error: string | null = null): DefInfo => ({ kind: "orchestrator", name, summary: "", builtin: true, overridden: false, error });
 const release = (id: number, version: string, released_at: number | null = null) => ({ id, product: "p1", version, start: "", target: "", released_at });
 const checkout = (path: string, main: boolean, branch: string | null): CheckoutInfo => ({ path, main, branch, commit: "abc1234", subject: "s" });
 const started = (id = "new") => ({ agent: agent({ id }), warnings: [] as string[] });
@@ -82,83 +80,45 @@ describe("New task, as Lite's dialog", () => {
     expect(options).toContain(`${twin.name} (me2)`);
   });
 
-  it("type_defaults_to_solo_and_lists_valid_orchestrators", async () => {
-    await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead"), def("broken", "bad yaml"), { ...def("rust"), kind: "specialist" }]) });
-    expect(await picked("Type")).toBe("Solo");
-    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "lead"]));
-  });
-
-  it("new_task_lists_the_dialogs_persona_definitions", async () => {
-    const personaDefinitions = vi.fn(async (p: string) => [def(p === "me" ? "lead" : "boss")]);
-    await openDialog({ personaDefinitions });
-    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "lead"]));
-    expect(personaDefinitions).toHaveBeenLastCalledWith("me");
-    await choose("Persona", "work");
-    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "boss"]));
-    expect(personaDefinitions).toHaveBeenLastCalledWith("work");
-  });
-
-  it("reopening_under_another_persona_drops_the_previous_orchestrators", async () => {
-    let held: (() => void) | null = null;
-    const personaDefinitions = vi.fn((p: string) =>
-      p === "me" && held === null && personaDefinitions.mock.calls.filter(([q]) => q === "me").length > 1
-        ? new Promise<DefInfo[]>((resolve) => (held = () => resolve([def("lead")])))
-        : Promise.resolve([def(p === "me" ? "lead" : "boss")]),
-    );
-    await openDialog({ personaDefinitions });
-    await choose("Persona", "work");
-    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "boss"]));
-    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await reopen();
-    await waitFor(() => expect(held).not.toBeNull());
-    expect(await picked("Persona")).toBe("me");
-    expect(await optionsOf("Type")).toEqual(["Solo"]);
-  });
-
-  it("orchestrator_type_limits_to_one_repo", async () => {
-    await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
-    await pick("core");
-    await pick("portal");
-    await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
-    await choose("Type", "lead");
-    expect(screen.getByText("An orchestrated task takes one repo: portal was dropped.")).toBeInTheDocument();
+  it("new_task_has_no_type_picker", async () => {
+    await openDialog();
+    expect(screen.queryByRole("combobox", { name: "Type" })).toBeNull();
+    expect(screen.queryByText("Solo")).toBeNull();
     expect(screen.getByRole("group", { name: "Repo" })).toBeInTheDocument();
+  });
+
+  it("a_new_task_takes_one_repo", async () => {
+    await openDialog();
+    await pick("core");
     await pick("portal");
     const group = within(screen.getByRole("group", { name: "Repo" }));
     expect(group.getByRole("button", { name: "portal" })).toHaveAttribute("aria-pressed", "true");
     expect(group.getByRole("button", { name: "core" }), "the newest pick replaces the old one").toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByText(/was dropped/)).toBeNull();
+    await pick("portal");
+    expect(group.getByRole("button", { name: "portal" }), "a pick unticks").toHaveAttribute("aria-pressed", "false");
   });
 
-  it("start_disabled_without_a_repo", async () => {
-    await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
-    await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
-    await choose("Type", "lead");
+  it("new_task_needs_a_repo", async () => {
+    await openDialog();
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     expect(startButton()).toBeDisabled();
     expect(startButton()).toHaveAttribute("title", "Pick a repo");
   });
 
-  it("spawn_sends_kind_and_role", async () => {
-    const { client } = await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
-    await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
-    await choose("Type", "lead");
+  it("new_task_spawns_a_direct_orchestrator", async () => {
+    const { client } = await openDialog();
     await pick("core");
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(startButton());
-    expect(lastSpawn(client)).toMatchObject({ kind: "orchestrator", role: "lead", repos: [{ repo: "core", local: null }] });
+    expect(lastSpawn(client)).toMatchObject({ kind: "orchestrator", role: "direct", repos: [{ repo: "core", local: null }] });
   });
 
   describe("the workflow line", () => {
     const withWorkflow = (workflow: RepoInfo["workflow"]) => [repoInfo("core", { workflow })];
-    const asLead = async (repos: RepoInfo[]) => {
-      await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) }, { repos });
-      await waitFor(async () => expect(await optionsOf("Type")).toHaveLength(2));
-    };
+    const withRepos = (repos: RepoInfo[]) => openDialog({}, { repos });
 
     it("dialog_offers_create_workflow_without_blocking", async () => {
-      await asLead(withWorkflow({ state: "missing", base: "main" }));
-      await choose("Type", "lead");
+      await withRepos(withWorkflow({ state: "missing", base: "main" }));
       await pick("core");
       expect(screen.getByText(/core has no \.fleet\/workflow\.yml on main\./)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Create workflow" })).toBeDisabled();
@@ -167,22 +127,14 @@ describe("New task, as Lite's dialog", () => {
       expect(startButton(), "the line never blocks: creation decides").toBeEnabled();
     });
 
-    it("solo_ignores_a_missing_workflow", async () => {
-      await asLead(withWorkflow({ state: "missing", base: "main" }));
-      await pick("core");
-      expect(screen.queryByText(/workflow\.yml/)).toBeNull();
-    });
-
     it("dialog_shows_an_invalid_or_unreadable_workflow", async () => {
-      await asLead(withWorkflow({ state: "invalid", base: "main", error: "bad yaml" }));
-      await choose("Type", "lead");
+      await withRepos(withWorkflow({ state: "invalid", base: "main", error: "bad yaml" }));
       await pick("core");
       expect(screen.getByText("core: .fleet/workflow.yml on main is invalid: bad yaml")).toBeInTheDocument();
     });
 
     it("dialog_lists_the_found_steps", async () => {
-      await asLead(withWorkflow({ state: "found", base: "main", steps: ["fmt", "test"] }));
-      await choose("Type", "lead");
+      await withRepos(withWorkflow({ state: "found", base: "main", steps: ["fmt", "test"] }));
       await pick("core");
       expect(screen.getByText("Checks on main: fmt, test")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Create workflow" })).toBeNull();
@@ -228,7 +180,7 @@ describe("New task, as Lite's dialog", () => {
       expect(await optionsOf("Checkout of both")).toEqual(["main  /real/both", "feat  /wt/feat"]);
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
-      expect(lastSpawn(client)).toMatchObject({ product: "p1", release: 7, persona: "me", repos: [{ repo: "both", local: "/real/both" }], title: null, kind: "solo", role: null, slug: null });
+      expect(lastSpawn(client)).toMatchObject({ product: "p1", release: 7, persona: "me", repos: [{ repo: "both", local: "/real/both" }], title: null, kind: "orchestrator", role: "direct", slug: null });
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       await reopen();
       await pick("both");
@@ -303,9 +255,10 @@ describe("New task, as Lite's dialog", () => {
       const two = [repoInfo("both", { path: "/src/both", url: "https://example.invalid/both.git" }), repoInfo("also", { path: "/src/also", url: "https://example.invalid/also.git" })];
       await openDialog({}, { repos: two });
       await pick("both");
+      expect(screen.getByRole("group", { name: "both starts" })).toBeInTheDocument();
       await pick("also");
+      expect(screen.queryByRole("group", { name: "both starts" }), "the newest pick replaces the old one").toBeNull();
       await userEvent.click(within(screen.getByRole("group", { name: "also starts" })).getByRole("button", { name: "Local checkout" }));
-      expect(within(screen.getByRole("group", { name: "both starts" })).getByRole("button", { name: "From URL" })).toHaveAttribute("aria-pressed", "true");
       expect(within(screen.getByRole("group", { name: "also starts" })).getByRole("button", { name: "Local checkout" })).toHaveAttribute("aria-pressed", "true");
     });
 
@@ -324,6 +277,7 @@ describe("New task, as Lite's dialog", () => {
     it("spawn_success_clears_the_prompt_and_failure_keeps_it_with_the_error", async () => {
       const spawn = vi.fn().mockRejectedValueOnce(new FleetError('unknown repo "x"')).mockResolvedValueOnce(started());
       await openDialog({ spawn });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "do it");
       await userEvent.type(screen.getByLabelText("Title"), "Short");
       await userEvent.click(startButton());
@@ -340,6 +294,7 @@ describe("New task, as Lite's dialog", () => {
     it("a_spawn_refused_for_a_tool_shows_its_fix_and_the_wizard_link", async () => {
       const tool = { kind: "not-installed" as const, tool: "gh" as const, fix: { install: "brew install gh", link: "https://cli.github.com", manager: "brew" } };
       const { client } = await openDialog({ spawn: vi.fn().mockRejectedValue(new FleetError("gh is missing", undefined, tool)) });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       expect(await screen.findByText("GitHub CLI (gh) is not installed")).toBeInTheDocument();
@@ -357,6 +312,7 @@ describe("New task, as Lite's dialog", () => {
     it("a_spawn_refused_for_a_login_does_not_offer_the_wizard", async () => {
       const tool = { kind: "not-logged-in" as const, tool: "claude" as const, persona: "me" };
       await openDialog({ spawn: vi.fn().mockRejectedValue(new FleetError("log in", undefined, tool)) });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       expect(await screen.findByText("Claude Code is not logged in for me")).toBeInTheDocument();
@@ -367,6 +323,7 @@ describe("New task, as Lite's dialog", () => {
     it("spawn_failure_after_closing_the_dialog_shows_in_the_footer", async () => {
       let fail!: (e: Error) => void;
       await openDialog({ spawn: vi.fn(() => new Promise((_, reject) => (fail = reject))) });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       await userEvent.keyboard("{Escape}");
@@ -391,11 +348,12 @@ describe("New task, as Lite's dialog", () => {
       const repos = vi.fn((p?: string) => Promise.resolve(p === "p1" && ++opened > 1 ? [repoInfo("portal"), repoInfo("web")] : [repoInfo("core"), repoInfo("portal")]));
       const { client } = await openDialog({ repos });
       await pick("core");
-      await pick("portal");
       await userEvent.click(screen.getByRole("button", { name: "Close" }));
       await reopen();
       await within(screen.getByRole("group", { name: /^Repo/ })).findByRole("button", { name: "web" });
       await userEvent.type(screen.getByLabelText("Goal"), "go");
+      expect(startButton()).toHaveAttribute("title", "Pick a repo");
+      await pick("portal");
       await userEvent.click(startButton());
       expect(lastSpawn(client)).toMatchObject({ repos: [{ repo: "portal", local: null }] });
     });
@@ -413,6 +371,7 @@ describe("New task, as Lite's dialog", () => {
     it("spawn_success_after_closing_does_not_reopen", async () => {
       let done!: (v: ReturnType<typeof started>) => void;
       await openDialog({ spawn: vi.fn(() => new Promise((r) => (done = r))) });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       await userEvent.keyboard("{Escape}");
@@ -422,6 +381,7 @@ describe("New task, as Lite's dialog", () => {
 
     it("spawn_warnings_are_announced_after_the_success", async () => {
       await openDialog({ spawn: vi.fn().mockResolvedValue({ agent: agent({ id: "a9" }), warnings: ["could not fetch core"] }) });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       const footer = within(screen.getByRole("contentinfo"));
@@ -433,6 +393,7 @@ describe("New task, as Lite's dialog", () => {
     it("spawn_success_keeps_a_dialog_reopened_and_typed_into_while_in_flight", async () => {
       let done!: (v: ReturnType<typeof started>) => void;
       await openDialog({ spawn: vi.fn(() => new Promise((r) => (done = r))) });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "first");
       await userEvent.click(startButton());
       await userEvent.keyboard("{Escape}");
@@ -445,6 +406,7 @@ describe("New task, as Lite's dialog", () => {
 
     it("ctrl_enter_starts_the_task", async () => {
       const { client } = await openDialog();
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go{Control>}{Enter}{/Control}");
       expect(lastSpawn(client)).toMatchObject({ prompt: "go" });
     });
@@ -452,6 +414,7 @@ describe("New task, as Lite's dialog", () => {
     it("a_second_start_while_one_is_on_its_way_is_not_sent", async () => {
       const spawn = vi.fn(() => new Promise(() => {}));
       await openDialog({ spawn });
+      await pick("core");
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       await userEvent.click(startButton());
       expect(startButton()).toBeDisabled();
@@ -476,6 +439,7 @@ describe("New task, as Lite's dialog", () => {
     const board = () => repos.mock.calls.filter(([p]) => p === undefined).length;
     const dialog = () => repos.mock.calls.filter(([p]) => p === "p1").length;
     await waitFor(() => expect(board(), "the board's list, at load and on opening").toBe(2));
+    await pick("core");
     await userEvent.type(screen.getByLabelText("Goal"), "first");
     await userEvent.click(startButton());
     await userEvent.type(screen.getByLabelText("Goal"), " more");

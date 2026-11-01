@@ -278,6 +278,15 @@ describe("Board by tasks", () => {
   };
   const rows = () => screen.queryAllByRole("button", { name: /, (working|needs you|queued|review|stopped)$/ }).map((r) => r.getAttribute("aria-label"));
 
+  it("existing_solo_and_structured_tasks_keep_their_type", () => {
+    // New tasks are direct only; tasks started before keep their card until they end.
+    board([agent({ id: "s", kind: "solo", goal: "Old solo" }), o({ role: "structured" }), f("f1")]);
+    expect(screen.getByText("Old solo").closest("[data-kind]")).toHaveAttribute("data-kind", "solo");
+    const lead = screen.getByRole("group", { name: "Fix login, 1 fleet agents" });
+    expect(lead).toHaveAttribute("data-kind", "lead");
+    expect(within(lead).getByRole("img", { name: "Orchestrator" })).toBeInTheDocument();
+  });
+
   it("a_click_on_empty_board_is_reported", async () => {
     const onEmpty = vi.fn();
     board([o()], { onEmpty });

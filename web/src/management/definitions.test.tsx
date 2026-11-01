@@ -70,13 +70,12 @@ describe("Definitions", () => {
       def("specialist", "go", null, { builtin: false }),
       def("specialist", "broken", "specialists/broken.md: no skills"),
     ]);
-    for (const tab of ["Orchestrators", "Specialists", "Skills"]) expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
+    for (const tab of ["Specialists", "Skills"]) expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
 
     // A built-in is read-only until Override.
-    await fleetTab("Orchestrators");
-    expect(fleetSelected()).toHaveTextContent("Orchestrators");
+    await fleetTab("Specialists");
+    expect(fleetSelected()).toHaveTextContent("Specialists");
     await userEvent.click(await row("bug-fix built-in"));
-    expect(screen.queryByRole("button", { name: /rust/ })).toBeNull();
     expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "orchestrator", "bug-fix");
     const text = doc("bug-fix", "Fix it.");
     await land(h.reads[0]!, file("orchestrator", "bug-fix", text, true));
@@ -97,7 +96,6 @@ describe("Definitions", () => {
     expect(editor("orchestrators/bug-fix")).toHaveValue("Fix it. Now.");
 
     // The list says what each one is; Reset asks first.
-    await fleetTab("Specialists");
     expect(await row("go yours")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "broken built-in ⚠" })).toBeInTheDocument();
     expect(screen.getByText(/no skills/)).toBeInTheDocument();
@@ -130,6 +128,29 @@ describe("Definitions", () => {
     expect(editor("specialists/rust")).toHaveValue("Built in.");
   });
 
+  it("definitions_show_one_specialists_tab_with_roles", async () => {
+    const h = await defsTab("Specialists", [def("orchestrator", "direct"), def("specialist", "rust"), def("skill", "tdd")]);
+    expect(screen.queryByRole("tab", { name: "Orchestrators" })).toBeNull();
+    const direct = await row("direct built-in");
+    const rust = row("rust built-in");
+    expect(within(direct).getByTitle("Role")).toHaveTextContent("orchestrator");
+    expect(within(await rust).getByTitle("Role")).toHaveTextContent("rust");
+    expect(within(direct).getByTitle("Role")).toHaveClass("badge");
+    expect(screen.queryByRole("button", { name: "tdd built-in" })).toBeNull();
+    // Each opens from its own folder.
+    await userEvent.click(direct);
+    expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "orchestrator", "direct");
+    await land(h.reads[0]!, file("orchestrator", "direct", doc("direct", "o"), true));
+    expect(editor("orchestrators/direct")).toHaveValue("o");
+    await click("rust built-in");
+    expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
+    await land(h.reads[1]!, file("specialist", "rust", doc("rust", "s"), true));
+    expect(editor("specialists/rust")).toHaveValue("s");
+    // Skills keep their own tab, with no role.
+    await fleetTab("Skills");
+    expect(within(await row("tdd built-in")).queryByTitle("Role")).toBeNull();
+  });
+
   it("pr_styles_tab_lists_and_edits_styles", async () => {
     const names = ["conventional-semver-pre1.0", "conventional-semver", "conventional", "minimal", "plain"];
     await defsTab("PR styles", [...names.map((n) => def("pr_style", n)), def("pr_style", "broken", "pr_styles/broken.md: no title")]);
@@ -144,7 +165,7 @@ describe("Definitions", () => {
   });
 
   it("a_saved_definition_is_the_users_file_and_the_list_is_asked_again", async () => {
-    const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix", null, { mode: "auto", effort: "high" })]);
+    const h = await defsTab("Specialists", [def("orchestrator", "bug-fix", null, { mode: "auto", effort: "high" })]);
     // egui's `mode_effort` line under the name.
     expect(await screen.findByText("auto · high")).toBeInTheDocument();
     await click("bug-fix built-in");
@@ -167,7 +188,7 @@ describe("Definitions", () => {
     await click("go yours");
     await land(h.reads[0]!, file("specialist", "go", doc("go", "mine"), false));
     await userEvent.type(editor("specialists/go"), "!");
-    await fleetTab("Orchestrators");
+    await fleetTab("Skills");
     expect(screen.getByText("No definition selected.")).toBeInTheDocument();
     await click("Kanban");
     await click("Fleet");
@@ -178,21 +199,19 @@ describe("Definitions", () => {
   });
 
   it("a_save_landing_after_opening_another_definition_keeps_both", async () => {
-    const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix"), def("specialist", "go", null, { builtin: false })]);
+    const h = await defsTab("Specialists", [def("orchestrator", "bug-fix"), def("specialist", "go", null, { builtin: false })]);
     await click("bug-fix built-in");
     await land(h.reads[0]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     await click("Override");
     await userEvent.type(editor("orchestrators/bug-fix"), "b");
     await click("Save");
     // Moved on to another kind and editing there when the save lands.
-    await fleetTab("Specialists");
     await click("go yours");
     await land(h.reads[1]!, file("specialist", "go", doc("go", "mine"), false));
     await userEvent.type(editor("specialists/go"), "!");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
     expect(editor("specialists/go")).toHaveValue("mine!");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-    await fleetTab("Orchestrators");
     await click("bug-fix built-in");
     expect(editor("orchestrators/bug-fix")).toHaveValue("ab");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -200,7 +219,7 @@ describe("Definitions", () => {
   });
 
   it("a_read_sent_before_a_save_landing_after_it_is_ignored", async () => {
-    const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix")]);
+    const h = await defsTab("Specialists", [def("orchestrator", "bug-fix")]);
     await click("bug-fix built-in");
     await land(h.reads[0]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     await click("Override");
@@ -222,7 +241,7 @@ describe("Definitions", () => {
       lists.push(p);
       return p.promise;
     });
-    const h = await defsTab("Orchestrators", [], { personaDefinitions: definitions });
+    const h = await defsTab("Specialists", [], { personaDefinitions: definitions });
     const builtin = [def("orchestrator", "bug-fix")];
     await land(lists[0]!, builtin);
     await click("bug-fix built-in");
@@ -230,8 +249,8 @@ describe("Definitions", () => {
     await click("Override");
     await click("Save");
     // Out of the tab and back while the save is out: lists asked before it, answered after the one it asks.
+    await fleetTab("Skills");
     await fleetTab("Specialists");
-    await fleetTab("Orchestrators");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
     await land(lists[3]!, [def("orchestrator", "bug-fix", null, { builtin: false, overridden: true })]);
     await land(lists[1]!, builtin);
@@ -263,7 +282,7 @@ describe("Definitions", () => {
   });
 
   it("a_failed_list_load_tells_the_footer", async () => {
-    await management("Orchestrators", { over: { personaDefinitions: vi.fn().mockRejectedValue(new FleetError("daemon down")) } });
+    await management("Specialists", { over: { personaDefinitions: vi.fn().mockRejectedValue(new FleetError("daemon down")) } });
     expect(await within(footer()).findByText("Could not load the orchestrators and specialists: daemon down")).toBeInTheDocument();
     // The tab waits for a list, as egui's.
     expect(screen.getByText("Loading…")).toBeInTheDocument();

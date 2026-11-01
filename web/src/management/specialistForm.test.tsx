@@ -369,9 +369,9 @@ describe("New definition", () => {
       defs.loadList();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [p.persona]);
-    // With the role free, the tab shows whichever role is open, as the merged tab list will.
-    const kind = p.roleFixed === false ? (defs.st.selected?.kind ?? p.kind ?? "specialist") : (p.kind ?? "specialist");
-    return <Definitions kind={kind} defs={defs} roleFixed={p.roleFixed} />;
+    // With the role free, the tab lists both roles, as the merged Specialists tab does.
+    const kinds: DefKind[] = p.roleFixed === false ? ["orchestrator", "specialist"] : [p.kind ?? "specialist"];
+    return <Definitions kinds={kinds} defs={defs} roleFixed={p.roleFixed} />;
   }
 
   async function dialog(kind: DefKind = "specialist", roleFixed = true, over: Record<string, unknown> = {}) {

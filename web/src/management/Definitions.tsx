@@ -15,7 +15,7 @@ import { SpecialistForm } from "./SpecialistForm";
 import { defDirty, usable, type DefinitionsApi } from "./definitions";
 import { writeDef } from "./frontmatter";
 
-// A port of crates/fleet-gui/src/views/management/definitions.rs: one kind's definitions, built-in or the user's, with
+// A port of crates/fleet-gui/src/views/management/definitions.rs: one tab's definitions, built-in or the user's, with
 // the selected one's file. A built-in is read-only until Override copies it into a draft that saves as the user's file.
 
 /** egui's `ROWS`: the editor's height in lines. */
@@ -40,6 +40,12 @@ const ORIGIN_SHORT = { ...ORIGIN_TEXT, copy: "your copy" } as const;
 
 const tag = (d: DefInfo) => ORIGIN_SHORT[origin(d)];
 
+/** What an agent from this definition is in a task: `orchestrator`, or the specialist's own name. */
+function role(d: DefInfo) {
+  if (d.kind === "orchestrator") return "orchestrator";
+  return d.kind === "specialist" ? d.name : null;
+}
+
 /** `auto · high`: what the definition's agents start with; nothing for a file that names neither. */
 const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · ");
 
@@ -50,10 +56,18 @@ const newText = (name: string) =>
   writeDef("", { fields: { name, summary: "", skills: [], model: null, mode: null, effort: null }, body: `# ${name}\n` });
 
 /** `roleFixed`: the tab fixes each definition's role. The merged tab list lifts it. */
-export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; defs: DefinitionsApi; roleFixed?: boolean }) {
+export function Definitions({
+  kinds,
+  defs,
+  roleFixed = true,
+}: {
+  kinds: readonly DefKind[];
+  defs: DefinitionsApi;
+  roleFixed?: boolean;
+}) {
   const { st } = defs;
   const [creating, setCreating] = useState(false);
-  const all = kind === "pr_style" ? st.styles : st.list;
+  const all = kinds.includes("pr_style") ? st.styles : st.list;
   if (all === null) {
     return (
       <div className="tabbed-page">
@@ -61,24 +75,26 @@ export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; d
       </div>
     );
   }
-  const listed = all.filter((d) => d.kind === kind);
-  const selected = st.selected?.kind === kind ? st.selected.name : null;
+  const listed = all.filter((d) => kinds.includes(d.kind));
+  const selected = st.selected && kinds.includes(st.selected.kind) ? st.selected : null;
+  // One New entry per tab: the merged Specialists tab starts a specialist and lets its dialog pick the role.
+  const newRole = kinds.includes("specialist") ? "specialist" : kinds.find(isForm);
   return (
     <ListDetail
       width="management"
-      listLabel={KINDS[kind].label}
-      detailLabel={selected ?? "Definition"}
+      listLabel={KINDS[kinds[0]!].label}
+      detailLabel={selected?.name ?? "Definition"}
       list={
         <>
-          {isForm(kind) && (
+          {newRole && (
             <div className="definition-new">
-              <Button onClick={() => setCreating(true)}>+ New {kind}</Button>
+              <Button onClick={() => setCreating(true)}>+ New {newRole}</Button>
             </div>
           )}
-          {creating && isForm(kind) && (
+          {creating && newRole && (
             <NewDefinitionDialog
               list={all}
-              kind={kind}
+              kind={newRole}
               roleFixed={roleFixed}
               onClose={() => setCreating(false)}
               onCreate={(role, name) => {
@@ -90,17 +106,18 @@ export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; d
           {listed.length === 0 && <p className="note">None yet.</p>}
           <ul>
             {listed.map((d) => (
-              <li key={d.name}>
+              <li key={defs.key(d.kind, d.name)}>
                 <ListRow
                   name={`${d.name} ${tag(d)}${d.error ? " ⚠" : ""}`}
-                  selected={d.name === selected}
-                  onSelect={() => defs.open(kind, d.name)}
+                  selected={d.kind === selected?.kind && d.name === selected.name}
+                  onSelect={() => defs.open(d.kind, d.name)}
                 >
                   <span className="definition-row">
                     <span className="definition-row-head">
                       <span className="list-row-name">{d.name}</span>
                       {d.nickname && <span className="low definition-row-nick">{d.nickname}</span>}
                       <span className="low definition-row-tag">{tag(d)}</span>
+                      {role(d) && <Badge label="Role">{role(d)}</Badge>}
                     </span>
                     {modeEffort(d) && <span className="low">{modeEffort(d)}</span>}
                     {d.error && (
@@ -121,9 +138,9 @@ export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; d
           <p className="note">No definition selected.</p>
         ) : (
           <Editor
-            kind={kind}
-            name={selected}
-            info={listed.find((d) => d.name === selected)}
+            kind={selected.kind}
+            name={selected.name}
+            info={listed.find((d) => d.kind === selected.kind && d.name === selected.name)}
             defs={defs}
             skills={usable(st.list ?? [], "skill")}
             roleFixed={roleFixed}

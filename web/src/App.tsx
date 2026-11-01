@@ -297,7 +297,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   useEffect(() => {
     if (route !== "fleet") return;
     if (["pr-styles", "pull-requests", "products"].includes(fleetTab)) loadStyles();
-    if (["orchestrators", "specialists", "skills", "products"].includes(fleetTab)) loadDefinitions();
+    if (["specialists", "skills", "products"].includes(fleetTab)) loadDefinitions();
   }, [route, fleetTab, loadDefinitions, loadStyles]);
 
   // A product's override keys offer the persona's definitions and the fleet's PR styles.
@@ -687,7 +687,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
         onDraft={newTask.setDraft}
         personas={personaList}
         product={productInfo}
-        orchestrators={newTask.orchestrators}
         repos={newTask.repos}
         reposError={newTask.reposError}
         listings={newTask.listings}
@@ -818,11 +817,10 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     setupOpen={managedSetup !== null}
                   />
                 );
-              case "orchestrators":
               case "specialists":
               case "skills":
               case "pr-styles":
-                return <Definitions kind={DEF_TABS[tab]} defs={definitions} />;
+                return <Definitions kinds={DEF_TABS[tab]} defs={definitions} roleFixed={tab !== "specialists"} />;
               default:
                 return <NotYet />;
             }

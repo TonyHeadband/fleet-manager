@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { FleetError, type FleetClient } from "../api/client";
-import type { DefInfo } from "../api/generated/DefInfo";
 import type { Product } from "../api/generated/Product";
 import type { RepoInfo } from "../api/generated/RepoInfo";
 import type { Notice } from "../shell/messages";
@@ -25,7 +24,6 @@ export function useNewTask(
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [reposError, setReposError] = useState<string | null>(null);
-  const [defs, setDefs] = useState<DefInfo[]>([]);
   const [listings, setListings] = useState<Listings>({});
   // Read by answers that land later: the dialog's state as it is now, not as it was when they were asked.
   const now = useRef({ open, draft });
@@ -47,14 +45,6 @@ export function useNewTask(
         setDraft((d) => ({ ...d, chosen: d.chosen.filter((c) => list.some((r) => r.name === c)), starts: {} }));
       },
       (e: unknown) => n === reposAsked.current && setReposError(`Could not load the repos: ${message(e)}`),
-    );
-  };
-
-  // The dialog's persona owns the orchestrators it offers; an answer for a persona since left is dropped.
-  const fetchDefs = (persona: string) => {
-    client.personaDefinitions(persona).then(
-      (list) => now.current.draft.persona === persona && setDefs(list),
-      () => {},
     );
   };
 
@@ -90,7 +80,6 @@ export function useNewTask(
     opening.current++;
     setListings({});
     setRepos((r) => (persona === draft.persona ? r : []));
-    setDefs((d) => (persona === draft.persona ? d : []));
     setDraft((d) => resetChoices(setPersona(d, persona)));
     setReposError(null);
     setOpen(true);
@@ -98,7 +87,6 @@ export function useNewTask(
     // As Lite's open path: the board's repos are asked for again, and the dialog's for its persona.
     reloadRepos();
     fetchRepos(persona);
-    fetchDefs(persona);
   };
 
   const changePersona = (id: string) => {
@@ -108,8 +96,6 @@ export function useNewTask(
     setDraft((d) => setPersona(d, id));
     now.current = { ...now.current, draft: { ...draft, persona: id } };
     fetchRepos(id);
-    setDefs([]);
-    fetchDefs(id);
   };
 
   const retry = (name: string, path: string) => listCheckouts(name, path);
@@ -128,8 +114,9 @@ export function useNewTask(
         slug: null,
         title: d.title.trim() === "" ? null : d.title,
         persona: d.persona,
-        kind: d.role === null ? "solo" : "orchestrator",
-        role: d.role,
+        // Plans come from the supervisor; New task starts the orchestrator that agrees one change with the owner.
+        kind: "orchestrator",
+        role: "direct",
       })
       .then(
         (started) => {
@@ -164,7 +151,6 @@ export function useNewTask(
     setDraft,
     repos,
     reposError,
-    orchestrators: defs.filter((d) => d.kind === "orchestrator" && !d.error).map((d) => d.name),
     listings,
     openDialog,
     close: () => setOpen(false),

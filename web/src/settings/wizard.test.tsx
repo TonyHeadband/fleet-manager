@@ -229,6 +229,7 @@ describe("The wizard from the board", () => {
       },
     });
     await userEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await userEvent.click(await screen.findByRole("button", { name: "core" }));
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(within(screen.getByRole("dialog", { name: "New task" })).getByRole("button", { name: "Start task" }));
     await userEvent.click(await screen.findByRole("button", { name: "Open the setup wizard" }));

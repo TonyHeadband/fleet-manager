@@ -12,13 +12,12 @@ import type { FleetTab } from "../shell/routes";
 /** `{persona}/{kind}/{name}`: one definition. A PR style belongs to no persona, so its persona is empty. */
 export type DefKey = string;
 
-/** The Fleet tabs that each list one kind. */
+/** The Fleet tabs and the kinds each lists: Specialists holds the orchestrators too, each with its role. */
 export const DEF_TABS = {
-  orchestrators: "orchestrator",
-  specialists: "specialist",
-  skills: "skill",
-  "pr-styles": "pr_style",
-} as const satisfies Partial<Record<FleetTab, DefKind>>;
+  specialists: ["orchestrator", "specialist"],
+  skills: ["skill"],
+  "pr-styles": ["pr_style"],
+} as const satisfies Partial<Record<FleetTab, readonly DefKind[]>>;
 
 export const defKey = (persona: string, kind: DefKind, name: string): DefKey => `${persona}/${kind}/${name}`;
 

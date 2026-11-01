@@ -99,13 +99,15 @@ export const FLEET_TABS = [
   { id: "pull-requests", label: "Pull requests", group: "rules" },
   { id: "workflow", label: "Workflow", group: "rules" },
   { id: "instructions", label: "Instructions", group: "definitions" },
-  { id: "orchestrators", label: "Orchestrators", group: "definitions" },
   { id: "specialists", label: "Specialists", group: "definitions" },
   { id: "skills", label: "Skills", group: "definitions" },
   { id: "pr-styles", label: "PR styles", group: "definitions" },
 ] as const;
 
 export type FleetTab = (typeof FLEET_TABS)[number]["id"];
+
+/** Tabs that went, and the tab their saved addresses open now: Specialists lists the orchestrators too. */
+const FLEET_TAB_MOVES: Record<string, FleetTab> = { orchestrators: "specialists" };
 
 /** Settings' tabs: this machine only, the app and its daemon (`#settings?tab=log`). */
 export const SETTINGS_TABS = [
@@ -122,16 +124,18 @@ function tabHref<Id extends string>(route: Route, tabs: readonly { id: Id }[], t
   return tab === tabs[0]!.id ? `#${route}` : `#${route}?tab=${tab}`;
 }
 
-/** The tab the address picks; the first, as egui opens on, when it names none or one that does not exist. */
-function useTab<Id extends string>(tabs: readonly { id: Id }[]): Id {
-  const tab = new URLSearchParams(useHash().split("?")[1] ?? "").get("tab");
-  return tabs.find((t) => t.id === tab)?.id ?? tabs[0]!.id;
+/** The tab the address picks, or where a tab that went moved to; the first, as egui opens on, when it names none or one
+ * that does not exist. */
+function tabFromHash<Id extends string>(hash: string, tabs: readonly { id: Id }[], moves: Record<string, Id> = {}): Id {
+  const tab = new URLSearchParams(hash.split("?")[1] ?? "").get("tab");
+  return tabs.find((t) => t.id === tab)?.id ?? (tab !== null && Object.hasOwn(moves, tab) ? moves[tab] : undefined) ?? tabs[0]!.id;
 }
 
 export const fleetHref = (tab: FleetTab = "overview") => tabHref("fleet", FLEET_TABS, tab);
-export const useFleetTab = () => useTab(FLEET_TABS);
+export const fleetTabFromHash = (hash: string) => tabFromHash(hash, FLEET_TABS, FLEET_TAB_MOVES);
+export const useFleetTab = () => fleetTabFromHash(useHash());
 export const settingsHref = (tab: SettingsTab = "app") => tabHref("settings", SETTINGS_TABS, tab);
-export const useSettingsTab = () => useTab(SETTINGS_TABS);
+export const useSettingsTab = () => tabFromHash(useHash(), SETTINGS_TABS);
 
 /** Goes to `href` and tells the route hooks at once; `replace` corrects the address without a history entry. */
 export function navigate(href: string, replace = false) {
