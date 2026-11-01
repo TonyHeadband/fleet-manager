@@ -125,6 +125,25 @@ The built-in definitions carry a `model:`. A user file with a built-in's name re
 copy you made earlier does not get a `model:` the built-in has since gained. Add the line to your copy, or use
 **Reset to built-in** to drop it. See [Orchestrated tasks](orchestrated-tasks.md#definitions).
 
+## The specialist form
+
+Orchestrators and specialists open as a form, for the active persona, in three sections:
+
+- **Identity**: the name, which is the file's name and cannot change, and the **Nickname**.
+- **Settings**: the summary, the skills (add one from the persona's skills), the model, the mode and the effort.
+- **Instructions**: the file's body, with Edit and Preview.
+
+**Save** writes the file and **Revert** drops your edits. A built-in is read-only until **Override**, which opens an
+editable copy as an unsaved draft: nothing is written until you Save. Over a built-in, **Reset to built-in** asks
+first, then deletes your copy.
+
+The **Nickname** can be set on a built-in without overriding it. It belongs to the persona, so another persona can call
+the same specialist something else: see [Specialist nicknames](personas.md#specialist-nicknames).
+
+**+ New specialist** (or **+ New orchestrator**) asks for a name and opens an unsaved draft. A name that is a built-in
+is refused: Override that one instead. A definition that is your own file can change its **Role** between specialist
+and orchestrator; a built-in keeps its role, overridden or not.
+
 ## Workflow
 
 Workflow explains the `.fleet/workflow.yml` file each repo keeps on its base branch, with a two-step example. The
@@ -136,5 +155,6 @@ tab does not edit the file: add it to the repo and push it. What the file holds 
 The agent instructions and settings edited in Management live in the config folder
 (`~/.config/fleet-manager` on Linux, `%USERPROFILE%\AppData\Roaming\fleet-manager` on Windows; see
 [Where your data lives](../getting-started/install.md#where-your-data-lives)): `agent/` holds `instructions.md`
-and `settings.json`, and `fleet/` the orchestrator, specialist, skill and PR style definitions. The active product picked on
-Overview is saved as `active_product` in `gui.toml`, in the same folder.
+and `settings.json`, and `fleet/` the PR style definitions. Orchestrators, specialists and skills are per persona: each
+persona keeps its own under `personas/<id>/fleet/`, next to its `nicknames.json`, while PR styles stay fleet-wide in
+`fleet/`. The active product picked on Overview is saved as `active_product` in `gui.toml`, in the same folder.

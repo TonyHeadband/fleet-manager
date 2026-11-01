@@ -478,9 +478,9 @@ repo's tests run as they do on CI.
 
 ## Definitions
 
-Definitions live in the binary (built-ins, read-only) plus your files in `fleet/` in the
-[config folder](../getting-started/install.md#where-your-data-lives)
-(`orchestrators/`, `specialists/`, `skills/`, `pr-styles/`); a user file with a built-in's name overrides it and keeps
+Definitions live in the binary (built-ins, read-only) plus your files: per persona under `personas/<id>/fleet/`
+(`orchestrators/`, `specialists/`, `skills/`) and fleet-wide in `fleet/` in the
+[config folder](../getting-started/install.md#where-your-data-lives) (`pr-styles/`); a user file with a built-in's name overrides it and keeps
 its own text: it has no internal-resources wording unless you add it. Edit them in
 Management: see [Management](management.md). A definition can set a `model:`, a `mode:` and an `effort:`; see
 [Models](management.md#models) and [Mode and effort](#mode-and-effort).

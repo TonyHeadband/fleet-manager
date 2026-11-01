@@ -98,6 +98,17 @@
   align-items: baseline;
   gap: var(--space-item);
 }
+/* The name gives way first: the nickname keeps at least its first six characters and the origin never wraps. */
+.definition-row-nick {
+  min-width: 6ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.definition-row-tag {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .definition-row-error {
   display: flex;
   align-items: flex-start;

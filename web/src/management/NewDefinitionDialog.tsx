@@ -9,13 +9,15 @@ import { ROLES } from "./SpecialistForm";
 type Role = "orchestrator" | "specialist";
 
 /** Why `name` cannot be a new definition of this persona, or null. The daemon's own check follows on Save. */
-export function refusal(name: string, list: DefInfo[]): string | null {
+export function refusal(name: string, list: DefInfo[], role: Role): string | null {
   // The daemon's is_safe_dir_name: the name is a file name.
   if (!/^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(name)) {
     return "Use letters, digits, '.', '_' or '-', and do not start with '.' or '-'.";
   }
   const same = list.filter((d) => (d.kind === "specialist" || d.kind === "orchestrator") && d.name === name);
-  if (same.some((d) => d.builtin && !d.overridden)) return "That's a built-in: open it and Override.";
+  if (same.some((d) => d.kind === role && d.builtin && !d.overridden)) return "That's a built-in: open it and Override.";
+  const other = same.find((d) => d.kind !== role && d.builtin);
+  if (other) return `That's the built-in ${other.kind} ${name}; choose another name.`;
   if (same.length > 0) return `This persona already has ${name}.`;
   return null;
 }
@@ -36,7 +38,7 @@ export function NewDefinitionDialog({ list, kind, roleFixed, onCreate, onClose }
   const nameId = useId();
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>(kind);
-  const error = name === "" ? null : refusal(name, list);
+  const error = name === "" ? null : refusal(name, list, role);
   const ok = name !== "" && error === null;
   return (
     <Modal labelledBy={titleId} onClose={onClose}>

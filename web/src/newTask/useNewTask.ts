@@ -90,6 +90,7 @@ export function useNewTask(
     opening.current++;
     setListings({});
     setRepos((r) => (persona === draft.persona ? r : []));
+    setDefs((d) => (persona === draft.persona ? d : []));
     setDraft((d) => resetChoices(setPersona(d, persona)));
     setReposError(null);
     setOpen(true);

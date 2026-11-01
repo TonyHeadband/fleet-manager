@@ -98,10 +98,10 @@ describe("Definitions", () => {
 
     // The list says what each one is; Reset asks first.
     await fleetTab("Specialists");
-    expect(await row("go custom")).toBeInTheDocument();
+    expect(await row("go yours")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "broken built-in ⚠" })).toBeInTheDocument();
     expect(screen.getByText(/no skills/)).toBeInTheDocument();
-    await click("rust overrides built-in");
+    await click("rust your copy");
     await land(h.reads[1]!, file("specialist", "rust", doc("rust", "Mine."), false));
     expect(screen.getByRole("button", { name: "Revert" })).toBeInTheDocument();
     await click("Reset to built-in");
@@ -164,7 +164,7 @@ describe("Definitions", () => {
 
   it("a_draft_outlives_the_tab_and_the_view", async () => {
     const h = await defsTab("Specialists", [def("specialist", "go", null, { builtin: false })]);
-    await click("go custom");
+    await click("go yours");
     await land(h.reads[0]!, file("specialist", "go", doc("go", "mine"), false));
     await userEvent.type(editor("specialists/go"), "!");
     await fleetTab("Orchestrators");
@@ -186,7 +186,7 @@ describe("Definitions", () => {
     await click("Save");
     // Moved on to another kind and editing there when the save lands.
     await fleetTab("Specialists");
-    await click("go custom");
+    await click("go yours");
     await land(h.reads[1]!, file("specialist", "go", doc("go", "mine"), false));
     await userEvent.type(editor("specialists/go"), "!");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
@@ -236,8 +236,23 @@ describe("Definitions", () => {
     await land(lists[3]!, [def("orchestrator", "bug-fix", null, { builtin: false, overridden: true })]);
     await land(lists[1]!, builtin);
     await land(lists[2]!, builtin);
-    expect(await row("bug-fix overrides built-in")).toBeInTheDocument();
+    expect(await row("bug-fix your copy")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset to built-in" })).toBeInTheDocument();
+  });
+
+  it("the_list_row_names_the_origin_in_the_specs_words_and_keeps_the_nickname_whole", async () => {
+    await defsTab("Specialists", [
+      def("specialist", "rust", null, { nickname: "Ferris" }),
+      def("specialist", "go", null, { builtin: false, overridden: true }),
+      def("specialist", "mine", null, { builtin: false }),
+    ]);
+    const rust = await row("rust built-in");
+    expect(within(rust).getByText("Ferris")).toBeInTheDocument();
+    expect(within(rust).getByText("built-in")).toBeInTheDocument();
+    expect(within(await row("go your copy")).getByText("your copy")).toBeInTheDocument();
+    expect(within(await row("mine yours")).getByText("yours")).toBeInTheDocument();
+    expect(css).toMatch(/\.definition-row-nick \{[^}]*min-width: 6ch/);
+    expect(css).toMatch(/\.definition-row-tag \{[^}]*white-space: nowrap/);
   });
 
   it("a_long_caption_and_error_wrap", () => {
@@ -256,7 +271,7 @@ describe("Definitions", () => {
 
   it("a_failed_read_says_why", async () => {
     const h = await defsTab("Skills", [def("skill", "review", null, { builtin: false })]);
-    await click("review custom");
+    await click("review yours");
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     await refuse(h.reads[0]!, "skills/review.md: unreadable");
     expect(screen.getByText("skills/review.md: unreadable")).toBeInTheDocument();
@@ -275,7 +290,7 @@ describe("Definitions", () => {
     expect(screen.getByRole("button", { name: "Override" })).toBeEnabled();
     await click("Override");
     for (const name of ["Save", "Revert"]) expect(screen.getByRole("button", { name })).toBeEnabled();
-    await click("rust overrides built-in");
+    await click("rust your copy");
     await land(h.reads[1]!, file("specialist", "rust", doc("rust", "mine"), false));
     expect(screen.getByRole("button", { name: "Reset to built-in" })).toBeEnabled();
     await fleetTab("Agents");
@@ -306,14 +321,14 @@ describe("Definitions per persona", () => {
     const personaDefinitions = vi.fn().mockResolvedValue([def("specialist", "rust", null, { builtin: false })]);
     const personaDefinition = vi.fn(async (p: string) => file("specialist", "rust", doc("rust", `mine ${p}`), false));
     await management("Specialists", { personas: two, over: { personaDefinitions, personaDefinition } });
-    await userEvent.click(await row("rust custom"));
+    await userEvent.click(await row("rust yours"));
     await userEvent.type(await screen.findByRole("textbox", { name: "Instructions" }), " edited");
     expect(personaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
     await switchTo("Home");
-    await userEvent.click(await row("rust custom"));
+    await userEvent.click(await row("rust yours"));
     expect(await screen.findByRole("textbox", { name: "Instructions" })).toHaveValue("mine b");
     await switchTo("Work");
-    await userEvent.click(await row("rust custom"));
+    await userEvent.click(await row("rust yours"));
     expect(await screen.findByRole("textbox", { name: "Instructions" })).toHaveValue("mine a edited");
   });
 
@@ -343,7 +358,7 @@ describe("Definitions per persona", () => {
       savePersonaDefinition: vi.fn(() => save.promise),
     };
     await management("Specialists", { personas: two, over });
-    await userEvent.click(await row("rust custom"));
+    await userEvent.click(await row("rust yours"));
     await userEvent.type(await screen.findByRole("textbox", { name: "Instructions" }), "!");
     await click("Save");
     await switchTo("Home");

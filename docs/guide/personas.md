@@ -36,10 +36,10 @@ A persona whose login breaks later is flagged in the drawer and in Management, a
 
 ## Specialist nicknames
 
-A persona can give each specialist a nickname, just for fun: Management → Personas → the persona →
-**Specialist nicknames**, one field per specialist that loads, then **Save nicknames**. The board and the breakdown
-then show that persona's specialists as `Ferris (rust)` instead of `rust`. Agents, prompts, briefs and the log keep
-the real names, and a specialist with no nickname shows its name.
+A persona can give each specialist a nickname, just for fun. Set it in the **Nickname** field of the specialist's form
+in Management → Specialists: see [The specialist form](management.md#the-specialist-form). The board and the
+breakdown then show that persona's specialists as `Ferris (rust)` instead of `rust`. Agents, prompts, briefs and the
+log keep the real names, and a specialist with no nickname shows its name.
 
 A nickname is one line of at most 32 characters; a blank one is removed. They are kept in the persona's folder, in
 `nicknames.json` beside its `claude` and `gh` folders, so each persona has its own.

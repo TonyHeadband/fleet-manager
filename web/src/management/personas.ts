@@ -25,8 +25,6 @@ export interface PersonasState {
   checkError: string | null;
   /** Scripts to run by hand, because no terminal was found to run them in. */
   scripts: { claude?: string; gh?: string };
-  /** The nicknames as being edited, by specialist name; blank means none. */
-  nicknames: Record<string, string>;
   /** Answers from checks and updates, laid over the app's list until a new one lands; null is deleted here. */
   fresh: Record<string, Persona | null>;
 }
@@ -43,7 +41,6 @@ export const initialPersonas: PersonasState = {
   error: null,
   checkError: null,
   scripts: {},
-  nicknames: {},
   fresh: {},
 };
 
@@ -56,7 +53,6 @@ export const selected = (st: PersonasState, p: Persona): PersonasState => ({
   commitName: p.commit_name,
   commitEmail: p.commit_email,
   githubAuth: p.github_auth,
-  nicknames: { ...p.nicknames },
 });
 
 /** Ready with both logins ok: nothing for the periodic check to wait for. */
@@ -67,17 +63,6 @@ export const message = (e: unknown) => (e instanceof Error ? e.message : String(
 type Which = "claude" | "gh";
 
 const NO_CHANGE: PersonaUpdate = { name: null, commit_name: null, commit_email: null, github_auth: null, nicknames: null };
-
-/** egui's `cleaned`: the nicknames as Save sends them, trimmed, blank ones left out. */
-export const cleaned = (nicknames: Record<string, string>) =>
-  Object.fromEntries(
-    Object.entries(nicknames)
-      .map(([k, v]) => [k, v.trim()])
-      .filter(([, v]) => v !== ""),
-  );
-
-export const sameNicknames = (a: Record<string, string>, b: Record<string, string>) =>
-  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => b[k] === v);
 
 /** The tab's state and calls, kept above Management so what was typed outlives the tab, as egui's does. */
 /**
@@ -183,7 +168,7 @@ export function usePersonasTab(
         update((s) => ({ ...s, fresh: { ...s.fresh, [saved.id]: saved } }));
         // The board, the drawer and the breakdowns read the app's list: a new name or nickname shows there too.
         reload();
-        forShown(saved.id, (s) => ({ ...s, error: null, githubAuth: saved.github_auth, nicknames: { ...saved.nicknames } }));
+        forShown(saved.id, (s) => ({ ...s, error: null, githubAuth: saved.github_auth }));
         if (relogin && now.current.selected === saved.id) beginGithub(saved);
       },
       (e: unknown) => update((s) => ({ ...s, error: `Could not save: ${message(e)}` })),
@@ -196,7 +181,6 @@ export function usePersonasTab(
     loadMeta,
     rename: (p: Persona) => save(p, { name: now.current.name.trim() }),
     saveIdentity: (p: Persona) => save(p, { commit_name: now.current.commitName.trim(), commit_email: now.current.commitEmail.trim() }),
-    saveNicknames: (p: Persona) => save(p, { nicknames: cleaned(now.current.nicknames) }),
     relogin: (p: Persona, which: Which) => {
       if (which === "claude") open(p, "claude");
       // A changed auth choice is saved first; the login starts when the daemon has it.

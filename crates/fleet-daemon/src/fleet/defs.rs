@@ -1,6 +1,7 @@
 //! Orchestrator types (`orchestrators/<name>.md`), specialists (`specialists/<name>.md`), skills
-//! (`skills/<name>/SKILL.md`) and PR styles (`pr-styles/<name>.md`): Markdown with YAML frontmatter. The built-ins are embedded in the binary; a user file
-//! of the same name under `Config.fleet_dir` takes their place until it is reset.
+//! (`skills/<name>/SKILL.md`) and PR styles (`pr-styles/<name>.md`): Markdown with YAML frontmatter. The built-ins are
+//! embedded in the binary. A persona's files live under `<personas_dir>/<id>/fleet/`, and one of the same name takes
+//! the built-in's place until it is reset. PR styles are not per persona: they stay under `Config.fleet_dir`.
 use crate::config::is_safe_dir_name;
 use fleet_api::{DefFile, DefInfo, DefKind, Effort, PermissionMode, Versioning};
 use rust_embed::RustEmbed;

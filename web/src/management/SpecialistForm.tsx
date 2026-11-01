@@ -125,8 +125,8 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
     setNickError(null);
   };
 
-  // Only the persona's own file can move, and not with unsaved changes: the move works on the file as saved.
-  const ownFile = info !== undefined && (info.overridden || !info.builtin);
+  // Only the persona's own file can move (the daemon refuses an overridden built-in), and not with unsaved changes: the move works on the file as saved.
+  const ownFile = info !== undefined && !info.builtin;
   const move = async (to: string) => {
     setRoleError(null);
     setMoving(true);
@@ -140,6 +140,8 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
   };
 
   const { fields } = parsed;
+  // An effort the form has no chip for (xhigh, max) stays visible as selected, so the form does not misreport the file.
+  const extraEffort = fields.effort !== null && !EFFORTS.some((e) => e.value === fields.effort) ? fields.effort : null;
 
   return (
     <div className="specialist-form">
@@ -237,6 +239,11 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
             <div className="form-field">
               <span className="mono-label caption">Effort</span>
               <div className="form-chips">
+                {extraEffort !== null && (
+                  <Chip selected disabled={!editable} onClick={() => change({ effort: null })}>
+                    {extraEffort}
+                  </Chip>
+                )}
                 {EFFORTS.map((e) => (
                   <Chip key={e.value} selected={fields.effort === e.value} disabled={!editable} onClick={() => change({ effort: fields.effort === e.value ? null : e.value })}>
                     {e.label}

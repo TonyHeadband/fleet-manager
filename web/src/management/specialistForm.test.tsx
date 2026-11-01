@@ -282,7 +282,7 @@ describe("SpecialistForm", () => {
 
   describe("moving between roles", () => {
     const movable = (over: Record<string, unknown> = {}) =>
-      form(ownCopy, { builtin: false, overridden: true }, { movePersonaDefinition: vi.fn().mockResolvedValue(undefined), ...over }, { roleFixed: false });
+      form(ownCopy, { builtin: false }, { movePersonaDefinition: vi.fn().mockResolvedValue(undefined), ...over }, { roleFixed: false });
 
     it("role_change_moves_and_reopens", async () => {
       const client = await movable();
@@ -318,6 +318,19 @@ describe("SpecialistForm", () => {
       expect(screen.queryByRole("combobox", { name: "Role" })).toBeNull();
       expect(screen.getByText("Specialist")).toBeInTheDocument();
     });
+
+    it("an_overridden_builtin_keeps_its_role_read_only", async () => {
+      await form(ownCopy, { builtin: true, overridden: true }, {}, { roleFixed: false });
+      expect(screen.queryByRole("combobox", { name: "Role" })).toBeNull();
+    });
+  });
+
+  it("an_effort_outside_the_chips_shows_as_an_extra_selected_one", async () => {
+    await form({ ...ownCopy, text: TEXT.replace("effort: medium", "effort: xhigh") }, { builtin: false });
+    expect(screen.getByRole("button", { name: "xhigh" })).toHaveAttribute("aria-pressed", "true");
+    for (const e of ["Low", "Medium", "High"]) expect(screen.getByRole("button", { name: e })).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(screen.getByRole("button", { name: "High" }));
+    expect(screen.queryByRole("button", { name: "xhigh" })).toBeNull();
   });
 
   it("the_form_has_help_lines_and_a_small_avatar_tile", async () => {
@@ -380,7 +393,8 @@ describe("New definition", () => {
     });
     render(<Tab client={client} />);
     const row = await screen.findByRole("button", { name: /^rust / });
-    expect(row).toHaveTextContent("· Ferris");
+    expect(row).toHaveTextContent("Ferris");
+    expect(row).toHaveTextContent("your copy");
     await userEvent.click(row);
     expect(await screen.findByText(/your copy · overrides built-in/i)).toHaveClass("badge");
   });
@@ -388,6 +402,18 @@ describe("New definition", () => {
   it("an_unopened_definition_shows_no_origin_badge", async () => {
     await dialog();
     expect(document.querySelector(".definition-editor .badge")).toBeNull();
+  });
+
+  it("new_refuses_the_other_roles_builtin_name", async () => {
+    await dialog("orchestrator", true, {
+      personaDefinitions: vi.fn().mockResolvedValue([info({ kind: "orchestrator", name: "bug-fix" }), info()]),
+    });
+    await userEvent.type(field("Name"), "rust");
+    expect(screen.getByText("That's the built-in specialist rust; choose another name.")).toHaveClass("error-line");
+    expect(button("OK")).toBeDisabled();
+    await userEvent.clear(field("Name"));
+    await userEvent.type(field("Name"), "bug-fix");
+    expect(screen.getByText("That's a built-in: open it and Override.")).toBeInTheDocument();
   });
 
   it("new_refuses_a_builtin_name", async () => {

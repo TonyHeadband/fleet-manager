@@ -98,6 +98,23 @@ describe("New task, as Lite's dialog", () => {
     expect(personaDefinitions).toHaveBeenLastCalledWith("work");
   });
 
+  it("reopening_under_another_persona_drops_the_previous_orchestrators", async () => {
+    let held: (() => void) | null = null;
+    const personaDefinitions = vi.fn((p: string) =>
+      p === "me" && held === null && personaDefinitions.mock.calls.filter(([q]) => q === "me").length > 1
+        ? new Promise<DefInfo[]>((resolve) => (held = () => resolve([def("lead")])))
+        : Promise.resolve([def(p === "me" ? "lead" : "boss")]),
+    );
+    await openDialog({ personaDefinitions });
+    await choose("Persona", "work");
+    await waitFor(async () => expect(await optionsOf("Type")).toEqual(["Solo", "boss"]));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await reopen();
+    await waitFor(() => expect(held).not.toBeNull());
+    expect(await picked("Persona")).toBe("me");
+    expect(await optionsOf("Type")).toEqual(["Solo"]);
+  });
+
   it("orchestrator_type_limits_to_one_repo", async () => {
     await openDialog({ personaDefinitions: vi.fn().mockResolvedValue([def("lead")]) });
     await pick("core");

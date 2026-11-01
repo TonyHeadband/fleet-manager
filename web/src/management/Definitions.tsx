@@ -35,10 +35,10 @@ function origin(d: DefInfo): keyof typeof ORIGIN_TEXT {
   return d.builtin ? "builtin" : "yours";
 }
 
-function tag(d: DefInfo) {
-  if (d.overridden) return "overrides built-in";
-  return d.builtin ? "built-in" : "custom";
-}
+/** The list row's short form: the badge's long "your copy · overrides built-in" would wrap there. */
+const ORIGIN_SHORT = { ...ORIGIN_TEXT, copy: "your copy" } as const;
+
+const tag = (d: DefInfo) => ORIGIN_SHORT[origin(d)];
 
 /** `auto · high`: what the definition's agents start with; nothing for a file that names neither. */
 const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · ");
@@ -98,11 +98,9 @@ export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; d
                 >
                   <span className="definition-row">
                     <span className="definition-row-head">
-                      <span className="list-row-name">
-                        {d.name}
-                        {d.nickname && <span className="low"> · {d.nickname}</span>}
-                      </span>
-                      <span className="low">{tag(d)}</span>
+                      <span className="list-row-name">{d.name}</span>
+                      {d.nickname && <span className="low definition-row-nick">{d.nickname}</span>}
+                      <span className="low definition-row-tag">{tag(d)}</span>
                     </span>
                     {modeEffort(d) && <span className="low">{modeEffort(d)}</span>}
                     {d.error && (
