@@ -743,7 +743,15 @@ fn the_chart_sizes_are_exported() {
     assert!(css.contains("--layout-chart-spark: 56px;"), "{css}");
     assert!(css.contains("--size-stat: 40px;"), "{css}");
     let ts = layout_ts();
-    for want in ["chartLine: 2", "chartCompact: 180", "chartTiny: 120", "chartSpark: 56", "chartPlot: 80", "chartLabelW: 96", "chartValueW: 44"] {
+    for want in [
+        "chartLine: 2",
+        "chartCompact: 180",
+        "chartTiny: 120",
+        "chartSpark: 56",
+        "chartPlot: 80",
+        "chartLabelW: 96",
+        "chartValueW: 44",
+    ] {
         assert!(ts.contains(want), "{want} in {ts}");
     }
 }
