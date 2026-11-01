@@ -7,8 +7,8 @@ use fleet_api::{
     InternalCommit, InternalFile, InternalFiles, InternalHistory, NewPersona, NewProduct,
     NewRelease, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
     ProductOverride, ProductUpdate, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList,
-    ToolError, ToolList, UiSchema, VersionInfo, Workspace,
+    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task,
+    TaskList, ToolError, ToolList, UiSchema, VersionInfo, Workspace,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -464,6 +464,15 @@ impl FleetClient {
     pub fn check_persona(&self, id: &str) -> Result<Persona, FleetError> {
         let path = format!("/api/personas/{}/check", encode_path_segment(id));
         self.json_within("POST", &path, None, CHECK_TIMEOUT)
+    }
+
+    /// The daemon checks the token against GitHub before it keeps it, so this can take as long as a check.
+    pub fn set_persona_token(&self, id: &str, token: &str) -> Result<Persona, FleetError> {
+        let path = format!("/api/personas/{}/token", encode_path_segment(id));
+        let body = to_value(&SetToken {
+            token: token.to_string(),
+        })?;
+        self.json_within("PUT", &path, Some(&body), CHECK_TIMEOUT)
     }
 
     pub fn agent_config(&self) -> Result<AgentConfig, FleetError> {

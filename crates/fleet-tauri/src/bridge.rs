@@ -346,7 +346,7 @@ pub async fn run_login(
     .map_err(|e| e.to_string())?
 }
 
-/// Hands a token to the persona's gh. It lives only in this call: never logged, never kept.
+/// Hands a token to the daemon, which keeps it once GitHub accepts it. It lives only in this call: never logged.
 #[tauri::command]
 pub async fn save_pat(
     paths: tauri::State<'_, Paths>,
@@ -355,13 +355,10 @@ pub async fn save_pat(
 ) -> Result<(), String> {
     let paths = paths.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let list = local_daemon(&paths)?.personas().map_err(|e| e.message)?;
-        let p = list
-            .personas
-            .iter()
-            .find(|p| p.id == persona)
-            .ok_or("The persona is gone")?;
-        login::pat_login(p, list.gh_login_program(), &token)
+        local_daemon(&paths)?
+            .set_persona_token(&persona, &token)
+            .map(|_| ())
+            .map_err(|e| e.message)
     })
     .await
     .map_err(|e| e.to_string())?

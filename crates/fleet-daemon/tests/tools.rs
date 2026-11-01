@@ -273,6 +273,21 @@ mod service {
     }
 
     #[tokio::test]
+    async fn gh_is_not_required() {
+        let t = tempfile::tempdir().unwrap();
+        install_git(&bin(&t));
+        install_claude(&bin(&t));
+        let (tools, _) = tools(&bin(&t), &[]);
+        let list = tools.check().await;
+        assert!(matches!(
+            row(&list, ToolId::Gh).error,
+            Some(ToolError::NotInstalled { .. })
+        ));
+        assert!(!row(&list, ToolId::Gh).required);
+        assert!(list.missing_required().next().is_none());
+    }
+
+    #[tokio::test]
     async fn an_old_gh_is_too_old() {
         let t = tempfile::tempdir().unwrap();
         install_gh(&bin(&t));

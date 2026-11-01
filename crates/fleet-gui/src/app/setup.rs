@@ -437,12 +437,15 @@ impl FleetApp {
 
     /// Runs the token login off the UI thread. The caller has already taken the token out of its field, so from here
     /// it lives only in the worker.
-    fn spawn_pat_login(&mut self, p: Persona, gh: String, token: String) {
-        self.persona_calls.push(PersonaCall::Pat(p.id.clone()));
-        self.background(move |_| {
-            let result = login::pat_login(&p, &gh, &token);
+    fn spawn_pat_login(&mut self, id: String, token: String) {
+        self.persona_calls.push(PersonaCall::Pat(id.clone()));
+        self.background(move |c| {
+            let result = c
+                .set_persona_token(&id, &token)
+                .map(|_| ())
+                .map_err(|e| e.message);
             drop(token);
-            AppResult::PatSaved(p.id.clone(), result)
+            AppResult::PatSaved(id, result)
         });
     }
 
@@ -497,8 +500,7 @@ impl FleetApp {
                 let token = std::mem::take(&mut st.pat);
                 st.busy = true;
                 st.error = None;
-                let gh = list.gh_login_program().to_string();
-                self.spawn_pat_login(p, gh, token);
+                self.spawn_pat_login(p.id, token);
             }
             SetupAction::Check => {
                 if let Some(p) = persona {
@@ -846,14 +848,13 @@ impl FleetApp {
                 }
             }
             ManagementAction::SubmitPat(id) => {
-                let (Some(p), Some(list)) = (self.listed(&id), &self.personas) else {
+                if self.listed(&id).is_none() {
                     return;
-                };
+                }
                 let token = std::mem::take(&mut self.management.pat);
                 self.management.pat_busy = true;
                 self.management.error = None;
-                let gh = list.gh_login_program().to_string();
-                self.spawn_pat_login(p, gh, token);
+                self.spawn_pat_login(id, token);
             }
             ManagementAction::SetActiveProduct(_)
             | ManagementAction::NewProduct

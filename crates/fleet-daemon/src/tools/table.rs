@@ -42,7 +42,7 @@ const CLAUDE: ToolSpec = ToolSpec {
 };
 const GH: ToolSpec = ToolSpec {
     id: ToolId::Gh,
-    required: true,
+    required: false,
     program: "gh",
     version_args: &["--version"],
     min_version: Some("2.40"),

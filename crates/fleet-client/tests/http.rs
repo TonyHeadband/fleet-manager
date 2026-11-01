@@ -220,3 +220,58 @@ fn a_refusal_keeps_the_field_it_names() {
         ("x", Some("target"))
     );
 }
+
+#[test]
+fn set_persona_token_sends_the_token_in_the_body_not_the_url() {
+    let persona = fleet_api::Persona {
+        id: "work".into(),
+        name: "Work".into(),
+        host: "github.com".into(),
+        commit_name: "T".into(),
+        commit_email: "t@example.invalid".into(),
+        github_auth: fleet_api::GithubAuth::Pat,
+        claude_dir: "/p/claude".into(),
+        gh_dir: "/p/gh".into(),
+        ready: true,
+        claude: None,
+        github: None,
+        tasks: 0,
+        nicknames: Default::default(),
+    };
+    let reply = serde_json::to_string(&persona).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut head = String::new();
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = v.trim().parse().unwrap();
+            }
+            if line == "\r\n" {
+                break;
+            }
+            head.push_str(&line);
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        let mut stream = stream;
+        let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
+        (head, String::from_utf8(body).unwrap())
+    });
+    let got = FleetClient::new(&base)
+        .set_persona_token("work", "ghp_secret123")
+        .unwrap();
+    assert_eq!(got, persona);
+    let (head, body) = server.join().unwrap();
+    assert!(head.starts_with("PUT /api/personas/work/token "), "{head}");
+    assert!(!head.contains("ghp_secret123"), "{head}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        json!({"token": "ghp_secret123"})
+    );
+}

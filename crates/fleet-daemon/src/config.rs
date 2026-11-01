@@ -19,7 +19,7 @@ pub struct Config {
     pub tasks_root: PathBuf,
     /// Parent of every persona folder (`<name>/claude`, `<name>/gh`): each persona's own Claude and GitHub login.
     pub personas_dir: PathBuf,
-    /// The GitHub CLI program: `gh` from PATH unless the config names another.
+    /// The GitHub CLI program: `gh` from PATH unless the config names another. Used only to read a `gh` login's token.
     pub gh_command: String,
     /// Fleet-wide agent settings (`agent/` beside the config file). Not a key: it moves with the file.
     pub agent_config_dir: PathBuf,

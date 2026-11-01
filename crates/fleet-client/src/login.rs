@@ -1,14 +1,9 @@
-//! Logging a persona in: a terminal running the real `claude` / `gh` CLI, or a PAT piped to `gh`. fleet never reads
-//! the token the CLI stores; it only starts the CLI against the persona's own config folder.
+//! Logging a persona in: a terminal running the real `claude` / `gh` CLI. fleet never reads the token the CLI
+//! stores; it only starts the CLI against the persona's own config folder.
 use fleet_api::{ambient_vars, Persona};
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
-
-/// How long a PAT login may take: gh talks to the network (and possibly a keyring), and a stuck one must not hang
-/// the GUI's worker forever.
-const PAT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Quotes `s` for a POSIX shell. A leading `~` or `~/` stays outside the quotes because the shell does not expand a
 /// quoted tilde; that only works where the shell expands it (a command word such as `cd ~/x`, not `VAR=~/x` in dash),
@@ -216,78 +211,4 @@ pub fn open_in_terminal(term: &[String], script: &str) -> io::Result<()> {
         let _ = child.wait();
     });
     Ok(())
-}
-
-/// Logs `gh` in with a personal access token on stdin, never on the command line. On failure returns gh's own
-/// message with the token masked.
-pub fn pat_login(p: &Persona, gh: &str, token: &str) -> Result<(), String> {
-    pat_login_within(p, gh, token, PAT_TIMEOUT)
-}
-
-#[doc(hidden)]
-pub fn pat_login_within(
-    p: &Persona,
-    gh: &str,
-    token: &str,
-    timeout: Duration,
-) -> Result<(), String> {
-    let token = token.trim();
-    if token.is_empty() {
-        return Err("no token given".into());
-    }
-    // In the background: from the GUI, a console window would flash up while gh runs.
-    let mut cmd = fleet_fs::child::background(gh);
-    cmd.args([
-        "auth",
-        "login",
-        "--hostname",
-        &p.host,
-        "--with-token",
-        GH_STORAGE_FLAG,
-    ])
-    .env("GH_CONFIG_DIR", &p.gh_dir)
-    .stdin(Stdio::piped())
-    .stdout(Stdio::null())
-    .stderr(Stdio::piped());
-    for k in ambient_vars() {
-        cmd.env_remove(k);
-    }
-    let mut child = cmd.spawn().map_err(|e| format!("cannot run {gh}: {e}"))?;
-    let mut stdin = child.stdin.take().ok_or("no stdin for gh")?;
-    // A gh that exits early closes the pipe; its exit status below says why, so a broken pipe is not the error.
-    let _ = writeln!(stdin, "{token}");
-    drop(stdin);
-    // Drained on a thread so a chatty gh cannot fill the pipe while we poll. Not joined after a kill: a grandchild
-    // could keep the pipe open.
-    let mut stderr = child.stderr.take().ok_or("no stderr for gh")?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf);
-        let _ = tx.send(buf);
-    });
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("gh did not answer in {} s", timeout.as_secs()));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Err(format!("gh did not finish: {e}")),
-        }
-    };
-    if status.success() {
-        return Ok(());
-    }
-    let buf = rx.recv_timeout(Duration::from_secs(2)).unwrap_or_default();
-    let err = String::from_utf8_lossy(&buf).replace(token, "***");
-    let err = err.trim();
-    Err(if err.is_empty() {
-        format!("gh exited with {status}")
-    } else {
-        err.to_string()
-    })
 }
