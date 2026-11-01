@@ -525,7 +525,6 @@ async fn the_reaper_stops_only_idle_review_after_ten_minutes() {
     let idle = cases.last().unwrap().0.id.clone();
     assert!(wait_until(|| async { agent(&fx, &idle).await.status == Status::Stopped }).await);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    reaper.abort();
     for (a, status, idle, stopped) in &cases {
         let now = agent(&fx, &a.id).await;
         assert_eq!(
@@ -537,6 +536,9 @@ async fn the_reaper_stops_only_idle_review_after_ten_minutes() {
     assert!(!fx.sessions.alive(&cases.last().unwrap().0.session));
     assert_eq!(agent(&fx, &typed.id).await.status, Status::Review);
     assert_eq!(agent(&fx, &solo.id).await.status, Status::Review);
+    // Last: an abort in the middle of a store call drops the in-memory connection, and the store reopens empty
+    // (#475), which would fail the reads above.
+    reaper.abort();
 }
 
 #[tokio::test]
