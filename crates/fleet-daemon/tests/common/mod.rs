@@ -33,10 +33,21 @@ pub async fn ready_persona(svc: &AgentService, name: &str, host: &str) -> String
         .await
         .unwrap();
     std::fs::write(Path::new(&p.claude_dir).join(".fake-login"), "").unwrap();
-    std::fs::write(Path::new(&p.gh_dir).join("hosts.yml"), "x").unwrap();
+    store_token(&p);
     let checked = svc.personas().check(&p.id).await.unwrap();
     assert!(checked.ready, "{checked:?}");
     p.id
+}
+
+/// Where a persona's daemon-held GitHub token lives: beside its `claude` and `gh` folders.
+pub fn token_file(p: &fleet_api::Persona) -> PathBuf {
+    let dir = Path::new(&p.gh_dir).parent().unwrap();
+    fleet_daemon::forge::token::token_path(dir.parent().unwrap(), &p.id)
+}
+
+/// Gives the persona a token, which the fixture's fake forge accepts.
+pub fn store_token(p: &fleet_api::Persona) {
+    fleet_daemon::forge::token::write_token(&token_file(p), "ghp_fake").unwrap();
 }
 
 pub struct TestClock(pub AtomicI64);
@@ -96,6 +107,8 @@ pub struct Fx {
     pub sessions: SessionHost,
     pub clock: Arc<TestClock>,
     pub svc: Arc<AgentService>,
+    /// The GitHub API the fixture's personas ask.
+    pub forge: fake_forge::FakeForge,
 }
 
 impl Drop for Fx {
@@ -351,6 +364,10 @@ async fn build_in(
         cfg.gh_command.clone(),
         opts.claude.clone(),
     );
+    let forge = fake_forge::FakeForge::start();
+    opts.forge = Arc::new(fleet_daemon::forge::ForgeConfig {
+        api_override: Some(forge.base_url()),
+    });
     opts_tweak(&mut opts);
     let svc = Arc::new(AgentService::new(
         cfg,
@@ -372,6 +389,7 @@ async fn build_in(
         sessions,
         clock,
         svc,
+        forge,
     }
 }
 

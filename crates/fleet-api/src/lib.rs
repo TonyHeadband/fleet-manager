@@ -53,8 +53,8 @@ pub use progress::{
 pub use requests::{
     AddRepoRequest, AnswerRequest, ArchiveOrphanRequest, ArchiveRequest, CheckoutInfo,
     CheckoutList, ControlRequest, DiffReport, EnvLine, EnvSource, GrantRepoRequest, OrphanRequest,
-    RefuseRepoRequest, RepoInfo, RepoList, RepoPick, SpawnRequest, SpawnResponse, WorkflowState,
-    WorkspaceDiff,
+    RefuseRepoRequest, RepoInfo, RepoList, RepoPick, SetToken, SpawnRequest, SpawnResponse,
+    WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
 pub use task::{
@@ -119,6 +119,7 @@ use utoipa::OpenApi;
         routes::update_persona,
         routes::delete_persona,
         routes::check_persona,
+        routes::set_persona_token,
         routes::get_agent_config,
         routes::put_agent_config,
         routes::list_definitions,
@@ -177,6 +178,7 @@ use utoipa::OpenApi;
         RepoInfo,
         CheckoutInfo,
         CheckoutList,
+        SetToken,
         WorkflowState,
         EnvLine,
         EnvSource,

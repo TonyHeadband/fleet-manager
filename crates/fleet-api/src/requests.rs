@@ -34,6 +34,13 @@ pub struct CheckoutInfo {
     pub subject: String,
 }
 
+/// Body of `PUT /api/personas/{id}/token`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct SetToken {
+    pub token: String,
+}
+
 /// Body of `GET /api/products/{id}/repos/{name}/checkouts`: the main checkout first, then linked worktrees by path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]

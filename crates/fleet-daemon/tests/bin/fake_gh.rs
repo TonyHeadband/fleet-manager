@@ -56,6 +56,24 @@ fn main() {
             eprintln!("You are not logged into any GitHub hosts. To log in, run: gh auth login");
             exit(1);
         }
+        // The token gh holds for the host: FAKE_GH_TOKEN, else the `token` file of the config dir (which keeps a test
+        // off the shared process environment), else a failure with no output like gh with no login.
+        ("auth", "token") => {
+            let from_file = dir
+                .as_ref()
+                .and_then(|d| std::fs::read_to_string(d.join("token")).ok());
+            let token = std::env::var("FAKE_GH_TOKEN").ok().or(from_file);
+            match token
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+            {
+                Some(t) => {
+                    println!("{t}");
+                    exit(0);
+                }
+                None => exit(1),
+            }
+        }
         ("auth", "git-credential") => exit(1),
         ("auth", "login") => {
             let mut stdin = String::new();

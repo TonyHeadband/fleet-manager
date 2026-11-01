@@ -1,6 +1,7 @@
 use fleet_api::Os;
 use fleet_daemon::agents::{AgentService, ServiceOptions};
 use fleet_daemon::config::{self, Config};
+use fleet_daemon::forge::ForgeConfig;
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::repos::Repos;
 use fleet_daemon::session::SessionHost;
@@ -116,6 +117,12 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     }
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
     opts.claude = cfg.claude_command.clone();
+    // Test seam: the binary test points every forge host at a fake API; unset in a real run.
+    opts.forge = Arc::new(ForgeConfig {
+        api_override: std::env::var("FLEET_FORGE_API")
+            .ok()
+            .filter(|v| !v.is_empty()),
+    });
     let tools = Tools::new(
         Os::current(),
         Arc::new(SystemPath),

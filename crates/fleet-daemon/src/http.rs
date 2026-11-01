@@ -6,6 +6,7 @@ use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{Defs, FleetError};
 use crate::fleet::env;
 use crate::fleet::workflow::{self, WorkflowError};
+use crate::forge::ForgeError;
 use crate::git::GitError;
 use crate::hooks_cfg::PERMISSION_HOLD_SECS;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
@@ -34,8 +35,8 @@ use fleet_api::{
     InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct, NewRelease,
     OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
     ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
-    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
-    TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse,
+    Task, TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -186,6 +187,7 @@ pub fn router(state: AppState) -> Router {
             patch(update_persona).delete(delete_persona),
         )
         .route("/api/personas/{id}/check", post(check_persona))
+        .route("/api/personas/{id}/token", put(set_persona_token))
         .route(
             "/api/agent-config",
             get(get_agent_config).put(put_agent_config),
@@ -533,11 +535,17 @@ impl From<PersonaError> for ApiError {
             PersonaError::BadName
             | PersonaError::BadIdentity
             | PersonaError::BadHost(_)
-            | PersonaError::BadNickname(_) => StatusCode::BAD_REQUEST,
+            | PersonaError::BadNickname(_)
+            | PersonaError::EmptyToken
+            | PersonaError::Forge(ForgeError::Unauthorized | ForgeError::Refused { .. }) => {
+                StatusCode::BAD_REQUEST
+            }
             PersonaError::HasTasks(_)
+            | PersonaError::NoToken
             | PersonaError::NotReady(_)
             | PersonaError::LoginBroken { .. } => StatusCode::CONFLICT,
             PersonaError::Tool(_) => StatusCode::FAILED_DEPENDENCY,
+            PersonaError::Forge(_) => StatusCode::BAD_GATEWAY,
             PersonaError::Io(_) | PersonaError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         ApiError::new(status, e.to_string())
@@ -1161,6 +1169,18 @@ async fn check_persona(
 ) -> Result<Json<Persona>, ApiError> {
     Ok(Json(
         detached(async move { st.svc.personas().check(&id).await }).await??,
+    ))
+}
+
+/// The forge is asked before anything is stored, so this may take up to its timeout; detached for the same reason as
+/// the check.
+async fn set_persona_token(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SetToken>,
+) -> Result<Json<Persona>, ApiError> {
+    Ok(Json(
+        detached(async move { st.svc.personas().set_token(&id, &req.token).await }).await??,
     ))
 }
 

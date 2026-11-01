@@ -141,6 +141,8 @@ pub struct ServiceOptions {
     pub extra_env: Vec<(String, String)>,
     /// The tools on this machine; every session's PATH is the one their last check found.
     pub tools: crate::tools::Tools,
+    /// Where the forge clients connect; tests point it at a fake forge.
+    pub forge: Arc<crate::forge::ForgeConfig>,
 }
 
 /// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
@@ -174,6 +176,7 @@ impl ServiceOptions {
                 "gh".into(),
                 vec!["claude".into()],
             ),
+            forge: Arc::new(crate::forge::ForgeConfig { api_override: None }),
         }
     }
 }
@@ -1055,6 +1058,7 @@ impl AgentService {
             cfg.tasks_root.clone(),
             cfg.state_dir.clone(),
             opts.tools.clone(),
+            opts.forge.clone(),
         ));
         let internal = Arc::new(Internal::new(cfg.state_dir.join(INTERNAL_DIR)));
         AgentService {

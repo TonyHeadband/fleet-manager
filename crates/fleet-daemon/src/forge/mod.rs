@@ -2,6 +2,7 @@
 
 mod github;
 pub mod log;
+pub mod token;
 
 use fleet_api::{parse_date, PrState};
 use std::fmt;

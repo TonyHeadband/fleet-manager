@@ -1,6 +1,11 @@
-//! Personas: a Claude config dir, a gh config dir on one GitHub host, and a commit identity. fleet never reads a
-//! token; whether a persona is logged in is only what the `claude` and `gh` CLIs say about its own folders.
+//! Personas: a Claude config dir, a gh config dir on one GitHub host, a GitHub token the daemon holds, and a commit
+//! identity. Whether a persona is logged in to Claude is what the `claude` CLI says about its own folder; to GitHub,
+//! whether the forge accepts its token.
 use crate::config::is_safe_dir_name;
+use crate::forge::log::{recorded, CallCtx};
+use crate::forge::token::{read_token, token_from_gh, token_path, write_token};
+use crate::forge::{self, ForgeConfig, ForgeError, RepoRef};
+use crate::git::REMOTE_TIMEOUT;
 use crate::store::{PersonaRow, Store, StoreError};
 use crate::tools::Tools;
 use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate, ToolError, ToolId};
@@ -42,6 +47,13 @@ pub enum PersonaError {
         which: &'static str,
         detail: String,
     },
+    #[error("no GitHub token: set one in the persona")]
+    NoToken,
+    #[error("no token given")]
+    EmptyToken,
+    /// The forge did not take the token being set.
+    #[error(transparent)]
+    Forge(#[from] ForgeError),
     #[error("the persona still has {0} task(s); archive them first")]
     HasTasks(u32),
     #[error("the nickname of {0} must be one line of at most 32 characters")]
@@ -368,35 +380,6 @@ fn failed(detail: String, tool: Option<ToolError>) -> LoginState {
     }
 }
 
-/// `account <name>` in `gh auth status` output; best effort.
-fn gh_account(text: &str) -> Option<String> {
-    let mut words = text.split_whitespace();
-    words.find(|w| *w == "account")?;
-    words.next().map(String::from)
-}
-
-/// `gh auth status` exits non-zero when the host has no login, or one gh no longer accepts.
-async fn check_github(tools: &Tools, gh: &str, host: &str, dir: &Path, persona: &str) -> Login {
-    let Some(cmd) = check_command(
-        gh,
-        &["auth", "status", "--hostname", host],
-        "GH_CONFIG_DIR",
-        dir,
-        &tools.path(),
-    ) else {
-        return Login::missing(tools, ToolId::Gh);
-    };
-    match run_check(cmd, gh).await {
-        Err(e) => Login::cannot_run(tools, ToolId::Gh, e),
-        Ok(o) if o.ok => Login::ok(gh_account(&o.text)),
-        Ok(o) => Login::logged_out(
-            last_line(&o.text).unwrap_or_else(|| "not logged in".into()),
-            ToolId::Gh,
-            persona,
-        ),
-    }
-}
-
 /// `claude auth status` prints JSON and exits 1 when logged out; exit 0 alone is not trusted, since the
 /// JSON is what says whether there is a login.
 async fn check_claude(tools: &Tools, claude: &[String], dir: &Path, persona: &str) -> Login {
@@ -455,9 +438,11 @@ pub struct Personas {
     create_lock: tokio::sync::Mutex<()>,
     /// The PATH the CLIs are looked for on, and how to install one that is missing.
     tools: Tools,
+    forge: Arc<ForgeConfig>,
 }
 
 impl Personas {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Arc<Store>,
         personas_dir: PathBuf,
@@ -466,6 +451,7 @@ impl Personas {
         tasks_root: PathBuf,
         state_dir: PathBuf,
         tools: Tools,
+        forge: Arc<ForgeConfig>,
     ) -> Personas {
         Personas {
             store,
@@ -477,6 +463,7 @@ impl Personas {
             checked: Mutex::new(HashMap::new()),
             create_lock: tokio::sync::Mutex::new(()),
             tools,
+            forge,
         }
     }
 
@@ -680,12 +667,81 @@ impl Personas {
         Ok(())
     }
 
+    /// The persona's token: the stored one, else the one its gh login holds, which is then stored. Today's logins,
+    /// PATs included, live in gh's hosts file whatever `github_auth` says, so the move needs no other condition.
+    pub async fn token(&self, id: &str) -> Result<String, PersonaError> {
+        self.token_of(&self.row(id).await?).await
+    }
+
+    async fn token_of(&self, row: &PersonaRow) -> Result<String, PersonaError> {
+        let path = token_path(&self.personas_dir, &row.id);
+        if let Some(token) = read_token(&path) {
+            return Ok(token);
+        }
+        let gh_dir = self.personas_dir.join(&row.id).join("gh");
+        let token = token_from_gh(&self.gh, &gh_dir, &row.host, &self.tools.path())
+            .await
+            .ok_or(PersonaError::NoToken)?;
+        write_token(&path, &token)?;
+        Ok(token)
+    }
+
+    /// Asks the forge who `token` belongs to, as a recorded call of the persona.
+    async fn whoami(&self, row: &PersonaRow, token: String) -> Result<String, ForgeError> {
+        let forge = forge::github(&row.host, token, &self.forge, REMOTE_TIMEOUT);
+        let ctx = CallCtx {
+            persona: row.id.clone(),
+            task: None,
+            agent: None,
+        };
+        // The call has no repo; the row then reads `<host>//`.
+        let repo = RepoRef {
+            host: row.host.clone(),
+            owner: String::new(),
+            name: String::new(),
+        };
+        recorded(&self.store, &ctx, "github", &repo, "whoami", move || {
+            forge.whoami()
+        })
+        .await
+    }
+
+    /// Stores a token the forge accepts, and answers the persona as a new check finds it.
+    pub async fn set_token(&self, id: &str, token: &str) -> Result<Persona, PersonaError> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(PersonaError::EmptyToken);
+        }
+        let row = self.row(id).await?;
+        self.whoami(&row, token.to_string()).await?;
+        write_token(&token_path(&self.personas_dir, &row.id), token)?;
+        self.check(id).await
+    }
+
+    /// Whether the forge accepts the persona's token.
+    async fn check_github(&self, row: &PersonaRow) -> Login {
+        let token = match self.token_of(row).await {
+            Ok(t) => t,
+            Err(PersonaError::NoToken) => {
+                return Login::logged_out(PersonaError::NoToken.to_string(), ToolId::Gh, &row.name)
+            }
+            Err(e) => return Login::unreadable(e.to_string()),
+        };
+        match self.whoami(row, token).await {
+            Ok(login) => Login::ok(Some(login)),
+            Err(ForgeError::Unauthorized) => {
+                Login::logged_out(ForgeError::Unauthorized.to_string(), ToolId::Gh, &row.name)
+            }
+            Err(e) => Login::unreadable(e.to_string()),
+        }
+    }
+
     async fn run_checks(&self, row: &PersonaRow) -> (Login, Login) {
         let dir = self.personas_dir.join(&row.id);
-        let (claude_dir, gh_dir) = (dir.join("claude"), dir.join("gh"));
+        let claude_dir = dir.join("claude");
         let (claude, github) = tokio::join!(
             check_claude(&self.tools, &self.claude, &claude_dir, &row.name),
-            check_github(&self.tools, &self.gh, &row.host, &gh_dir, &row.name),
+            self.check_github(row),
         );
         self.checked
             .lock()
@@ -773,8 +829,7 @@ impl Personas {
         if !row.ready {
             return Err(PersonaError::NotReady(row.name));
         }
-        let gh_dir = self.personas_dir.join(&row.id).join("gh");
-        let github = check_github(&self.tools, &self.gh, &row.host, &gh_dir, &row.name).await;
+        let github = self.check_github(&row).await;
         if let Some((_, cached)) = self.checked.lock().unwrap().get_mut(&row.id) {
             *cached = github.state.clone();
         }

@@ -382,7 +382,7 @@ async fn logged_out_persona_changes_nothing() {
     let dir = gh_dir(&fx).await;
     let id = github_task(&fx, "t1").await;
     reply_merged(&dir);
-    std::fs::remove_file(dir.join("hosts.yml")).unwrap();
+    std::fs::remove_file(dir.parent().unwrap().join("forge/token")).unwrap();
 
     fx.svc.check_merges().await;
 

@@ -1208,6 +1208,55 @@ async fn persona_routes_map_errors() {
             .0,
         404
     );
+    let token = |t: &str| Some(json!({ "token": t }));
+    assert_eq!(
+        json_of(
+            srv.addr,
+            "PUT",
+            "/api/personas/nope/token",
+            token("x").as_ref()
+        )
+        .await
+        .0,
+        404
+    );
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        "/api/personas/home/token",
+        token(" ").as_ref(),
+    )
+    .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (400, Some("no token given")),
+        "{v}"
+    );
+    srv.fx.forge.fail_next(401, "Bad credentials");
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        "/api/personas/home/token",
+        token("bad").as_ref(),
+    )
+    .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (400, Some("the token was refused")),
+        "{v}"
+    );
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        "/api/personas/home/token",
+        token("good").as_ref(),
+    )
+    .await;
+    assert_eq!(
+        (s, v["github"]["account"].as_str()),
+        (200, Some("fake-user")),
+        "{v}"
+    );
     assert_eq!(
         json_of(srv.addr, "POST", "/api/personas/nope/check", None)
             .await
@@ -1253,8 +1302,14 @@ async fn spawn_persona_errors_are_400_or_a_tool_refusal() {
         assert_eq!(s, 400, "{persona:?}: {v}");
         assert!(v["error"].as_str().unwrap().contains(needle), "{v}");
     }
-    let gh = srv.fx._tmp.path().join("personas").join(PERSONA).join("gh");
-    std::fs::remove_file(gh.join("hosts.yml")).unwrap();
+    let forge = srv
+        .fx
+        ._tmp
+        .path()
+        .join("personas")
+        .join(PERSONA)
+        .join("forge");
+    std::fs::remove_file(forge.join("token")).unwrap();
     body["persona"] = json!(PERSONA);
     // A persona logged out is a tool refusal.
     let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;

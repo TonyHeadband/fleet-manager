@@ -6,8 +6,9 @@ use crate::{
     GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles,
     InternalHistory, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
     PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
-    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
+    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, SetToken, Snapshot,
+    SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo,
+    Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -177,6 +178,10 @@ pub fn delete_persona() {}
 /// Asks the `claude` and `gh` CLIs whether the persona is logged in; the first success makes it ready.
 #[utoipa::path(post, path = "/api/personas/{id}/check", params(("id" = String, Path)), responses((status = 200, body = Persona), (status = 404)))]
 pub fn check_persona() {}
+
+/// Stores the persona's GitHub token, after the forge accepts it; 400 when it is empty or refused.
+#[utoipa::path(put, path = "/api/personas/{id}/token", params(("id" = String, Path)), request_body = SetToken, responses((status = 200, body = Persona), (status = 400), (status = 404)))]
+pub fn set_persona_token() {}
 
 /// The instructions and settings every agent gets, whatever its persona.
 #[utoipa::path(get, path = "/api/agent-config", responses((status = 200, body = AgentConfig)))]

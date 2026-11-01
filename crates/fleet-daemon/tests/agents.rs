@@ -2143,8 +2143,8 @@ async fn spawn_without_persona_is_refused() {
 #[tokio::test]
 async fn spawn_on_broken_login_creates_nothing() {
     let fx = fixture().await;
-    let gh = fx._tmp.path().join("personas").join(PERSONA).join("gh");
-    std::fs::remove_file(gh.join("hosts.yml")).unwrap();
+    let forge = fx._tmp.path().join("personas").join(PERSONA).join("forge");
+    std::fs::remove_file(forge.join("token")).unwrap();
     let err = fx.svc.spawn(req(&fx, "broken")).await.unwrap_err();
     assert!(
         matches!(

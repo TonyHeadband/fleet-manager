@@ -124,6 +124,7 @@ fn openapi_lists_all_routes() {
         "/api/personas",
         "/api/personas/{id}",
         "/api/personas/{id}/check",
+        "/api/personas/{id}/token",
         "/api/agent-config",
         "/api/products",
         "/api/products/{id}",

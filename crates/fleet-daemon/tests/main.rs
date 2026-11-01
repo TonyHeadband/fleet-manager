@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "common/fake_forge.rs"]
+mod fake_forge;
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
@@ -476,7 +480,13 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
             .await
             .unwrap();
     });
-    let mut child = Daemon::spawn(&cfg);
+    let forge = fake_forge::FakeForge::start();
+    let mut child = Daemon::new(
+        command(&cfg)
+            .env("FLEET_FORGE_API", forge.base_url())
+            .spawn()
+            .unwrap(),
+    );
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)
@@ -497,7 +507,13 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     );
     assert_eq!(status, 200, "{body}");
     std::fs::write(personas.join("p/claude/.fake-login"), "").unwrap();
-    std::fs::write(personas.join("p/gh/hosts.yml"), "x").unwrap();
+    let (status, body) = send(
+        port,
+        "PUT",
+        "/api/personas/p/token",
+        r#"{"token":"ghp_fake"}"#,
+    );
+    assert_eq!(status, 200, "{body}");
     let (status, body) = send(port, "POST", "/api/personas/p/check", "");
     assert_eq!(status, 200, "{body}");
     let (status, body) = send(

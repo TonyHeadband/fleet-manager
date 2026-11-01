@@ -38,6 +38,7 @@ fn personas_with(fx: &Fx, claude: Vec<String>, gh: String) -> Personas {
         fx.tasks_root.clone(),
         fx.state_dir.clone(),
         fx.svc.options().tools.clone(),
+        fx.svc.options().forge.clone(),
     )
 }
 
@@ -46,7 +47,7 @@ fn log_in(p: &fleet_api::Persona, claude: bool, gh: bool) {
         std::fs::write(Path::new(&p.claude_dir).join(".fake-login"), "").unwrap();
     }
     if gh {
-        std::fs::write(Path::new(&p.gh_dir).join("hosts.yml"), "x").unwrap();
+        store_token(p);
     }
 }
 
@@ -136,7 +137,7 @@ async fn check_marks_ready() {
     assert!(p.ready);
     assert_eq!(
         p.github.as_ref().unwrap().account.as_deref(),
-        Some("tester")
+        Some("fake-user")
     );
     assert_eq!(
         p.claude.as_ref().unwrap().account.as_deref(),
@@ -177,7 +178,7 @@ async fn ready_env_rejects_draft_and_broken() {
     assert!(ps.check(&p.id).await.unwrap().ready);
     let env = ps.ready_env(&p.id).await.unwrap();
     assert_eq!(env.host, "github.com");
-    std::fs::remove_file(Path::new(&p.gh_dir).join("hosts.yml")).unwrap();
+    std::fs::remove_file(token_file(&p)).unwrap();
     match ps.ready_env(&p.id).await {
         Err(PersonaError::Tool(t)) => match *t {
             ToolError::NotLoggedIn { tool, persona } => {
@@ -190,33 +191,17 @@ async fn ready_env_rejects_draft_and_broken() {
 }
 
 #[tokio::test]
-async fn a_persona_without_gh_reports_gh_not_installed() {
+async fn a_persona_with_a_token_needs_no_gh() {
     let fx = fixture_without_persona().await;
     let ps = personas(&fx);
     let p = ps.create(new_persona("Home")).await.unwrap();
     log_in(&p, true, true);
     assert!(ps.check(&p.id).await.unwrap().ready);
-    // The same persona once gh is gone.
     let without = personas_with(&fx, fake_claude(), "fleet-no-such-gh".into());
-    let checked = without.check(&p.id).await.unwrap();
-    let github = checked.github.unwrap();
-    assert!(!github.ok);
-    assert_eq!(
-        github.detail.as_deref(),
-        Some("GitHub CLI (gh) is not installed")
-    );
-    for refused in [without.ready_env(&p.id).await, without.gh_env(&p.id).await] {
-        assert!(
-            matches!(
-                &refused,
-                Err(PersonaError::Tool(t)) if matches!(**t, ToolError::NotInstalled {
-                    tool: ToolId::Gh,
-                    ..
-                })
-            ),
-            "{refused:?}"
-        );
-    }
+    let github = without.check(&p.id).await.unwrap().github.unwrap();
+    assert!(github.ok, "{github:?}");
+    without.ready_env(&p.id).await.unwrap();
+    without.gh_env(&p.id).await.unwrap();
 }
 
 #[test]
@@ -503,6 +488,7 @@ async fn the_claude_check_follows_an_npm_shim_to_its_exe() {
         fx.tasks_root.clone(),
         fx.state_dir.clone(),
         fx.svc.options().tools.clone(),
+        fx.svc.options().forge.clone(),
     );
     let p = ps.create(new_persona("Npm")).await.unwrap();
     log_in(&p, true, true);
@@ -590,6 +576,7 @@ async fn the_claude_check_runs_the_whole_command() {
         fx.tasks_root.clone(),
         fx.state_dir.clone(),
         fx.svc.options().tools.clone(),
+        fx.svc.options().forge.clone(),
     );
     let p = ps.create(new_persona("Home")).await.unwrap();
     log_in(&p, true, true);
@@ -657,6 +644,7 @@ async fn delete_keeps_clones_from_before_products() {
             fake_gh(),
             fake_claude(),
         ),
+        std::sync::Arc::new(fleet_daemon::forge::ForgeConfig::default()),
     );
     let old = make_repo(&state.join("repos/p/core"));
     git(&old, &["branch", "fleet/kept-work"]);
@@ -727,29 +715,10 @@ async fn a_cli_that_cannot_start_is_broken_and_an_unreadable_answer_is_a_broken_
         .path()
         .join(format!("junk{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&junk, "not a program").unwrap();
+    // gh is only read for a token, so one that cannot start costs a persona with a stored token nothing.
     let cannot_start = personas_with(&fx, fake_claude(), junk.to_string_lossy().into_owned());
-    let github = cannot_start.check(&p.id).await.unwrap().github.unwrap();
-    assert!(!github.ok);
-    assert!(
-        matches!(
-            github.tool,
-            Some(ToolError::Broken {
-                tool: ToolId::Gh,
-                ..
-            })
-        ),
-        "{github:?}"
-    );
-    assert_eq!(
-        github.detail,
-        github.tool.as_ref().map(|t| t.to_string()),
-        "the detail is the tool error's own message"
-    );
-    let refused = cannot_start.gh_env(&p.id).await;
-    assert!(
-        matches!(&refused, Err(PersonaError::Tool(t)) if matches!(**t, ToolError::Broken { .. })),
-        "{refused:?}"
-    );
+    assert!(cannot_start.check(&p.id).await.unwrap().github.unwrap().ok);
+    cannot_start.gh_env(&p.id).await.unwrap();
 
     // gh standing in for claude: `auth status` prints no JSON.
     let unreadable = personas_with(&fx, vec![fake_gh()], fake_gh());
@@ -767,4 +736,107 @@ async fn a_cli_that_cannot_start_is_broken_and_an_unreadable_answer_is_a_broken_
         ),
         "{refused:?}"
     );
+}
+
+#[tokio::test]
+async fn a_token_is_stored_trimmed_and_private() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    ps.set_token(&p.id, "  ghp_x\n").await.unwrap();
+    let file = token_file(&p);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ghp_x");
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_x");
+    assert_eq!(fx.forge.requests()[0].auth, "Bearer ghp_x");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(file.parent().unwrap()), 0o700);
+    }
+}
+
+#[tokio::test]
+async fn an_empty_token_is_refused() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    let err = ps.set_token(&p.id, " \n").await.unwrap_err();
+    assert_eq!(err.to_string(), "no token given");
+    assert!(fx.forge.requests().is_empty());
+}
+
+#[tokio::test]
+async fn a_token_the_forge_refuses_is_not_stored() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    fx.forge.fail_next(401, "Bad credentials");
+    let err = ps.set_token(&p.id, "ghp_bad").await.unwrap_err();
+    assert_eq!(err.to_string(), "the token was refused");
+    assert!(!token_file(&p).exists());
+}
+
+#[tokio::test]
+async fn an_existing_gh_login_is_migrated_once() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    std::fs::write(Path::new(&p.gh_dir).join("token"), "ghp_from_gh\n").unwrap();
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_from_gh");
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_from_gh");
+    assert_eq!(
+        std::fs::read_to_string(token_file(&p)).unwrap(),
+        "ghp_from_gh"
+    );
+    let log = std::fs::read_to_string(Path::new(&p.gh_dir).join("argv.log")).unwrap();
+    assert_eq!(
+        log.lines().filter(|l| l.starts_with("auth token")).count(),
+        1,
+        "{log}"
+    );
+}
+
+#[tokio::test]
+async fn a_persona_without_gh_and_without_a_token_is_logged_out_not_missing_a_tool() {
+    let fx = fixture_without_persona().await;
+    let without = personas_with(&fx, fake_claude(), "fleet-no-such-gh".into());
+    let p = without.create(new_persona("Home")).await.unwrap();
+    let github = without.check(&p.id).await.unwrap().github.unwrap();
+    assert!(!github.ok);
+    assert_eq!(
+        github.detail.as_deref(),
+        Some("no GitHub token: set one in the persona")
+    );
+    assert!(matches!(github.tool, Some(ToolError::NotLoggedIn { .. })));
+}
+
+#[tokio::test]
+async fn a_revoked_token_shows_logged_out_with_the_reason() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, true);
+    fx.forge.fail_next(401, "Bad credentials");
+    let github = ps.check(&p.id).await.unwrap().github.unwrap();
+    assert!(!github.ok);
+    assert_eq!(github.detail.as_deref(), Some("the token was refused"));
+}
+
+#[tokio::test]
+async fn the_login_check_is_a_recorded_call_without_the_token() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, true);
+    let github = ps.check(&p.id).await.unwrap().github.unwrap();
+    assert_eq!(github.account.as_deref(), Some("fake-user"));
+    let calls = fx.store.forge_calls(50).await.unwrap();
+    let call = calls.iter().find(|c| c.op == "whoami").expect("a row");
+    assert_eq!(
+        (call.persona.as_str(), call.repo.as_str()),
+        (p.id.as_str(), "github.com//")
+    );
+    assert!(calls.iter().all(|c| !format!("{c:?}").contains("ghp_fake")));
 }
