@@ -2147,15 +2147,10 @@ async fn spawn_on_broken_login_creates_nothing() {
     std::fs::remove_file(forge.join("token")).unwrap();
     let err = fx.svc.spawn(req(&fx, "broken")).await.unwrap_err();
     assert!(
-        matches!(
-            &err,
-            SpawnError::Persona(PersonaError::Tool(t)) if matches!(&**t, ToolError::NotLoggedIn {
-                tool: ToolId::Gh,
-                persona: Some(p),
-            } if p == PERSONA)
-        ),
+        matches!(&err, SpawnError::Persona(PersonaError::NoToken)),
         "{err:?}"
     );
+    assert_eq!(err.to_string(), "no GitHub token: set one in the persona");
     assert_eq!(std::fs::read_dir(&fx.tasks_root).unwrap().count(), 0);
     assert!(fx.store.snapshot().await.unwrap().agents.is_empty());
     assert!(fx.store.tasks().await.unwrap().is_empty());

@@ -179,16 +179,26 @@ async fn ready_env_rejects_draft_and_broken() {
     assert!(ps.check(&p.id).await.unwrap().ready);
     let env = ps.ready_env(&p.id).await.unwrap();
     assert_eq!(env.host, "github.com");
+    // A token problem is refused as itself, not as a gh CLI that is not logged in.
+    fx.forge.refuse_token("ghp_fake");
+    let refused = ps.ready_env(&p.id).await.unwrap_err();
+    assert_eq!(refused.to_string(), "the token was refused");
     std::fs::remove_file(token_file(&p)).unwrap();
-    match ps.ready_env(&p.id).await {
-        Err(PersonaError::Tool(t)) => match *t {
-            ToolError::NotLoggedIn { tool, persona } => {
-                assert_eq!((tool, persona.as_deref()), (ToolId::Gh, Some("Home")));
-            }
-            other => panic!("{other:?}"),
-        },
-        other => panic!("{other:?}"),
-    }
+    let missing = ps.ready_env(&p.id).await.unwrap_err();
+    assert!(matches!(missing, PersonaError::NoToken), "{missing:?}");
+    assert_eq!(
+        missing.to_string(),
+        "no GitHub token: set one in the persona"
+    );
+    // The list still offers a login for it.
+    let github = ps.get(&p.id).await.unwrap().github.unwrap();
+    assert!(matches!(
+        github.tool,
+        Some(ToolError::NotLoggedIn {
+            tool: ToolId::Gh,
+            ..
+        })
+    ));
 }
 
 #[tokio::test]
@@ -902,6 +912,63 @@ async fn the_login_check_is_a_recorded_call_without_the_token() {
         (p.id.as_str(), "github.com//")
     );
     assert!(calls.iter().all(|c| !format!("{c:?}").contains("ghp_fake")));
+}
+
+/// For a persona that logs in through gh, the stored token caches gh's: a new gh login replaces it.
+#[tokio::test]
+async fn a_gh_relogin_is_picked_up() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, false);
+    let gh_token = Path::new(&p.gh_dir).join("token");
+    std::fs::write(&gh_token, "ghp_one\n").unwrap();
+    assert!(ps.check(&p.id).await.unwrap().ready);
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_one");
+
+    // Logged in again: gh now holds another token, and the old one is revoked.
+    fx.forge.refuse_token("ghp_one");
+    std::fs::write(&gh_token, "ghp_two\n").unwrap();
+    let github = ps.check(&p.id).await.unwrap().github.unwrap();
+    assert!(github.ok, "{github:?}");
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_two");
+    ps.ready_env(&p.id).await.unwrap();
+    let last = fx.forge.requests().pop().unwrap();
+    assert_eq!(last.auth, "Bearer ghp_two");
+}
+
+/// A token gh now holds that the forge refuses does not replace a stored one it accepts.
+#[tokio::test]
+async fn a_refused_gh_token_keeps_the_stored_one() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    log_in(&p, true, true);
+    std::fs::write(Path::new(&p.gh_dir).join("token"), "ghp_stale").unwrap();
+    fx.forge.refuse_token("ghp_stale");
+    let github = ps.check(&p.id).await.unwrap().github.unwrap();
+    assert!(github.ok, "{github:?}");
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_fake");
+}
+
+/// A PAT persona's token is the one set for it: gh's is never read once there is one.
+#[tokio::test]
+async fn a_pat_persona_is_not_overwritten_by_gh() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let mut req = new_persona("Home");
+    req.github_auth = GithubAuth::Pat;
+    let p = ps.create(req).await.unwrap();
+    log_in(&p, true, false);
+    ps.set_token(&p.id, "ghp_pat").await.unwrap();
+    std::fs::write(Path::new(&p.gh_dir).join("token"), "ghp_gh").unwrap();
+    assert!(ps.check(&p.id).await.unwrap().github.unwrap().ok);
+    fx.forge.refuse_token("ghp_pat");
+    let github = ps.check(&p.id).await.unwrap().github.unwrap();
+    assert_eq!(github.detail.as_deref(), Some("the token was refused"));
+    assert_eq!(ps.token(&p.id).await.unwrap(), "ghp_pat");
+    let log = std::fs::read_to_string(Path::new(&p.gh_dir).join("argv.log")).unwrap_or_default();
+    assert!(!log.lines().any(|l| l.starts_with("auth token")), "{log}");
 }
 
 #[test]

@@ -1753,6 +1753,23 @@ fn gate_failure(err: &ServiceError) -> &fleet_api::GateRun {
     }
 }
 
+/// A token revoked since the persona was checked stops `open_pr` at the persona check, which says so in its own
+/// words rather than as a gh CLI that is not logged in.
+#[tokio::test]
+async fn a_revoked_token_refuses_open_pr_before_the_gate() {
+    let fx = fleet_fixture().await;
+    let marker = fx._tmp.path().join("ran");
+    let (a, _, branch, bare) =
+        done_task(&fx, &one_step(&format!("touch '{}'", marker.display()))).await;
+    fx.forge.refuse_token("ghp_fake");
+    let err = fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert!(matches!(err, ServiceError::Persona(_)), "{err:?}");
+    assert_eq!(err.to_string(), "the token was refused");
+    assert!(!marker.exists(), "the gate ran");
+    assert_eq!(git(&bare, &["branch", "--list", &branch]), "");
+    assert!(pr_calls(&fx).is_empty());
+}
+
 #[tokio::test]
 async fn gate_failure_pushes_nothing() {
     let fx = fleet_fixture().await;

@@ -10,7 +10,9 @@ use crate::forge::{self, ForgeConfig, ForgeError, RepoRef};
 use crate::git::REMOTE_TIMEOUT;
 use crate::store::{PersonaRow, Store, StoreError};
 use crate::tools::Tools;
-use fleet_api::{LoginState, NewPersona, Persona, PersonaList, PersonaUpdate, ToolError, ToolId};
+use fleet_api::{
+    GithubAuth, LoginState, NewPersona, Persona, PersonaList, PersonaUpdate, ToolError, ToolId,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -259,6 +261,14 @@ pub fn persona_env(row: &PersonaRow, personas_dir: &Path, daemon_exe: &Path) -> 
     }
 }
 
+/// Stores a token read from gh, unless one was set meanwhile: that one wins.
+fn migrate(path: &Path, token: String) -> Result<String, PersonaError> {
+    if write_token_if_absent(path, &token)? {
+        return Ok(token);
+    }
+    read_token(path).ok_or(PersonaError::NoToken)
+}
+
 /// Quotes `s` for `sh -c`, which is how git runs a `!` helper: a path with a space would otherwise split.
 /// fleet-client has the same function, but the daemon only takes that crate for its tests.
 fn sh_quote(s: &str) -> String {
@@ -334,6 +344,8 @@ fn last_line(text: &str) -> Option<String> {
 /// One CLI's answer about a persona's login.
 struct Login {
     state: LoginState,
+    /// What to refuse with instead of the state's tool problem.
+    refusal: Option<PersonaError>,
 }
 
 impl Login {
@@ -345,6 +357,7 @@ impl Login {
                 detail: None,
                 tool: None,
             },
+            refusal: None,
         }
     }
 
@@ -352,12 +365,14 @@ impl Login {
     fn unreadable(detail: String) -> Login {
         Login {
             state: failed(detail, None),
+            refusal: None,
         }
     }
 
     fn tool(e: ToolError) -> Login {
         Login {
             state: failed(e.to_string(), Some(e)),
+            refusal: None,
         }
     }
 
@@ -377,11 +392,23 @@ impl Login {
         };
         Login {
             state: failed(detail, Some(e)),
+            refusal: None,
         }
+    }
+
+    /// The persona's GitHub token is missing or refused: logged out, so the list offers a login, but refused as
+    /// itself, since gh may have nothing to do with it.
+    fn no_token(e: PersonaError, persona: &str) -> Login {
+        let mut login = Login::logged_out(e.to_string(), ToolId::Gh, persona);
+        login.refusal = Some(e);
+        login
     }
 
     /// The refusal for a login that is not ok.
     fn refusal(self, persona: &str, which: &'static str) -> PersonaError {
+        if let Some(e) = self.refusal {
+            return e;
+        }
         match self.state.tool {
             Some(e) => PersonaError::Tool(Box::new(e)),
             None => PersonaError::LoginBroken {
@@ -705,15 +732,43 @@ impl Personas {
         if let Some(token) = read_token(&path) {
             return Ok(token);
         }
+        let token = self.gh_token(row).await.ok_or(PersonaError::NoToken)?;
+        migrate(&path, token)
+    }
+
+    async fn gh_token(&self, row: &PersonaRow) -> Option<String> {
         let gh_dir = self.personas_dir.join(&row.id).join("gh");
-        let token = token_from_gh(&self.gh, &gh_dir, &row.host, &self.tools.path())
-            .await
-            .ok_or(PersonaError::NoToken)?;
-        // A token set meanwhile wins over the one gh held.
-        if write_token_if_absent(&path, &token)? {
-            return Ok(token);
+        token_from_gh(&self.gh, &gh_dir, &row.host, &self.tools.path()).await
+    }
+
+    /// Who the forge says the persona's token belongs to. For a persona that logs in through gh, the stored token is
+    /// a cache of gh's: when gh now holds another one (a re-login), that one is asked about first and stored if the
+    /// forge takes it. A PAT persona's token is the one set for it, so gh is not read once there is one.
+    async fn github_login(&self, row: &PersonaRow) -> Result<String, PersonaError> {
+        if row.github_auth != GithubAuth::Gh {
+            let token = self.token_of(row).await?;
+            return Ok(self.whoami(row, token).await?);
         }
-        read_token(&path).ok_or(PersonaError::NoToken)
+        let path = token_path(&self.personas_dir, &row.id);
+        let stored = read_token(&path);
+        let from_gh = self.gh_token(row).await;
+        let stored = match (stored, from_gh) {
+            (Some(stored), Some(gh)) if stored != gh => {
+                match self.whoami(row, gh.clone()).await {
+                    Ok(login) => {
+                        write_token(&path, &gh)?;
+                        return Ok(login);
+                    }
+                    // gh's token is no better: the stored one may still be good.
+                    Err(ForgeError::Unauthorized) => stored,
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            (Some(stored), _) => stored,
+            (None, Some(gh)) => migrate(&path, gh)?,
+            (None, None) => return Err(PersonaError::NoToken),
+        };
+        Ok(self.whoami(row, stored).await?)
     }
 
     /// Asks the forge who `token` belongs to, as a recorded call of the persona.
@@ -750,17 +805,10 @@ impl Personas {
 
     /// Whether the forge accepts the persona's token.
     async fn check_github(&self, row: &PersonaRow) -> Login {
-        let token = match self.token_of(row).await {
-            Ok(t) => t,
-            Err(PersonaError::NoToken) => {
-                return Login::logged_out(PersonaError::NoToken.to_string(), ToolId::Gh, &row.name)
-            }
-            Err(e) => return Login::unreadable(e.to_string()),
-        };
-        match self.whoami(row, token).await {
+        match self.github_login(row).await {
             Ok(login) => Login::ok(Some(login)),
-            Err(ForgeError::Unauthorized) => {
-                Login::logged_out(ForgeError::Unauthorized.to_string(), ToolId::Gh, &row.name)
+            Err(e @ (PersonaError::NoToken | PersonaError::Forge(ForgeError::Unauthorized))) => {
+                Login::no_token(e, &row.name)
             }
             Err(e) => Login::unreadable(e.to_string()),
         }

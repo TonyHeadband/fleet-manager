@@ -29,6 +29,7 @@ struct State_ {
     fail_on: Option<(String, String, u16, String)>,
     delay: Option<Duration>,
     next_number: u64,
+    refused: Vec<String>,
 }
 
 pub struct FakeForge {
@@ -90,6 +91,15 @@ impl FakeForge {
             Some((method.into(), path_part.into(), status, message.into()));
     }
 
+    /// Every request with this token answers 401 from now on, like a revoked one.
+    pub fn refuse_token(&self, token: &str) {
+        self.state
+            .lock()
+            .unwrap()
+            .refused
+            .push(format!("Bearer {token}"));
+    }
+
     /// The next request waits this long before answering.
     pub fn delay_next(&self, d: Duration) {
         self.state.lock().unwrap().delay = Some(d);
@@ -130,7 +140,13 @@ async fn handle(
             .fail_on
             .as_ref()
             .is_some_and(|(m, part, ..)| m == method.as_str() && path.contains(part.as_str()));
-        let fail = if matched {
+        let revoked = s
+            .refused
+            .iter()
+            .any(|r| *r == header(&headers, "authorization"));
+        let fail = if revoked {
+            Some((401, "Bad credentials".to_string()))
+        } else if matched {
             s.fail_on
                 .take()
                 .map(|(_, _, status, message)| (status, message))

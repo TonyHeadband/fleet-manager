@@ -1293,7 +1293,7 @@ async fn persona_routes_map_errors() {
 }
 
 #[tokio::test]
-async fn spawn_persona_errors_are_400_or_a_tool_refusal() {
+async fn spawn_persona_errors_are_400() {
     let srv = start().await;
     let mut body = spawn_body(&srv.fx, "core", "x");
     for (persona, needle) in [("", "pick a persona"), ("nobody", "no such persona")] {
@@ -1311,14 +1311,11 @@ async fn spawn_persona_errors_are_400_or_a_tool_refusal() {
         .join("forge");
     std::fs::remove_file(forge.join("token")).unwrap();
     body["persona"] = json!(PERSONA);
-    // A persona logged out is a tool refusal.
+    // A missing token is refused as itself: gh, a tool, may have nothing to do with it.
     let (s, v) = json_of(srv.addr, "POST", "/api/agents", Some(&body)).await;
-    assert_eq!(s, 424, "{v}");
-    assert_eq!(
-        v["tool"],
-        json!({"kind": "not-logged-in", "tool": "gh", "persona": PERSONA}),
-        "{v}"
-    );
+    assert_eq!(s, 400, "{v}");
+    assert_eq!(v["error"], "no GitHub token: set one in the persona", "{v}");
+    assert!(v["tool"].is_null(), "{v}");
 }
 
 async fn add_product(srv: &Server, id: &str) {
