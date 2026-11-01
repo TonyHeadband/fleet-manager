@@ -190,6 +190,7 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
     // Asks GitHub at once, then every MERGE_CHECK_EVERY and when an agent stops or reaches Review.
     svc.start_merge_watcher(fleet_daemon::merges::MERGE_CHECK_EVERY);
     fleet_daemon::supervisor::start_event_watcher(svc.clone());
+    fleet_daemon::supervisor::start_idle_reaper(svc.clone(), fleet_daemon::supervisor::REAP_EVERY);
 
     let ticker = svc.clone();
     // No session outlives a daemon, so every agent not stopped was interrupted. They are relaunched beside the

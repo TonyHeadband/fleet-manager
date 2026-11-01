@@ -150,6 +150,32 @@ fn openapi_lists_all_routes() {
 }
 
 #[test]
+fn the_openapi_document_lists_the_supervisor_routes() {
+    let doc = serde_json::to_value(openapi()).unwrap();
+    let paths = doc["paths"].as_object().expect("paths object");
+    for (p, method) in [
+        ("/api/supervisor/{persona}/conversations", "get"),
+        ("/api/supervisor/conversations", "post"),
+        ("/api/supervisor/conversations/{id}/message", "post"),
+    ] {
+        assert!(
+            paths.get(p).is_some_and(|o| o.get(method).is_some()),
+            "missing {method} {p}; have {:?}",
+            paths.keys()
+        );
+    }
+    let schemas = doc["components"]["schemas"].as_object().unwrap();
+    for s in [
+        "Conversation",
+        "TaskMark",
+        "NewConversation",
+        "ConversationMessage",
+    ] {
+        assert!(schemas.contains_key(s), "missing schema {s}");
+    }
+}
+
+#[test]
 fn the_openapi_document_lists_the_task_routes() {
     let doc = serde_json::to_value(openapi()).unwrap();
     let paths = doc["paths"].as_object().expect("paths object");

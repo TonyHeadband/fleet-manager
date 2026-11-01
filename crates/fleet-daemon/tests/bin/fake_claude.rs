@@ -7,6 +7,9 @@
 //! text: they show as `^J` / `^M` and never submit. An Enter straight after the end of a paste is a key press and
 //! submits. The paste markers themselves echo like any other escape sequence (`^[[200~`, `^[[201~`).
 //!
+//! FAKE_CLAUDE_READY_AFTER_MS holds `ready` back that long and drops whatever was typed meanwhile, as the real TUI
+//! loses keys typed before its input box is up.
+//!
 //! It keeps an input buffer of several lines with a cursor, edited as the real CLI's is: Down/Up move between
 //! lines, Ctrl-E goes to the end of the line, Ctrl-U deletes back to the start of the line (at the start it joins
 //! the line above), Backspace deletes a character (at the start it joins the line above). Ctrl-L does nothing. A
@@ -114,6 +117,13 @@ fn main() {
             let _ = std::fs::create_dir_all(&dir);
             let _ = std::fs::write(dir.join(format!("{id}.jsonl")), "{}\n");
         }
+    }
+    if let Some(ms) = std::env::var("FAKE_CLAUDE_READY_AFTER_MS")
+        .ok()
+        .and_then(|m| m.parse().ok())
+    {
+        std::thread::sleep(Duration::from_millis(ms));
+        raw::drop_input();
     }
     // Tests wait for this line: input sent before raw mode was on could have been flushed.
     line(&mut out, "ready");
@@ -320,6 +330,13 @@ mod raw {
             }
         }
     }
+
+    pub fn drop_input() {
+        // SAFETY: discards fd 0's unread input; failure (not a tty) is ignored.
+        unsafe {
+            libc::tcflush(0, libc::TCIFLUSH);
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -343,6 +360,13 @@ mod raw {
                     mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN,
                 );
             }
+        }
+    }
+
+    pub fn drop_input() {
+        // SAFETY: discards this process's own console input; failure (no console) is ignored.
+        unsafe {
+            FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
         }
     }
 }

@@ -6,7 +6,7 @@ use fleet_api::{Agent, AgentId, Status};
 use fleet_daemon::agents::PROMPT_FILE;
 use fleet_daemon::hooks_cfg::rule_path;
 use fleet_daemon::http::{bind_loopback, router, AppState};
-use fleet_daemon::supervisor::{folder, Supervisor};
+use fleet_daemon::supervisor::{conversation_folder, folder, Supervisor};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::path::Path;
@@ -57,8 +57,7 @@ async fn a_new_conversation_starts_a_supervisor_with_the_text_as_its_prompt() {
         assert!(screen.contains(line), "{line} missing:\n{screen}");
     }
     assert!(!screen.contains("arg=--model"), "{screen}");
-    let prompt =
-        std::fs::read_to_string(folder(fx.svc.config(), PERSONA).join(PROMPT_FILE)).unwrap();
+    let prompt = std::fs::read_to_string(Path::new(&a.workdir).join(PROMPT_FILE)).unwrap();
     assert_eq!(prompt.trim_end(), "what is left for the release?");
     assert_eq!(a.kind, fleet_api::AgentKind::Supervisor);
     assert_eq!(a.product, "");
@@ -91,20 +90,26 @@ async fn a_new_conversation_starts_a_supervisor_with_the_text_as_its_prompt() {
 #[tokio::test]
 async fn a_second_conversation_writes_its_own_prompt() {
     let fx = fixture().await;
-    start(&fx, "first").await;
-    start(&fx, "second").await;
-    let prompt =
-        std::fs::read_to_string(folder(fx.svc.config(), PERSONA).join(PROMPT_FILE)).unwrap();
-    assert_eq!(prompt.trim_end(), "second");
+    let first = start(&fx, "first").await;
+    let second = start(&fx, "second").await;
+    assert_ne!(first.workdir, second.workdir);
+    for (a, text) in [(&first, "first"), (&second, "second")] {
+        let prompt = std::fs::read_to_string(Path::new(&a.workdir).join(PROMPT_FILE)).unwrap();
+        assert_eq!(prompt.trim_end(), text);
+    }
     assert_eq!(fx.store.conversations(PERSONA).await.unwrap().len(), 2);
 }
 
 #[tokio::test]
-async fn the_supervisor_runs_in_its_persona_folder_with_the_persona_config() {
+async fn the_supervisor_runs_in_its_own_folder_in_the_persona_folder_with_the_persona_config() {
     let fx = fixture().await;
     let a = start(&fx, "hello").await;
-    let dir = folder(fx.svc.config(), PERSONA);
-    assert_eq!(dir, fx.state_dir.join("supervisor").join(PERSONA));
+    assert_eq!(
+        folder(fx.svc.config(), PERSONA),
+        fx.state_dir.join("supervisor").join(PERSONA)
+    );
+    let dir = folder(fx.svc.config(), PERSONA).join(&a.id.0);
+    assert_eq!(conversation_folder(fx.svc.config(), PERSONA, &a.id), dir);
     assert_eq!(Path::new(&a.workdir), dir);
     let cwd = fleet_fs::canonical(&dir).unwrap();
     assert!(pane_contains(&fx, &a.id, &format!("cwd={}", cwd.display())).await);
@@ -329,20 +334,284 @@ async fn a_rebase_keeps_the_subagent_guard() {
 }
 
 #[tokio::test]
-async fn the_supervisor_folder_is_trusted_for_its_persona() {
+async fn the_conversation_folder_is_trusted_for_its_persona() {
     let fx = fixture().await;
-    start(&fx, "hello").await;
+    let a = start(&fx, "hello").await;
     let claude_dir = fixture_env(&fx).await.claude_dir().unwrap();
     let config: Value =
         serde_json::from_str(&std::fs::read_to_string(claude_dir.join(".claude.json")).unwrap())
             .unwrap();
-    let key = fleet_daemon::first_run::trust_key(
-        &fleet_fs::canonical(&folder(fx.svc.config(), PERSONA)).unwrap(),
-    );
+    let key =
+        fleet_daemon::first_run::trust_key(&fleet_fs::canonical(Path::new(&a.workdir)).unwrap());
     assert_eq!(
         config["projects"][&key]["hasTrustDialogAccepted"], true,
         "{config}"
     );
     // The first-run answers are still there.
     assert_eq!(config["hasCompletedOnboarding"], true);
+}
+
+fn message_path(id: &AgentId) -> String {
+    format!("/api/supervisor/conversations/{}/message", id.0)
+}
+
+async fn send(srv: &Server, id: &AgentId, text: &str) -> u16 {
+    json_of(
+        srv.addr,
+        "POST",
+        &message_path(id),
+        Some(&json!({ "text": text })),
+    )
+    .await
+    .0
+}
+
+/// A fixture whose fake Claude takes a while to come up and drops what is typed before, as the real TUI does.
+async fn slow_start() -> Fx {
+    fixture_options(
+        |_| {},
+        |o| o.extra_env = vec![("FAKE_CLAUDE_READY_AFTER_MS".into(), "800".into())],
+    )
+    .await
+}
+
+/// A conversation at its prompt, stopped as the reaper stops it: its process is gone.
+async fn exited(fx: &Fx) -> Agent {
+    let a = start(fx, "hello").await;
+    wait_screen_in(&fx.sessions, &a.session, |s| s.contains("ready")).await;
+    fx.svc.stop(&a.id).await.unwrap();
+    assert!(wait_until(|| async { !fx.sessions.alive(&a.session) }).await);
+    a
+}
+
+fn count(screen: &str, needle: &str) -> usize {
+    screen.matches(needle).count()
+}
+
+#[tokio::test]
+async fn a_message_to_a_live_conversation_is_typed() {
+    let fx = fixture().await;
+    let a = start(&fx, "hello").await;
+    wait_screen_in(&fx.sessions, &a.session, |s| s.contains("ready")).await;
+    let before = fx.store.conversations(PERSONA).await.unwrap()[0].last_used_at;
+    fx.clock.advance(30);
+    let srv = serve(fx).await;
+    assert_eq!(send(&srv, &a.id, "  and the docs?  ").await, 204);
+    let screen = wait_screen_in(&srv.fx.sessions, &a.session, |s| s.contains("entry<<")).await;
+    assert_eq!(count(&screen, "entry<<and the docs?>>"), 1, "{screen}");
+    let row = &srv.fx.store.conversations(PERSONA).await.unwrap()[0];
+    assert_eq!(row.last_used_at, before + 30);
+}
+
+#[tokio::test]
+async fn a_message_to_an_exited_conversation_resumes_then_types_once() {
+    let fx = slow_start().await;
+    let a = exited(&fx).await;
+    let claude_session = fx.store.claude_session(&a.id).await.unwrap().unwrap();
+    let srv = serve(fx).await;
+    assert_eq!(send(&srv, &a.id, "are we there yet?").await, 204);
+    let screen = wait_screen_in(&srv.fx.sessions, &a.session, |s| {
+        s.contains("entry<<are we there yet?>>")
+    })
+    .await;
+    assert!(screen.contains("arg=--resume"), "{screen}");
+    assert!(
+        screen.contains(&format!("arg={claude_session}")),
+        "{screen}"
+    );
+    assert!(!screen.contains("arg=--session-id"), "{screen}");
+    // Typed once, and only into the ready TUI: nothing of it echoes before `ready`.
+    let ready = screen.find("ready").unwrap();
+    let first = screen.find("are we there yet?").unwrap();
+    assert!(first > ready, "{screen}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let screen = srv.fx.sessions.screen_text(&a.session).unwrap();
+    assert_eq!(count(&screen, "entry<<"), 1, "{screen}");
+    let now = agent(&srv.fx, &a.id).await;
+    assert_ne!(now.status, Status::Stopped);
+    let listed = Supervisor::new(srv.fx.svc.clone())
+        .list(PERSONA)
+        .await
+        .unwrap();
+    assert!(listed[0].live);
+}
+
+#[tokio::test]
+async fn two_messages_while_resuming_arrive_in_order() {
+    let fx = slow_start().await;
+    let a = exited(&fx).await;
+    let srv = serve(fx).await;
+    let (addr, path) = (srv.addr, message_path(&a.id));
+    let first = tokio::spawn({
+        let path = path.clone();
+        async move {
+            json_of(addr, "POST", &path, Some(&json!({"text": "one"})))
+                .await
+                .0
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let second = tokio::spawn(async move {
+        json_of(addr, "POST", &path, Some(&json!({"text": "two"})))
+            .await
+            .0
+    });
+    assert_eq!(first.await.unwrap(), 204);
+    assert_eq!(second.await.unwrap(), 204);
+    let screen = wait_screen_in(&srv.fx.sessions, &a.session, |s| s.contains("entry<<two>>")).await;
+    let one = screen.find("entry<<one>>").expect(&screen);
+    let two = screen.find("entry<<two>>").unwrap();
+    assert!(one < two, "{screen}");
+    assert_eq!(count(&screen, "entry<<"), 2, "{screen}");
+    // One process: the second message did not start another.
+    assert_eq!(count(&screen, "arg=--resume"), 1, "{screen}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_reaper_stops_only_idle_review_after_ten_minutes() {
+    let fx = fixture().await;
+    let mut cases = Vec::new();
+    for (status, idle, stopped) in [
+        (Status::Working, 660, false),
+        (Status::NeedsYou, 660, false),
+        (Status::Talking, 660, false),
+        (Status::Queued, 660, false),
+        (Status::Review, 540, false),
+        (Status::Review, 600, true),
+    ] {
+        cases.push((start(&fx, "hello").await, status, idle, stopped));
+    }
+    // Typed into a minute ago, still in Review until Claude's hook says otherwise.
+    let typed = start(&fx, "hello").await;
+    fx.clock.advance(660);
+    let now = fx.clock.0.load(std::sync::atomic::Ordering::SeqCst);
+    for (a, status, idle, _) in &cases {
+        let (status, idle) = (*status, *idle);
+        fx.store
+            .update_agent(&a.id, |x| {
+                x.status = status;
+                x.status_since = now - idle;
+            })
+            .await
+            .unwrap();
+    }
+    fx.store
+        .update_agent(&typed.id, |x| {
+            x.status = Status::Review;
+            x.status_since = now - 660;
+        })
+        .await
+        .unwrap();
+    fx.store
+        .touch_conversation(&typed.id, now - 60)
+        .await
+        .unwrap();
+    // Only supervisors: a task idle in Review for longer is left alone.
+    let solo = spawn_ready(&fx).await;
+    fx.store
+        .update_agent(&solo.id, |x| {
+            x.status = Status::Review;
+            x.status_since = now - 3600;
+        })
+        .await
+        .unwrap();
+
+    let reaper =
+        fleet_daemon::supervisor::start_idle_reaper(fx.svc.clone(), Duration::from_millis(50));
+    assert_eq!(
+        fleet_daemon::supervisor::IDLE_EXIT,
+        Duration::from_secs(600)
+    );
+    let idle = cases.last().unwrap().0.id.clone();
+    assert!(wait_until(|| async { agent(&fx, &idle).await.status == Status::Stopped }).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    reaper.abort();
+    for (a, status, idle, stopped) in &cases {
+        let now = agent(&fx, &a.id).await;
+        assert_eq!(
+            now.status == Status::Stopped,
+            *stopped,
+            "{status:?} idle {idle} s: {now:?}"
+        );
+    }
+    assert!(!fx.sessions.alive(&cases.last().unwrap().0.session));
+    assert_eq!(agent(&fx, &typed.id).await.status, Status::Review);
+    assert_eq!(agent(&fx, &solo.id).await.status, Status::Review);
+}
+
+#[tokio::test]
+async fn conversations_list_their_tasks_with_status() {
+    let fx = fixture().await;
+    let srv = serve(fx).await;
+    let (status, v) = json_of(
+        srv.addr,
+        "POST",
+        "/api/supervisor/conversations",
+        Some(&json!({"persona": PERSONA, "text": "plan the release"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let made: fleet_api::Conversation = serde_json::from_value(v).unwrap();
+    assert_eq!(made.persona, PERSONA);
+    assert!(made.live);
+    assert!(made.tasks.is_empty());
+
+    let solo = spawn_ready(&srv.fx).await;
+    let origin = made.id.clone();
+    srv.fx
+        .store
+        .update_task(&solo.id, |t| t.origin = Some(origin))
+        .await
+        .unwrap();
+    // Another task, started by no conversation, is not listed.
+    spawn_ready(&srv.fx).await;
+    set_status(&srv.fx, &solo.id, Status::NeedsYou).await;
+
+    let (status, v) = json_of(
+        srv.addr,
+        "GET",
+        &format!("/api/supervisor/{PERSONA}/conversations"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let listed: Vec<fleet_api::Conversation> = serde_json::from_value(v).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, made.id);
+    assert_eq!(
+        listed[0].tasks,
+        [fleet_api::TaskMark {
+            id: solo.id.clone(),
+            title: "do the thing".into(),
+            status: Status::NeedsYou,
+        }]
+    );
+    let (_, v) = json_of(
+        srv.addr,
+        "GET",
+        "/api/supervisor/nobody/conversations",
+        None,
+    )
+    .await;
+    assert_eq!(v, json!([]));
+}
+
+#[tokio::test]
+async fn blank_text_is_400_and_unknown_id_is_404() {
+    let fx = fixture().await;
+    let a = start(&fx, "hello").await;
+    let solo = spawn_ready(&fx).await;
+    let srv = serve(fx).await;
+    assert_eq!(send(&srv, &a.id, " \n ").await, 400);
+    assert_eq!(send(&srv, &AgentId("nope".into()), "hi").await, 404);
+    // A task's agent is no conversation.
+    assert_eq!(send(&srv, &solo.id, "hi").await, 404);
+    let (status, _) = json_of(
+        srv.addr,
+        "POST",
+        "/api/supervisor/conversations",
+        Some(&json!({"persona": PERSONA, "text": "  "})),
+    )
+    .await;
+    assert_eq!(status, 400);
 }

@@ -15,6 +15,7 @@ import type { AgentConfig } from "./generated/AgentConfig";
 import type { AgentSettings } from "./generated/AgentSettings";
 import type { AskAnswer } from "./generated/AskAnswer";
 import type { ChatPage } from "./generated/ChatPage";
+import type { Conversation } from "./generated/Conversation";
 import type { CheckoutList } from "./generated/CheckoutList";
 import type { DefFile } from "./generated/DefFile";
 import type { DefInfo } from "./generated/DefInfo";
@@ -207,6 +208,15 @@ export class FleetClient {
     this.call<Task>("PUT", `/api/tasks/${encodeURIComponent(task)}/release`, { release });
 
   spawn = (req: SpawnRequest) => this.call<SpawnResponse>("POST", "/api/agents", req, LONG_TIMEOUT_MS);
+
+  /** The persona's supervisor conversations, most recently used first. */
+  conversations = (persona: string) => this.call<Conversation[]>("GET", `/api/supervisor/${encodeURIComponent(persona)}/conversations`);
+  /** Starts a conversation; the daemon checks the persona first. */
+  newConversation = (persona: string, text: string) =>
+    this.call<Conversation>("POST", "/api/supervisor/conversations", { persona, text }, CHECK_TIMEOUT_MS);
+  /** The daemon may resume the conversation's process first and waits for it to be ready. */
+  sendToConversation = (id: string, text: string) =>
+    this.call<void>("POST", `/api/supervisor/conversations/${encodeURIComponent(id)}/message`, { text }, CHECK_TIMEOUT_MS);
 
   /** An orchestrated task's breakdowns and gate runs. */
   fleetView = (taskId: string) => this.call<FleetView>("GET", `/api/tasks/${encodeURIComponent(taskId)}/fleet`);

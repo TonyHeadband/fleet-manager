@@ -2,13 +2,13 @@
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
     ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer, ChatPage, CheckoutList, ControlRequest,
-    DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport, EffectiveSettings, Event, FleetView,
-    GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles,
-    InternalHistory, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
-    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
-    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, SetToken, Snapshot,
-    SpawnRequest, SpawnResponse, StopTaskResponse, Task, TaskList, ToolList, UiSchema, VersionInfo,
-    Workspace,
+    Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport,
+    EffectiveSettings, Event, FleetView, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches,
+    InternalFile, InternalFiles, InternalHistory, NewConversation, NewPersona, NewProduct,
+    NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product,
+    ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList,
+    RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse,
+    Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -34,7 +34,8 @@ pub fn terminal_stream() {}
 
 /// The agent's Claude sessions as chat. Events: `page` (a `ChatPage`, the latest 200 items, first), `items` (new or
 /// updated `ChatItem`s, merged by `seq`), `ask` (the `ChatAsk` the agent waits on or `null`, after `page` and whenever
-/// it changes), and for a Stopped agent `ended` (its `status_since`), after which the stream closes.
+/// it changes), and for a Stopped agent `ended` (its `status_since`), after which the stream closes. A supervisor
+/// conversation's stream never ends: its task events, and its session once a message resumes it, keep coming.
 #[utoipa::path(get, path = "/api/agents/{id}/chat", params(("id" = String, Path)), responses((status = 200, content_type = "text/event-stream", body = ChatPage), (status = 404)))]
 pub fn chat_stream() {}
 
@@ -254,3 +255,17 @@ pub fn recheck_tools() {}
 /// The daemon's own version.
 #[utoipa::path(get, path = "/api/version", responses((status = 200, body = VersionInfo)))]
 pub fn daemon_version() {}
+
+/// The persona's supervisor conversations, most recently used first, each with the tasks it started and their live
+/// status.
+#[utoipa::path(get, path = "/api/supervisor/{persona}/conversations", params(("persona" = String, Path)), responses((status = 200, body = Vec<Conversation>)))]
+pub fn list_conversations() {}
+
+/// Starts a supervisor conversation with `text` as its first prompt. 400 for blank text.
+#[utoipa::path(post, path = "/api/supervisor/conversations", request_body = NewConversation, responses((status = 200, body = Conversation), (status = 400), (status = 404)))]
+pub fn new_conversation() {}
+
+/// Types `text` into the conversation, resuming its process first when it has exited. 400 for blank text, 404 for an
+/// unknown conversation.
+#[utoipa::path(post, path = "/api/supervisor/conversations/{id}/message", params(("id" = String, Path)), request_body = ConversationMessage, responses((status = 204), (status = 400), (status = 404)))]
+pub fn message_conversation() {}

@@ -1,15 +1,22 @@
-//! What a supervisor conversation runs in: its persona's folder, its settings and its CLAUDE.md.
+//! What a supervisor conversation runs in: its own folder in its persona's, its settings and its CLAUDE.md.
 use crate::agents::AgentService;
 use crate::config::Config;
 use crate::hooks_cfg::RoleSettings;
 use crate::store::StoreError;
+use fleet_api::AgentId;
 use std::path::{Path, PathBuf};
 
 const CLAUDE_MD: &str = include_str!("../../builtin/supervisor/CLAUDE.md");
 
-/// The persona's supervisor folder, every conversation's cwd: one folder, so `--resume` finds each session again.
+/// The persona's supervisor folder, holding one folder per conversation.
 pub fn folder(cfg: &Config, persona: &str) -> PathBuf {
     cfg.state_dir.join("supervisor").join(persona)
+}
+
+/// A conversation's cwd, holding its own PROMPT.md and CLAUDE.md. It never changes, so `--resume` finds the
+/// session again.
+pub fn conversation_folder(cfg: &Config, persona: &str, id: &AgentId) -> PathBuf {
+    folder(cfg, persona).join(&id.0)
 }
 
 /// Reads every product checkout of the persona and the internal repos; edits nowhere a task or a repo lives.

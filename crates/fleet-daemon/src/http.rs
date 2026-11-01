@@ -17,6 +17,7 @@ use crate::products::ProductError;
 use crate::repos::{redact_url, RepoError};
 use crate::session::{Output, SessionHost};
 use crate::store::{ProductRow, ReleaseRow, RepoRow, Store};
+use crate::supervisor::{Supervisor, SupervisorError};
 use crate::tools::Tools;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -30,13 +31,14 @@ use fleet_api::{
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
     AgentKind, AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest,
     AskAnswer, AskKind, BlockedReason, ChatAsk, ChatItem, ChatPage, CheckoutInfo, CheckoutList,
-    ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, Event,
-    EventKind, FieldError, FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut,
-    InternalBranches, InternalFile, InternalFiles, InternalHistory, InternalRemote, NewPersona,
-    NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate,
-    Product, ProductList, ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo,
-    RepoList, RepoUpsert, SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, Status,
-    StopTaskResponse, Task, TaskEvent, TaskList, ToolError, ToolList, VersionInfo, Workspace,
+    ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind,
+    EffectiveSettings, Event, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
+    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
+    InternalRemote, NewConversation, NewPersona, NewProduct, NewRelease, OrphanRequest,
+    OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate,
+    RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease,
+    SetToken, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskEvent,
+    TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -171,6 +173,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/repos", post(add_repo))
         .route("/api/agents/{id}/repo-request/grant", post(grant_repo))
         .route("/api/agents/{id}/repo-request/refuse", post(refuse_repo))
+        .route(
+            "/api/supervisor/{persona}/conversations",
+            get(list_conversations),
+        )
+        .route("/api/supervisor/conversations", post(new_conversation))
+        .route(
+            "/api/supervisor/conversations/{id}/message",
+            post(message_conversation),
+        )
         .route("/api/tasks", get(list_tasks))
         .route("/api/tasks/refresh", post(refresh_tasks))
         .route("/api/tasks/{id}/archive-plan", get(archive_plan))
@@ -1350,6 +1361,50 @@ async fn answer_agent(
     Ok(StatusCode::NO_CONTENT)
 }
 
+impl From<SupervisorError> for ApiError {
+    fn from(e: SupervisorError) -> Self {
+        match e {
+            SupervisorError::Spawn(e) => e.into(),
+            SupervisorError::Service(e) => e.into(),
+            SupervisorError::EmptyText => ApiError::new(StatusCode::BAD_REQUEST, e.to_string()),
+            SupervisorError::NotFound => ApiError::new(StatusCode::NOT_FOUND, e.to_string()),
+            SupervisorError::Resume(_) => internal(e),
+        }
+    }
+}
+
+async fn list_conversations(
+    State(st): State<AppState>,
+    Path(persona): Path<String>,
+) -> Result<Json<Vec<Conversation>>, ApiError> {
+    Ok(Json(Supervisor::new(st.svc.clone()).list(&persona).await?))
+}
+
+async fn new_conversation(
+    State(st): State<AppState>,
+    Json(req): Json<NewConversation>,
+) -> Result<Json<Conversation>, ApiError> {
+    let sup = Supervisor::new(st.svc.clone());
+    let id = sup.new_conversation(&req.persona, &req.text).await?;
+    sup.list(&req.persona)
+        .await?
+        .into_iter()
+        .find(|c| c.id == id)
+        .map(Json)
+        .ok_or_else(|| internal("the new conversation is gone"))
+}
+
+async fn message_conversation(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ConversationMessage>,
+) -> Result<StatusCode, ApiError> {
+    Supervisor::new(st.svc.clone())
+        .message(&AgentId(id), &req.text)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn pause_agent(
     State(st): State<AppState>,
     Path(id): Path<String>,
@@ -1800,7 +1855,8 @@ async fn terminal(
 }
 
 /// What a chat step reads: every Claude session the agent has had, a supervisor's task events after
-/// `Chat::last_event`, and the time its chat ended when it is Stopped.
+/// `Chat::last_event`, and the time its chat ended when it is Stopped. A supervisor's never ends: its process exits
+/// when idle, and its events and its resumed session still go on.
 struct ChatSources {
     sessions: Vec<(String, i64)>,
     events: Vec<TaskEvent>,
@@ -1821,7 +1877,8 @@ async fn chat_sources(st: &AppState, agent: &Agent, chat: &Chat) -> Result<ChatS
     } else {
         Vec::new()
     };
-    let ended = (agent.status == Status::Stopped).then_some(agent.status_since);
+    let ended = (agent.status == Status::Stopped && agent.kind != AgentKind::Supervisor)
+        .then_some(agent.status_since);
     Ok(ChatSources {
         sessions,
         events,
@@ -1856,7 +1913,8 @@ fn chat_event<T: serde::Serialize>(kind: &str, data: &T) -> Option<SseEvent> {
 }
 
 /// `page` (the latest items), then `items` as the transcript grows. A Stopped agent's chat ends with `ended` (its
-/// `status_since`), then the stream closes so the clients stop reconnecting.
+/// `status_since`), then the stream closes so the clients stop reconnecting; a supervisor's stays open (see
+/// `chat_sources`).
 async fn chat_stream(
     State(st): State<AppState>,
     Path(id): Path<String>,
@@ -1883,7 +1941,7 @@ async fn chat_stream(
         let mut ended = ended;
         // A Stopped agent waits on nothing, so its stream sends no `ask`.
         let mut sent_ask = SentAsk::default();
-        if ended.is_none() && !sent_ask.send(&tx, current_ask(&st, &agent)).await {
+        if agent.status != Status::Stopped && !sent_ask.send(&tx, current_ask(&st, &agent)).await {
             return;
         }
         loop {

@@ -2786,7 +2786,7 @@ impl AgentService {
             if a.status == Status::Stopped || self.sessions.alive(&a.session) {
                 continue;
             }
-            if let Err(why) = self.resume_one(&a, &mut personas).await {
+            if let Err(why) = self.resume_one(&a, &mut personas, false).await {
                 if let Err(e) = self.unresumable().stop(&a.id, &why).await {
                     error!(agent_id = %a.id.0, error = %e, "cannot stop the agent that could not resume");
                 }
@@ -2812,11 +2812,19 @@ impl AgentService {
         self.reconcile().await
     }
 
-    /// `Err` says why the agent cannot be resumed; it is empty when there is no Claude session to resume.
+    /// Relaunches the Stopped agent `a` with `--resume` on its Claude session and leaves it idle (Review): a
+    /// supervisor conversation the idle reaper closed, resumed for a message. `Err` says why it cannot be resumed.
+    pub(crate) async fn resume_stopped(&self, a: &Agent) -> Result<(), String> {
+        self.resume_one(a, &mut HashMap::new(), true).await
+    }
+
+    /// `Err` says why the agent cannot be resumed; it is empty when there is no Claude session to resume. `revive`
+    /// resumes a Stopped agent too (see `resume_stopped`).
     async fn resume_one(
         &self,
         a: &Agent,
         personas: &mut HashMap<String, Result<PersonaEnv, String>>,
+        revive: bool,
     ) -> Result<(), String> {
         // Not prompted yet (still starting, or at the trust dialog): Claude has written no transcript to resume, so
         // it starts over, as at spawn.
@@ -2927,7 +2935,7 @@ impl AgentService {
             .store
             .update_agent(&a.id, |x| {
                 // Stopped by its owner since the snapshot: the watcher ends it, and this must not revive it.
-                if x.status == Status::Stopped {
+                if x.status == Status::Stopped && !revive {
                     return;
                 }
                 if fresh {
@@ -2936,6 +2944,16 @@ impl AgentService {
                     x.status_since = now;
                     x.activity = "starting".into();
                     x.blocked_reason = None;
+                    x.paused = false;
+                    return;
+                }
+                if revive {
+                    x.status = Status::Review;
+                    x.status_since = now;
+                    x.stop_cause = None;
+                    x.activity = "resumed".into();
+                    x.blocked_reason = None;
+                    x.repo_request = None;
                     x.paused = false;
                     return;
                 }
@@ -2962,7 +2980,11 @@ impl AgentService {
         if let Err(e) = updated {
             error!(agent_id = %a.id.0, error = %e, "cannot mark the agent resumed");
         }
-        info!(agent_id = %a.id.0, "agent resumed after daemon restart");
+        if revive {
+            info!(agent_id = %a.id.0, "stopped agent resumed");
+        } else {
+            info!(agent_id = %a.id.0, "agent resumed after daemon restart");
+        }
         Ok(())
     }
 

@@ -137,6 +137,9 @@ use utoipa::OpenApi;
         routes::list_tools,
         routes::recheck_tools,
         routes::daemon_version,
+        routes::list_conversations,
+        routes::new_conversation,
+        routes::message_conversation,
     ),
     components(schemas(
         Status,
@@ -259,7 +262,11 @@ use utoipa::OpenApi;
         AskKind,
         AskOption,
         AskQuestion,
-        AskAnswer
+        AskAnswer,
+        Conversation,
+        TaskMark,
+        NewConversation,
+        ConversationMessage
     ))
 )]
 struct ApiDoc;

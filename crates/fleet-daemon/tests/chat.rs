@@ -1195,3 +1195,80 @@ async fn other_agents_never_get_event_items() {
         "{items:?}"
     );
 }
+
+#[tokio::test]
+async fn two_conversations_keep_their_own_first_prompt() {
+    let srv = start().await;
+    let (first, first_path) = supervisor(&srv, "first question").await;
+    let (second, second_path) = supervisor(&srv, "second question").await;
+    for path in [&first_path, &second_path] {
+        append(path, &[owner_line(PROMPT_POINTER, 0)]);
+    }
+    for (id, text) in [(&first, "first question\n"), (&second, "second question\n")] {
+        let history = format!("/api/agents/{}/chat/history", id.0);
+        let (_, v) = json_of(srv.addr, "GET", &history, None).await;
+        let page: ChatPage = serde_json::from_value(v).unwrap();
+        assert_eq!(
+            page.items[0].body,
+            ChatBody::Prompt {
+                text: text.into(),
+                from: PromptFrom::Owner
+            },
+            "{}",
+            id.0
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_stopped_supervisors_chat_stays_open_for_events_and_the_resume() {
+    let srv = start().await;
+    let (id, path) = supervisor(&srv, "watch the fleet").await;
+    append(&path, &[owner_line(PROMPT_POINTER, 0)]);
+    let session = srv.fx.svc.agent(&id).await.unwrap().session;
+    wait_screen_in(&srv.fx.sessions, &session, |s| s.contains("ready")).await;
+    srv.fx.svc.stop(&id).await.unwrap();
+
+    let mut sse = SseClient::connect(srv.addr, &chat_path(&id), &[]).await;
+    let page = page_of(&mut sse).await;
+    assert_eq!(page.items.len(), 1, "{:?}", page.items);
+    assert!(matches!(page.items[0].body, ChatBody::Prompt { .. }));
+
+    // Stored while stopped: `items_of` fails on an `ended`.
+    add_event(&srv, &id, TaskEventKind::PrMerged, "PR merged", 30).await;
+    let items = items_soon(&mut sse).await;
+    assert_eq!(
+        items.iter().map(|i| &i.body).collect::<Vec<_>>(),
+        [&event_body(TaskEventKind::PrMerged, "PR merged")]
+    );
+
+    Supervisor::new(srv.fx.svc.clone())
+        .message(&id, "still there?")
+        .await
+        .unwrap();
+    append(
+        &path,
+        &[owner_line("still there?", 60), reply_line("yes", 90)],
+    );
+    let mut fresh = Vec::new();
+    while !fresh
+        .iter()
+        .any(|i: &ChatItem| i.body == ChatBody::Reply { text: "yes".into() })
+    {
+        fresh.extend(items_soon(&mut sse).await);
+    }
+    assert!(
+        fresh.iter().any(|i| i.body
+            == ChatBody::Prompt {
+                text: "still there?".into(),
+                from: PromptFrom::Owner
+            }),
+        "{fresh:?}"
+    );
+    assert!(
+        fresh
+            .iter()
+            .all(|i| !is_marker(i, MarkerKind::SessionEnded)),
+        "{fresh:?}"
+    );
+}

@@ -164,6 +164,22 @@ describe("FleetClient", () => {
     expect(await history.internalHistory("p", "main", "a.md")).toEqual([commit]);
   });
 
+  it("the_supervisor_client_calls_hit_their_urls", async () => {
+    const conversation = { id: "c1", persona: "me/x", created_at: 1, last_used_at: 1, live: true, tasks: [] };
+    const f = vi.fn(async (url: string, _init?: RequestInit) =>
+      url.endsWith("/message") ? new Response(null, { status: 204 }) : new Response(JSON.stringify(url.endsWith("/conversations") && !url.includes("me%2Fx") ? conversation : [conversation])),
+    );
+    const c = new FleetClient("", f as unknown as typeof fetch);
+    expect(await c.conversations("me/x")).toEqual([conversation]);
+    expect(await c.newConversation("me/x", "what is left?")).toEqual(conversation);
+    expect(await c.sendToConversation("c/1", "and now?")).toBeUndefined();
+    expect(f.mock.calls.map(([url, init]) => [url, init?.method, init?.body && JSON.parse(init.body as string)])).toEqual([
+      ["/api/supervisor/me%2Fx/conversations", "GET", undefined],
+      ["/api/supervisor/conversations", "POST", { persona: "me/x", text: "what is left?" }],
+      ["/api/supervisor/conversations/c%2F1/message", "POST", { text: "and now?" }],
+    ]);
+  });
+
   it("reads the personas and the tasks", async () => {
     const f = fakeFetch(200, { personas: [] });
     const c = new FleetClient("", f as unknown as typeof fetch);

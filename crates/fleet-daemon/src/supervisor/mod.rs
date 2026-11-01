@@ -1,16 +1,16 @@
-//! A persona's supervisor: one agent of kind `Supervisor` per conversation, with no task and no product, running in
-//! the persona's own folder.
+//! A persona's supervisor: one agent of kind `Supervisor` per conversation, with no task and no product, each running
+//! in its own folder in the persona's.
 mod events;
 mod files;
 pub(crate) mod tools;
 
 pub(crate) use events::route_with;
 pub use events::{route, start_event_watcher};
-pub use files::folder;
+pub use files::{conversation_folder, folder};
 
 use crate::agents::{
-    fleet_config, one_line, write_prompt, AgentService, Clock, SpawnError, Start, MAX_PROMPT_BYTES,
-    PROMPT_FILE, SESSION_PREFIX,
+    fleet_config, one_line, write_prompt, AgentService, Clock, ServiceError, SpawnError, Start,
+    MAX_PROMPT_BYTES, SESSION_PREFIX,
 };
 use crate::first_run::trust_folder;
 use crate::fleet::ops::agent_vars;
@@ -21,8 +21,12 @@ use fleet_api::{
     Agent, AgentId, AgentKind, Conversation, Effort, PermissionMode, Status, TaskMark, ToolId,
 };
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{info, warn};
 
 const MODE: PermissionMode = PermissionMode::Auto;
@@ -31,13 +35,41 @@ const EFFORT: Effort = Effort::High;
 const SUBAGENT_TYPES: [&str; 2] = ["Explore", "Plan"];
 const SUBAGENT_REFUSAL: &str =
     "the supervisor's subagents are read-only (Explore, Plan); start a task to change anything";
+/// How long a conversation sits idle in Review before the reaper ends its process.
+pub const IDLE_EXIT: Duration = Duration::from_secs(600);
+/// How often the reaper looks.
+pub const REAP_EVERY: Duration = Duration::from_secs(60);
+/// How long a message waits for the TUI to turn bracketed paste on, the sign its input box is up, before it is typed
+/// anyway: a terminal that never reports it must not lose the message.
+const READY_WAIT: Duration = Duration::from_secs(15);
+
+/// One lock per conversation, held while a message resumes it and types, and while the reaper ends it: messages are
+/// typed in the order they came, and never into a process being resumed or ended. Process-wide, so every
+/// `Supervisor` and the reaper share it.
+static TURNS: LazyLock<Mutex<HashMap<AgentId, Arc<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(Default::default);
+
+fn turn(id: &AgentId) -> Arc<tokio::sync::Mutex<()>> {
+    TURNS
+        .lock()
+        .expect("turns poisoned")
+        .entry(id.clone())
+        .or_default()
+        .clone()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SupervisorError {
     #[error("the message is empty")]
     EmptyText,
+    #[error("no such conversation")]
+    NotFound,
+    #[error("cannot resume the conversation: {0}")]
+    Resume(String),
     #[error(transparent)]
     Spawn(#[from] SpawnError),
+    #[error(transparent)]
+    Service(#[from] ServiceError),
 }
 
 impl From<StoreError> for SupervisorError {
@@ -49,18 +81,12 @@ impl From<StoreError> for SupervisorError {
 pub struct Supervisor {
     svc: Arc<AgentService>,
     clock: Arc<dyn Clock>,
-    /// Held while a new conversation replaces the persona folder's PROMPT.md, so two starts never interleave there.
-    prompt_lock: tokio::sync::Mutex<()>,
 }
 
 impl Supervisor {
     pub fn new(svc: Arc<AgentService>) -> Supervisor {
         let clock = svc.options().clock.clone();
-        Supervisor {
-            svc,
-            clock,
-            prompt_lock: tokio::sync::Mutex::new(()),
-        }
+        Supervisor { svc, clock }
     }
 
     /// Creates the conversation row and the agent, writes `text` as PROMPT.md, starts with `Start::New`.
@@ -102,16 +128,20 @@ impl Supervisor {
             uuid::Uuid::new_v4().simple()
         );
         let session = format!("{SESSION_PREFIX}{}", &id.0[..8]);
-        let cwd = folder(svc.config(), persona);
+        let cwd = conversation_folder(svc.config(), persona, &id);
         let settings_dir = svc.agent_dir(&id.0);
         std::fs::create_dir_all(&cwd).map_err(SpawnError::from)?;
         // Task folders inherit the trust the persona gave the tasks root at login; this folder has none of its own.
         if let Some(claude_dir) = env.claude_dir() {
             let dir = cwd.clone();
-            tokio::task::spawn_blocking(move || trust_folder(&claude_dir, &dir))
+            let trusted = tokio::task::spawn_blocking(move || trust_folder(&claude_dir, &dir))
                 .await
-                .map_err(|e| SpawnError::from(std::io::Error::other(e)))?
-                .map_err(SpawnError::from)?;
+                .map_err(std::io::Error::other)
+                .and_then(|r| r);
+            if let Err(e) = trusted {
+                remove_dirs(&[&cwd]);
+                return Err(SpawnError::from(e).into());
+            }
         }
         let written = write_settings(
             &settings_dir,
@@ -132,23 +162,12 @@ impl Supervisor {
         let (settings, mcp) = match written {
             Ok(p) => p,
             Err(e) => {
-                remove_dir(&settings_dir);
+                remove_dirs(&[&settings_dir, &cwd]);
                 return Err(SpawnError::from(e).into());
             }
         };
-        let files = {
-            let _prompt = self.prompt_lock.lock().await;
-            files::write_claude_md(&cwd).and_then(|()| {
-                // The folder is every conversation's, so the last one's prompt is replaced.
-                match std::fs::remove_file(cwd.join(PROMPT_FILE)) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-                    _ => {}
-                }
-                write_prompt(&cwd, text)
-            })
-        };
-        if let Err(e) = files {
-            remove_dir(&settings_dir);
+        if let Err(e) = files::write_claude_md(&cwd).and_then(|()| write_prompt(&cwd, text)) {
+            remove_dirs(&[&settings_dir, &cwd]);
             return Err(SpawnError::from(e).into());
         }
 
@@ -189,11 +208,11 @@ impl Supervisor {
         };
         // Stored before the session starts: SessionStart can arrive within milliseconds of the process starting.
         if let Err(e) = svc.store.insert_agent(&agent, &token).await {
-            remove_dir(&settings_dir);
+            remove_dirs(&[&settings_dir, &cwd]);
             return Err(e.into());
         }
         if let Err(e) = svc.store.insert_conversation(&id, &env.id, now).await {
-            self.forget(&id, &settings_dir).await;
+            self.forget(&id, &[&settings_dir, &cwd]).await;
             return Err(e.into());
         }
 
@@ -216,7 +235,7 @@ impl Supervisor {
             .await;
         if let Err(e) = launched {
             // The conversation row stays, without an agent: `list` leaves it out.
-            self.forget(&id, &settings_dir).await;
+            self.forget(&id, &[&settings_dir, &cwd]).await;
             return Err(e.into());
         }
         info!(agent_id = %id.0, persona = %env.id, "supervisor conversation started");
@@ -258,22 +277,134 @@ impl Supervisor {
             .collect())
     }
 
-    /// Undoes a start whose agent was stored: its card and its settings go.
-    async fn forget(&self, id: &AgentId, settings_dir: &std::path::Path) {
+    /// Types `text` into the conversation `id` once its TUI is ready, resuming its process first when it has exited.
+    /// Messages to one conversation are typed in the order they came.
+    pub async fn message(&self, id: &AgentId, text: &str) -> Result<(), SupervisorError> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(SupervisorError::EmptyText);
+        }
+        self.conversation(id).await?;
+        let turn = turn(id);
+        let _turn = turn.lock().await;
+        // Read again under the lock: the message before this one may have resumed it, or the reaper ended it.
+        let a = self.conversation(id).await?;
+        if a.status == Status::Stopped {
+            self.svc
+                .resume_stopped(&a)
+                .await
+                .map_err(SupervisorError::Resume)?;
+        }
+        self.wait_ready(&a.session).await;
+        self.svc.answer(id, text).await?;
+        self.svc
+            .store
+            .touch_conversation(id, self.clock.now())
+            .await?;
+        info!(agent_id = %id.0, persona = %a.persona, resumed = a.status == Status::Stopped, "supervisor message sent");
+        Ok(())
+    }
+
+    async fn conversation(&self, id: &AgentId) -> Result<Agent, SupervisorError> {
+        match self.svc.agent(id).await {
+            Ok(a) if a.kind == AgentKind::Supervisor => Ok(a),
+            Ok(_) | Err(ServiceError::NotFound) => Err(SupervisorError::NotFound),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Waits until the session has turned bracketed paste on, as Claude's TUI does once its input box is up, so a
+    /// resumed conversation's message is not typed into its starting screen. Gives up after `READY_WAIT`.
+    async fn wait_ready(&self, session: &str) {
+        let end = Instant::now() + READY_WAIT;
+        loop {
+            match self.svc.sessions.bracketed_paste(session) {
+                Ok(true) => return,
+                // Gone: `answer` says so.
+                Err(_) => return,
+                Ok(false) if Instant::now() >= end => {
+                    warn!(
+                        session,
+                        "the supervisor's TUI never reported ready; typing anyway"
+                    );
+                    return;
+                }
+                Ok(false) => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        }
+    }
+
+    /// Undoes a start whose agent was stored: its card and its folders go.
+    async fn forget(&self, id: &AgentId, dirs: &[&Path]) {
         if let Err(e) = self.svc.store.remove_agent(id).await {
             warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot remove a failed supervisor start");
         }
-        remove_dir(settings_dir);
+        remove_dirs(dirs);
     }
 }
 
-fn remove_dir(dir: &std::path::Path) {
-    match std::fs::remove_dir_all(dir) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            warn!(dir = %dir.display(), error = %e, "cannot remove a failed supervisor start's settings")
+fn remove_dirs(dirs: &[&Path]) {
+    for dir in dirs {
+        match std::fs::remove_dir_all(dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                warn!(dir = %dir.display(), error = %e, "cannot remove a failed supervisor start's folder")
+            }
+            _ => {}
         }
-        _ => {}
     }
+}
+
+/// Every `every`, ends the process of each conversation that has sat in Review for `IDLE_EXIT`; a message resumes
+/// it. A conversation that is working, needs you, or is starting is never ended, nor one that got a message within
+/// `IDLE_EXIT`: it is still in Review until Claude's hook reports the message.
+pub fn start_idle_reaper(svc: Arc<AgentService>, every: Duration) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(every);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            if let Err(e) = reap(&svc).await {
+                warn!(error = %one_line(&e.to_string()), "the supervisor idle reaper could not read the agents");
+            }
+        }
+    })
+}
+
+async fn reap(svc: &AgentService) -> Result<(), StoreError> {
+    let idle = |a: &Agent, now: i64| {
+        a.kind == AgentKind::Supervisor
+            && a.status == Status::Review
+            && now - a.status_since >= IDLE_EXIT.as_secs() as i64
+    };
+    let clock = svc.options().clock.clone();
+    for a in svc.store.snapshot().await?.agents {
+        if !idle(&a, clock.now()) {
+            continue;
+        }
+        // A message on its way resumes or types into it: left for the next round.
+        let turn = turn(&a.id);
+        let Ok(_turn) = turn.try_lock() else {
+            continue;
+        };
+        match svc.agent(&a.id).await {
+            Ok(now) if idle(&now, clock.now()) => {}
+            _ => continue,
+        }
+        let rows = svc.store.conversations(&a.persona).await?;
+        let used = rows.iter().find(|r| r.id == a.id).map(|r| r.last_used_at);
+        if used.is_some_and(|at| clock.now() - at < IDLE_EXIT.as_secs() as i64) {
+            continue;
+        }
+        match svc.stop(&a.id).await {
+            Ok(()) => {
+                info!(agent_id = %a.id.0, persona = %a.persona, "idle supervisor conversation ended")
+            }
+            Err(e) => {
+                warn!(agent_id = %a.id.0, error = %one_line(&e.to_string()), "cannot end an idle supervisor conversation")
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The `PreToolUse` answer that refuses a subagent other than Explore or Plan, for a supervisor's hook; `None` for
