@@ -2,6 +2,7 @@ pub mod agent_config;
 pub mod agents;
 pub mod archive;
 mod attach;
+pub mod chat;
 pub mod config;
 pub mod first_run;
 pub mod fleet;

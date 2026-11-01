@@ -1,4 +1,5 @@
 //! The fleet-manager client/daemon contract. Types only; no I/O.
+mod chat;
 mod event;
 mod fleet;
 mod form;
@@ -16,6 +17,7 @@ mod task;
 mod tool;
 mod ui;
 
+pub use chat::{CallStatus, ChatBody, ChatItem, ChatPage, MarkerKind, PromptFrom};
 pub use event::{Event, EventKind, Snapshot};
 pub use fleet::{
     rollup, task_id, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
@@ -234,7 +236,13 @@ use utoipa::OpenApi;
         ToolStatus,
         ToolList,
         VersionInfo,
-        Os
+        Os,
+        ChatItem,
+        ChatBody,
+        PromptFrom,
+        CallStatus,
+        MarkerKind,
+        ChatPage
     ))
 )]
 struct ApiDoc;

@@ -54,7 +54,7 @@ struct GhPr {
 }
 
 /// `2026-10-26T10:00:00Z` as Unix seconds. gh prints UTC; anything else is None.
-fn parse_timestamp(s: &str) -> Option<i64> {
+pub(crate) fn parse_timestamp(s: &str) -> Option<i64> {
     let (date, time) = s.split_once('T')?;
     let time = time.strip_suffix('Z')?;
     let time = time.split_once('.').map_or(time, |(t, _)| t);
