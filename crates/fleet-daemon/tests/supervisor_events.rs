@@ -262,6 +262,31 @@ async fn a_needs_you_and_a_checks_passed_post_once_each_in_the_product_room() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_untitled_task_is_announced_by_its_name() {
+    let fx = fixture().await;
+    let conv = conversation(&fx).await;
+    let a = spawn_ready(&fx).await;
+    origin(&fx, &a.id, &conv).await;
+    let name = fx.store.task(&a.id).await.unwrap().unwrap().name;
+    for title in [Some(String::new()), None] {
+        fx.store
+            .update_task(&a.id, |t| t.title = title.clone())
+            .await
+            .unwrap();
+        route_again(&fx, &a.id).await;
+    }
+    let texts = room_texts(&fx).await;
+    assert!(!name.is_empty());
+    assert_eq!(
+        texts,
+        [
+            format!("{name} · checks passed"),
+            format!("{name} · checks passed")
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn room_events_are_not_announced_again() {
     let fx = fixture().await;
     let a = spawn_ready(&fx).await;
