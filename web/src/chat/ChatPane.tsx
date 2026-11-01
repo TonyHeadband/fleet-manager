@@ -230,11 +230,16 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
         </p>
       );
     case "reply":
+      // Without a speaker the text still shows, unheaded: a message must never vanish for want of a name.
       return speaker ? (
         <Message className="chat-reply" speaker={speaker} at={item.at} head={head}>
           <Markdown text={body.text} />
         </Message>
-      ) : null;
+      ) : (
+        <div className="chat-reply">
+          <Markdown text={body.text} />
+        </div>
+      );
     case "marker":
       return (
         <p className="chat-line" data-marker={body.kind}>

@@ -6,7 +6,7 @@ import type { ChatBody } from "../api/generated/ChatBody";
 import type { ChatItem } from "../api/generated/ChatItem";
 import type { Persona } from "../api/generated/Persona";
 import { FakeEventSource, agent, factory } from "../test/fixtures";
-import { ChatPane } from "./ChatPane";
+import { ChatPane, Entry } from "./ChatPane";
 import { agentSpeaker, ownerSpeaker, supervisorSpeaker } from "./speakers";
 
 const AT = 86_400 * 19_000 + 14 * 3600 + 9 * 60;
@@ -64,6 +64,13 @@ describe("a chat names who said each message", () => {
     expect(said.querySelector(".chat-speaker-name")).toHaveTextContent(/^Supervisor$/);
     expect(said.querySelector(".avatar")).toHaveAttribute("data-kind", "specialist");
     expect(said.querySelector(".avatar")).toHaveAttribute("data-seed", "supervisor:me");
+  });
+});
+
+describe("a reply with no speaker", () => {
+  it("still_shows_its_text", () => {
+    render(<Entry item={{ seq: 1, at: 0, body: { type: "reply", text: "still here" } }} />);
+    expect(screen.getByText("still here")).toBeInTheDocument();
   });
 });
 
