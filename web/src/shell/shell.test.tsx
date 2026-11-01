@@ -192,14 +192,24 @@ describe("Shell", () => {
     expect(css).toMatch(/\.drawer-picker \.avatar \{[^}]*height: var\(--drawer-avatar-h\);/);
   });
 
-  it("the_header_filters_are_captioned_above", async () => {
+  it("filters_are_captioned_beside_and_pickers_above", async () => {
     start();
     const header = await screen.findByRole("banner");
     for (const [name, caption] of [["Repo filter", "Repo"], ["Persona filter", "Persona"], ["Release filter", "Release"], ["Subtasks display", "Subtasks"]] as const) {
       const button = await within(header).findByRole("button", { name });
-      expect(button.closest(".filter-menu")!.querySelector(".filter-caption"), name).toHaveTextContent(caption);
+      const menu = button.closest(".filter-menu")!;
+      expect(menu.querySelector(".filter-caption"), name).toHaveTextContent(caption);
       expect(button, name).not.toHaveTextContent(caption);
+      // A filter's caption sits beside it; the drawer's pickers have theirs above.
+      expect(menu, name).toHaveAttribute("data-caption", "side");
     }
+    const drawer = screen.getByRole("navigation", { name: "Drawer" });
+    for (const name of ["Active persona", "Active product"]) {
+      expect(within(drawer).getByRole("button", { name }).closest(".filter-menu"), name).toHaveAttribute("data-caption", "above");
+    }
+    const css = readFileSync("src/ui/ui.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.filter-menu\[data-caption="side"\] \{[^}]*display: inline-flex;[^}]*align-items: center;/);
+    expect(css).toMatch(/\.filter-menu\[data-caption="above"\] \{[^}]*display: inline-grid;/);
   });
 
   it("the_first_ready_persona_becomes_the_active_one", async () => {

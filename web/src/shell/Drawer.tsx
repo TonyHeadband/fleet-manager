@@ -123,7 +123,7 @@ function Picker(props: {
 }) {
   return (
     <div className="drawer-picker">
-      <ChoiceMenu width="fill" {...props} />
+      <ChoiceMenu width="fill" captionAt="above" {...props} />
     </div>
   );
 }

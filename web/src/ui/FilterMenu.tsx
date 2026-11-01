@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 interface Props {
-  /** The mono caption above the control ("Repo"); none for a plain combo. */
+  /** The mono caption outside the control ("Repo"); none for a plain combo. */
   label?: string;
+  /** Where the caption sits: beside the control (a filter in a bar) or above it (a picker in a column). */
+  captionAt?: "side" | "above";
   /** What is picked, in words ("All repos"). */
   summary: string;
   /** The control's accessible name ("Repo filter"); none where a `<label>` names it by `id`. */
@@ -26,10 +28,10 @@ interface Props {
 }
 
 /**
- * The filter combo: its caption above, the summary on a button, and a menu under it that closes on a click outside
+ * The filter combo: its caption beside or above it, the summary on a button, and a menu under it that closes on a click outside
  * or Escape. A pick inside leaves it open unless the rows close it, so several repos are picked in one go.
  */
-export function FilterMenu({ label, summary, name, id, listbox, width, disabled, title, actions, lead, children }: Props) {
+export function FilterMenu({ label, captionAt = "side", summary, name, id, listbox, width, disabled, title, actions, lead, children }: Props) {
   // Where the menu opens: under the button, fixed to the window, since the header clips what overflows it.
   const [open, setOpen] = useState<{ top: number; left: number; width?: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -54,7 +56,7 @@ export function FilterMenu({ label, summary, name, id, listbox, width, disabled,
     };
   }, [open]);
   return (
-    <div className="filter-menu" ref={root}>
+    <div className="filter-menu" ref={root} data-caption={label ? captionAt : undefined}>
       {label && (
         <span className="mono-label filter-caption" aria-hidden="true">
           {label}
