@@ -31,7 +31,7 @@ export function Sparkline({ values, paint = { series: 0 } }: { values: number[];
             data-enter={entering || undefined}
             fill="none"
             stroke={color}
-            strokeWidth="var(--layout-chart-line)"
+            style={{ strokeWidth: "var(--layout-chart-line)" }}
             points={ys.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
           />
         )}
