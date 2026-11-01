@@ -3,14 +3,16 @@
 //! A notice is never typed into a running turn, and a held tool call counts as one. An orchestrator hears of a post
 //! from `wait_for_fleet` (its task's inbox) and from one line typed when it is at its input box; a supervisor
 //! conversation from a message, which resumes it if it has exited, though only its operation room does that: a
-//! product room post for an exited one is a chat row in it instead. An agent that cannot take the line now keeps it
-//! in its pending queue until it next reaches Review, when everything queued is typed as one line.
+//! product room post for an exited one is parked. A parked line, tagged `PARKED_TAG` so the chat does not show it,
+//! waits in its own queue and is typed when the conversation next runs (the owner's message, or another notice,
+//! resumes it) and reaches Review; the owner has the post in the room and as a toast. An agent that cannot take the
+//! line now keeps it in its pending queue until it next reaches Review, when everything queued is typed as one line.
 //!
-//! The queue is in memory. A daemon restart ends every session, so a queued line has nobody to be typed into; what it
+//! The queues are in memory. A daemon restart ends every session, so a queued line has nobody to be typed into; what it
 //! said is not lost: the post stays in the room for `room_read`, an orchestrator's inbox is stored with its task, and
 //! an answer given after the restart is delivered afresh.
 use super::posts::kind_word;
-use crate::agents::{one_line, AgentService, ServiceError};
+use crate::agents::{one_line, AgentService, ServiceError, PARKED_TAG};
 use crate::store::{RoomRow, StoreError};
 use crate::supervisor::{route_with, Supervisor};
 use fleet_api::{
@@ -34,6 +36,9 @@ pub struct Notices {
     /// goes idle is typed by the queueing side or by the watcher, never by both and never by neither.
     lock: tokio::sync::Mutex<()>,
     queue: Mutex<HashMap<AgentId, Vec<String>>>,
+    /// Lines for exited supervisor conversations, which only a resume for another reason brings back. Not flushed
+    /// while the conversation is stopped, so they resume nothing.
+    parked: Mutex<HashMap<AgentId, Vec<String>>>,
     /// Agents just typed into whose turn has not shown yet, with when: the status stays Review until Claude's hook
     /// reports Working, and a second line typed meanwhile would land in the turn the first one started. Set and
     /// cleared under `lock`; cleared by the next status other than Review (a turn, a stop, an exit), and ignored once
@@ -49,6 +54,22 @@ impl Notices {
         if !lines.contains(&line) {
             lines.push(line);
         }
+    }
+
+    fn park(&self, agent: &AgentId, line: String) {
+        let mut q = self.parked.lock().expect("notices poisoned");
+        let lines = q.entry(agent.clone()).or_default();
+        if !lines.contains(&line) {
+            lines.push(line);
+        }
+    }
+
+    fn take_parked(&self, agent: &AgentId) -> Vec<String> {
+        self.parked
+            .lock()
+            .expect("notices poisoned")
+            .remove(agent)
+            .unwrap_or_default()
     }
 
     fn take(&self, agent: &AgentId) -> Vec<String> {
@@ -93,12 +114,19 @@ impl Notices {
     }
 
     fn waiting(&self) -> Vec<AgentId> {
-        self.queue
+        let mut ids: Vec<AgentId> = self
+            .queue
             .lock()
             .expect("notices poisoned")
             .keys()
             .cloned()
-            .collect()
+            .collect();
+        for id in self.parked.lock().expect("notices poisoned").keys() {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+        ids
     }
 }
 
@@ -135,8 +163,8 @@ pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), Service
             ids
         }
     };
-    // A product room resumes no exited conversation; the post becomes a chat row instead. An operation room's
-    // own conversation is resumed, as the spec has it.
+    // A product room resumes no exited conversation; the post is parked for its next run instead. An operation
+    // room's own conversation is resumed, as the spec has it.
     let mut parked = false;
     for id in &recipients {
         if room.kind == RoomKind::Product
@@ -146,6 +174,7 @@ pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), Service
                 .any(|a| &a.id == id && a.status == Status::Stopped)
         {
             parked = true;
+            svc.notices.park(id, format!("{FROM} {PARKED_TAG} {text}"));
             continue;
         }
         if let Err(e) = notify(svc, id, &text).await {
@@ -207,6 +236,7 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
         // Gone for good: nobody is left to read them.
         Err(ServiceError::NotFound) => {
             svc.notices.take(id);
+            svc.notices.take_parked(id);
             return;
         }
         Err(e) => {
@@ -223,7 +253,11 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
         if matches!(a.status, Status::Working | Status::NeedsYou) {
             return;
         }
-        let lines = svc.notices.take(id);
+        let mut lines = svc.notices.take(id);
+        // Parked lines ride along with a run that happens anyway, never bring one about.
+        if a.status != Status::Stopped || !lines.is_empty() {
+            lines.extend(svc.notices.take_parked(id));
+        }
         if lines.is_empty() {
             return;
         }
@@ -270,8 +304,8 @@ async fn turn_seen(svc: &AgentService, id: &AgentId) {
     svc.notices.set_awaiting(id, None);
 }
 
-/// Puts the post in the owner's view: a `TaskEvent` routed to the sender's task's conversation, so it is a chat row
-/// there and a toast. A post whose sender is no task (a supervisor's own message) is already in the owner's chat
+/// Puts the post in the owner's view: a `TaskEvent` routed to the sender's task's conversation, so it is a toast
+/// (the chat shows no row for it; the post itself is in the room). A post whose sender is no task (a supervisor's own message) is already in the owner's chat
 /// with that supervisor, and `route_with` drops it.
 async fn surface(
     svc: &AgentService,
@@ -331,6 +365,7 @@ pub fn start_delivery_watcher(svc: Arc<AgentService>) -> JoinHandle<()> {
                     EventKind::AgentRemoved { id } => {
                         turn_seen(&svc, &id).await;
                         svc.notices.take(&id);
+                        svc.notices.take_parked(&id);
                     }
                     _ => {}
                 },

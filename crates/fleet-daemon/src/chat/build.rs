@@ -1,4 +1,4 @@
-use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
+use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PARKED_TAG, PROMPT_POINTER, RESUME_PROMPT};
 use crate::chat::summary::{result_of, summarize};
 use crate::forge::parse_timestamp;
 use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom};
@@ -145,7 +145,9 @@ impl Builder {
         let command = trimmed.starts_with("<command-")
             || trimmed.starts_with("<local-command")
             || bare_command;
-        if trimmed.is_empty() || command {
+        // A parked product-room post is for the supervisor alone: the owner has it in the room and as a toast.
+        let parked = trimmed.starts_with(NOTICE_PREFIX) && trimmed.contains(PARKED_TAG);
+        if trimmed.is_empty() || command || parked {
             return None;
         }
         let (text, from) = if text == PROMPT_POINTER {
@@ -249,7 +251,9 @@ fn display_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
+    use crate::agents::{
+        CONTINUE_PROMPT, NOTICE_PREFIX, PARKED_TAG, PROMPT_POINTER, RESUME_PROMPT,
+    };
     use fleet_api::{CallStatus, ChatBody, PromptFrom};
     use serde_json::json;
 
@@ -361,6 +365,14 @@ mod tests {
             from.len() >= 3 && from.iter().all(|f| *f == PromptFrom::System),
             "{prompts:?}"
         );
+    }
+
+    #[test]
+    fn a_parked_room_post_notice_is_not_a_chat_row() {
+        let mut b = Builder::new(None, PromptFrom::Owner);
+        let parked =
+            format!("{NOTICE_PREFIX}{PARKED_TAG} new message from t in product:x; call room_read.");
+        assert!(b.line(&user(json!(parked))).is_empty());
     }
 
     #[test]
