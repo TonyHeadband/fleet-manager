@@ -1709,6 +1709,21 @@ async fn post_to_room(
     })
 }
 
+/// What the owner's reply answers `q` with. A breakdown's ask takes `approve` alone, which approves the version, or
+/// text alone, which requests changes: approving keeps no comment, so both together are refused rather than the
+/// text dropped. Any other ask is answered with its text; `approve` there means nothing.
+fn reply_text(q: &Post, req: AskReply) -> Result<String, &'static str> {
+    let text = req.text.filter(|t| !t.trim().is_empty());
+    let approve = req.approve == Some(true);
+    match (q.breakdown_version.is_some(), approve, text) {
+        (true, true, None) => Ok("approve".into()),
+        (true, true, Some(_)) => Err("approve or request changes with a comment, not both"),
+        (_, _, Some(t)) => Ok(t),
+        (false, true, None) => Err("an ask is answered with text"),
+        (_, false, None) => Err("the answer is empty"),
+    }
+}
+
 /// The same answer as an agent's `room_answer`, given as the owner: a breakdown's ask is decided through it as the
 /// panel decides it.
 async fn answer_room_ask(
@@ -1728,10 +1743,8 @@ async fn answer_room_ask(
             format!("post {post} is not an ask"),
         ));
     }
-    let text = match req.approve {
-        Some(true) => "approve".to_string(),
-        _ => req.text.unwrap_or_default(),
-    };
+    let text =
+        reply_text(&q, req).map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why.into()))?;
     let answered =
         detached(async move { st.svc.room_answer(&MemberRef::Owner, post, &text).await }).await??;
     if !answered {

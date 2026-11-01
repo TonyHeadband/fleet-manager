@@ -144,6 +144,17 @@ impl AgentService {
             }
             id => AgentId(id.to_string()),
         };
+        self.agent_recipient(room, id, to).await.map(Some)
+    }
+
+    /// The agent as a member of the room, refused (as `shown`) unless it is in it. An orchestrator's agent id stands
+    /// for its task.
+    async fn agent_recipient(
+        &self,
+        room: &RoomRow,
+        id: AgentId,
+        shown: &str,
+    ) -> Result<MemberRef, ServiceError> {
         let id = match self.find(&id).await {
             Ok(a) if a.kind == AgentKind::Orchestrator => task_id(&a).clone(),
             _ => id,
@@ -155,9 +166,9 @@ impl AgentService {
             .iter()
             .any(|m| m.member == id.0 && m.left_at.is_none());
         if !present {
-            return Err(refuse(format!("{to} is not in this room")));
+            return Err(refuse(format!("{shown} is not in this room")));
         }
-        Ok(Some(MemberRef::Agent(id)))
+        Ok(MemberRef::Agent(id))
     }
 
     /// The sender as people read it.
@@ -258,7 +269,8 @@ impl AgentService {
         let mut p = self.new_post(&room, MemberRef::Owner, kind, text)?;
         p.to = match to {
             None => None,
-            Some(MemberRef::Agent(a)) => self.recipient(&room, &a.0).await?,
+            // Not `recipient`: that reads `owner` and `all` as words, and here they would be agent ids.
+            Some(MemberRef::Agent(a)) => Some(self.agent_recipient(&room, a.clone(), &a.0).await?),
             Some(m) => return Err(refuse(format!("{} is not a member to post to", m.key()))),
         };
         self.publish(&room, p).await

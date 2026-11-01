@@ -1975,6 +1975,9 @@ async fn the_owner_posts_messages_and_announcements_not_asks() {
         json!({ "kind": "answer", "text": "this one" }),
         json!({ "kind": "message", "text": "  " }),
         json!({ "kind": "message", "to": { "agent": "nobody" }, "text": "hi" }),
+        // Agent ids are checked as ids: neither names the owner or everyone.
+        json!({ "kind": "message", "to": { "agent": "owner" }, "text": "hi" }),
+        json!({ "kind": "message", "to": { "agent": "all" }, "text": "hi" }),
     ] {
         let (status, v) = post_as_owner(&srv, &room, body.clone()).await;
         assert_eq!(status, 400, "{body} → {v}");
@@ -1994,8 +1997,20 @@ async fn answering_twice_is_409() {
     let held = ask_in_background(&fx.svc, &a, "owner", "which port?");
     let ask = wait_ask(&fx, &room).await;
 
-    let (status, v) = answer_as_owner(&srv, ask, json!({ "text": "8080" })).await;
+    // An ordinary ask is answered with text: `approve` alone, or blank text, is no answer.
+    for body in [
+        json!({ "approve": true }),
+        json!({ "text": "  " }),
+        json!({}),
+    ] {
+        let (status, v) = answer_as_owner(&srv, ask, body.clone()).await;
+        assert_eq!(status, 400, "{body} → {v}");
+    }
+    assert_eq!(fx.store.post(ask).await.unwrap().unwrap().answered_at, None);
+    // With text, `approve` changes nothing: the text is the answer.
+    let (status, v) = answer_as_owner(&srv, ask, json!({ "approve": true, "text": "8080" })).await;
     assert_eq!(status, 204, "{v}");
+    assert_eq!(answer_to(&fx, ask, &room).await.text, "8080");
     let (reply, failed) = tokio::time::timeout(Duration::from_secs(10), held)
         .await
         .unwrap()
@@ -2025,6 +2040,22 @@ async fn the_owner_approves_a_breakdown_from_the_room() {
 
     // Text asks for changes, through the same decision as the panel's.
     let (held, v1) = propose(&fx, &a, &room).await;
+    // Approving drops a comment, so approve with text is refused and leaves the version undecided.
+    let (status, v) = answer_as_owner(
+        &srv,
+        v1.id,
+        json!({ "approve": true, "text": "but split it" }),
+    )
+    .await;
+    assert_eq!(status, 400, "{v}");
+    assert_eq!(
+        fx.store.post(v1.id).await.unwrap().unwrap().answered_at,
+        None
+    );
+    assert_eq!(
+        fx.store.task(&a).await.unwrap().unwrap().breakdowns[0].approval,
+        Approval::Proposed
+    );
     let (status, v) = answer_as_owner(&srv, v1.id, json!({ "text": "split the api step" })).await;
     assert_eq!(status, 204, "{v}");
     assert_eq!(

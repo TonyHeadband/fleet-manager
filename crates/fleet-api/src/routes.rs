@@ -318,6 +318,7 @@ pub fn post_to_room() {}
 
 /// The owner's answer to an ask; for a breakdown's ask, the owner's decision on that version. 409 with `already
 /// answered` when it was answered, or naming the latest version when the ask's breakdown version is stale. 400 for
-/// a post that is not an ask or a blank answer; 404 for an unknown post.
+/// a post that is not an ask, a blank answer, `approve` on an ordinary ask, or `approve` with text on a breakdown's;
+/// 404 for an unknown post.
 #[utoipa::path(post, path = "/api/rooms/asks/{post}/answer", params(("post" = i64, Path)), request_body = AskReply, responses((status = 204), (status = 400), (status = 404), (status = 409)))]
 pub fn answer_room_ask() {}

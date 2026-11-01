@@ -125,8 +125,8 @@ pub struct NewPost {
     pub text: String,
 }
 
-/// The owner's answer to an ask. `approve: true` answers `approve`, which approves a breakdown's version; otherwise
-/// the answer is `text`, which for a breakdown's ask requests changes.
+/// The owner's answer to an ask. A breakdown's ask takes `approve: true` alone, which approves its version, or
+/// `text` alone, which requests changes; both together are refused. Any other ask is answered with `text`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct AskReply {
