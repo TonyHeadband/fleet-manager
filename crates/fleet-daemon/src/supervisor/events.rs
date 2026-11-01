@@ -41,7 +41,7 @@ pub(crate) async fn route_with(
         Some(o) => Some(o),
         None => latest_conversation(store, &t.persona).await?,
     };
-    let task_title = t.title.unwrap_or_else(|| t.id.0.clone());
+    let task_title = announce::task_label(t.title.as_deref(), &t.name);
     // The task's own notices are for its product's room. Room messages and asks are posts there already, and a
     // merge is announced there as "landed" by the merge checker.
     let in_room = !matches!(

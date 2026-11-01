@@ -36,6 +36,11 @@ pub async fn migrations_taken(
     Ok(())
 }
 
+/// How the product room names a task: its title, or its name when it has none or an empty one.
+pub(crate) fn task_label(title: Option<&str>, name: &str) -> String {
+    title.filter(|t| !t.is_empty()).unwrap_or(name).to_string()
+}
+
 /// "<title> · <notice>", one announcement per event: unlike the others it is not deduplicated, as the same notice
 /// ("checks passed") is a new event each time it happens.
 pub async fn task_notice(
