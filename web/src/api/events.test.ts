@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SILENCE_MS, subscribe, subscribePane } from "./events";
+import { SILENCE_MS, subscribe, subscribeChat, subscribePane } from "./events";
 import { FakeEventSource, agent } from "../test/fixtures";
 
 const factory = (url: string) => new FakeEventSource(url) as unknown as EventSource;
@@ -90,5 +90,33 @@ describe("subscribePane", () => {
     es.emit("closed", "");
     expect(onText).toHaveBeenCalledWith("line one\nline two");
     expect(onClosed).toHaveBeenCalled();
+  });
+});
+
+describe("subscribeChat", () => {
+  it("hands each kind of frame to its handler and closes on ended", () => {
+    const on = { page: vi.fn(), items: vi.fn(), ask: vi.fn(), ended: vi.fn() };
+    const stop = subscribeChat("", "a/1", on, factory);
+    const es = FakeEventSource.for("/chat");
+    expect(es.url).toBe("/api/agents/a%2F1/chat");
+    const page = { items: [], earlier: false };
+    es.emit("page", page);
+    es.emit("items", [{ seq: 3 }]);
+    es.emit("ask", null);
+    expect(on.page).toHaveBeenCalledWith(page);
+    expect(on.items).toHaveBeenCalledWith([{ seq: 3 }]);
+    expect(on.ask).toHaveBeenCalledWith(null);
+    expect(es.closed).toBe(false);
+    es.emit("ended", 1_800_000_000);
+    expect(on.ended).toHaveBeenCalledWith(1_800_000_000);
+    expect(es.closed).toBe(true);
+    stop();
+  });
+
+  it("stop closes the source", () => {
+    const stop = subscribeChat("http://d", "a1", { page: vi.fn(), items: vi.fn(), ask: vi.fn(), ended: vi.fn() }, factory);
+    const es = FakeEventSource.for("/chat");
+    stop();
+    expect(es.closed).toBe(true);
   });
 });

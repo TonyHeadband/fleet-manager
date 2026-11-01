@@ -13,6 +13,8 @@ import type { RepoUpsert } from "./generated/RepoUpsert";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { AgentSettings } from "./generated/AgentSettings";
+import type { AskAnswer } from "./generated/AskAnswer";
+import type { ChatPage } from "./generated/ChatPage";
 import type { CheckoutList } from "./generated/CheckoutList";
 import type { DefFile } from "./generated/DefFile";
 import type { DefInfo } from "./generated/DefInfo";
@@ -132,6 +134,12 @@ export class FleetClient {
   tools = () => this.call<ToolList>("GET", "/api/tools", undefined, TOOLS_TIMEOUT_MS);
   /** Asks the daemon to look for the tools again, and answers with what it found. */
   recheckTools = () => this.call<ToolList>("POST", "/api/tools/recheck", undefined, TOOLS_TIMEOUT_MS);
+  /** The page of an agent's chat that ends just before `before`. */
+  chatHistory = (id: string, before: number, limit: number) =>
+    this.call<ChatPage>("GET", `/api/agents/${encodeURIComponent(id)}/chat/history?before=${before}&limit=${limit}`);
+  /** Rejects with the daemon's reason, e.g. when the ask was already answered. */
+  answerAsk = (id: string, ask: string, answer: AskAnswer) =>
+    this.call<void>("POST", `/api/agents/${encodeURIComponent(id)}/asks/${encodeURIComponent(ask)}`, answer);
   products = () => this.call<ProductList>("GET", "/api/products");
   createProduct = (p: NewProduct) => this.call<Product>("POST", "/api/products", p, LONG_TIMEOUT_MS);
   /** An absent field is left alone; `null` clears the default persona or the internal URL. */

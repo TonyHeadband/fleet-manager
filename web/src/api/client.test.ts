@@ -336,4 +336,25 @@ describe("the Tasks view's calls", () => {
       { method: "DELETE", url: "http://d/api/releases/7", body: undefined },
     ]);
   });
+
+  it("chat_history_asks_for_the_page_before_a_seq", async () => {
+    const page = { items: [], earlier: false };
+    const f = fakeFetch(200, page);
+    const c = new FleetClient("http://d", f as unknown as typeof fetch);
+    expect(await c.chatHistory("a/1", 40, 25)).toEqual(page);
+    expect(f.mock.calls[0]![0]).toBe("http://d/api/agents/a%2F1/chat/history?before=40&limit=25");
+    expect(f.mock.calls[0]![1]?.method).toBe("GET");
+  });
+
+  it("answer_ask_posts_the_answer_and_rejects_with_the_daemon_message", async () => {
+    const f = fakeFetch(204, null);
+    const c = new FleetClient("http://d", f as unknown as typeof fetch);
+    await c.answerAsk("a1", "k/1", { choice: "0.1", text: null });
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe("http://d/api/agents/a1/asks/k%2F1");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ choice: "0.1", text: null }));
+    const g = fakeFetch(409, { error: "already answered" });
+    await expect(new FleetClient("http://d", g as unknown as typeof fetch).answerAsk("a1", "k", { choice: "", text: "x" })).rejects.toThrow("already answered");
+  });
 });

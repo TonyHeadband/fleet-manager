@@ -1,5 +1,8 @@
 import type { Event } from "./generated/Event";
 import type { Snapshot } from "./generated/Snapshot";
+import type { ChatAsk } from "./generated/ChatAsk";
+import type { ChatItem } from "./generated/ChatItem";
+import type { ChatPage } from "./generated/ChatPage";
 
 export type EventSourceFactory = (url: string) => EventSource;
 export const browserEventSource: EventSourceFactory = (url) => new EventSource(url);
@@ -84,6 +87,29 @@ export function subscribePane(
   es.addEventListener("closed", () => {
     es.close(); // otherwise the browser would reconnect to a session that is gone
     onClosed();
+  });
+  return () => es.close();
+}
+
+/** One agent's conversation: the newest page first, then items by `seq` and the open ask as they change. */
+export function subscribeChat(
+  baseUrl: string,
+  agentId: string,
+  on: {
+    page(p: ChatPage): void;
+    items(i: ChatItem[]): void;
+    ask(a: ChatAsk | null): void;
+    ended(at: number): void;
+  },
+  factory: EventSourceFactory = browserEventSource,
+): () => void {
+  const es = factory(`${baseUrl}/api/agents/${encodeURIComponent(agentId)}/chat`);
+  es.addEventListener("page", (m) => parse<ChatPage>(m as MessageEvent, on.page));
+  es.addEventListener("items", (m) => parse<ChatItem[]>(m as MessageEvent, on.items));
+  es.addEventListener("ask", (m) => parse<ChatAsk | null>(m as MessageEvent, on.ask));
+  es.addEventListener("ended", (m) => {
+    es.close(); // the daemon is done with this chat; a reconnect would only replay it
+    parse<number>(m as MessageEvent, on.ended);
   });
   return () => es.close();
 }
