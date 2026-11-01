@@ -165,12 +165,12 @@ describe("SpecialistForm", () => {
     expect(button("Remove ghost").closest(".skill-chip")).toHaveAttribute("data-tone", "danger");
   });
 
-  it("a_skill_is_an_accent_tag_and_read_only_has_no_remove", async () => {
+  it("a_skills_remove_x_is_in_the_accent_and_read_only_has_none", async () => {
     await form({ text: TEXT, builtin: true }, { builtin: true, overridden: false });
     const tag = screen.getByText("test-driven-development").closest(".skill-chip")!;
     expect(tag.tagName).not.toBe("BUTTON");
     expect(screen.queryByRole("button", { name: "Remove test-driven-development" })).toBeNull();
-    expect(readFileSync("src/management/specialistForm.css", "utf8")).toMatch(/\.skill-chip \{[^}]*color: var\(--accent-text\)/);
+    expect(readFileSync("src/management/specialistForm.css", "utf8")).toMatch(/\.skill-chip-remove \{[^}]*color: var\(--accent-text\)/);
   });
 
   it("an_unmapped_error_shows_on_the_bottom_line", async () => {

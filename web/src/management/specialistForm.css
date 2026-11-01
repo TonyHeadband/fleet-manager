@@ -92,29 +92,34 @@
   align-items: center;
   gap: var(--space-chip-gap);
 }
-/* A skill is a tag in the accent, not a button: only its × removes it. */
+/* A skill is a plain tag, not a button: only its ×, in the accent, removes it. */
 .skill-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-chip-gap);
+  gap: var(--space-item);
   font-family: var(--font-mono);
   font-size: var(--size-meta);
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
   padding: var(--layout-control-y) var(--layout-control-x);
-  border: 1px solid var(--fill);
-  color: var(--accent-text);
-  background: color-mix(in srgb, var(--fill) calc(var(--chip-alpha) * 100%), transparent);
+  border: 1px solid var(--border);
+  background: var(--surface);
 }
+/* Bigger than the tag's caps text, so the one control in the tag is easy to see and hit. */
 .skill-chip-remove {
   padding: 0;
   border: none;
   background: none;
-  color: inherit;
+  font-size: var(--size-heading);
+  line-height: 1;
+  color: var(--accent-text);
 }
-.skill-chip[data-tone="danger"] {
+.skill-chip[data-tone="danger"],
+.skill-chip[data-tone="danger"] .skill-chip-remove {
   border-color: var(--tone-danger);
   color: var(--tone-danger);
+}
+.skill-chip[data-tone="danger"] {
   background: var(--tint-danger);
 }
 .form-preview {
