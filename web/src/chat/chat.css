@@ -91,3 +91,10 @@
 .chat-msg .chat-speaker { align-items: baseline; }
 .chat-msg .chat-speaker-name { color: var(--text-high); }
 .chat-speaker-time { flex: none; font-family: var(--font-mono); font-weight: var(--weight-mono); font-size: var(--size-meta); color: var(--text-low); }
+/* The owner's own messages mirror to the right, as in a messenger: avatar at the right edge, the header right-aligned,
+   the text in a raised box that keeps its lines left-aligned for reading. */
+.chat-msg[data-from="owner"] { grid-template-columns: minmax(0, 1fr) calc(var(--size-meta) * 4 * 3 / 4); }
+.chat-msg[data-from="owner"] > .avatar { grid-column: 2; }
+.chat-msg[data-from="owner"] .chat-msg-body { grid-column: 1; justify-self: end; max-width: 82%; }
+.chat-msg[data-from="owner"] .chat-speaker { justify-content: flex-end; }
+.chat-msg[data-from="owner"] .markdown { padding: var(--layout-list-row-y) var(--layout-list-row-x); background: var(--raised); border: 1px solid var(--border); }

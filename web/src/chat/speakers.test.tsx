@@ -67,6 +67,16 @@ describe("a chat names who said each message", () => {
   });
 });
 
+describe("the owner's own messages", () => {
+  it("sit_on_the_right_mirrored", () => {
+    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.chat-msg\[data-from="owner"\] \{[^}]*grid-template-columns: minmax\(0, 1fr\) calc/);
+    expect(css).toMatch(/\.chat-msg\[data-from="owner"\] > \.avatar \{[^}]*grid-column: 2/);
+    expect(css).toMatch(/\.chat-msg\[data-from="owner"\] \.chat-msg-body \{[^}]*grid-column: 1;[^}]*justify-self: end/);
+    expect(css).toMatch(/\.chat-msg\[data-from="owner"\] \.chat-speaker \{[^}]*justify-content: flex-end/);
+  });
+});
+
 describe("a reply with no speaker", () => {
   it("still_shows_its_text", () => {
     render(<Entry item={{ seq: 1, at: 0, body: { type: "reply", text: "still here" } }} />);
