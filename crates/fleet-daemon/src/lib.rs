@@ -7,6 +7,7 @@ pub mod config;
 pub mod first_run;
 pub mod fleet;
 pub mod footprint;
+pub mod forge;
 pub mod git;
 pub mod hooks_cfg;
 pub mod http;

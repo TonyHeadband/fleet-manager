@@ -2,12 +2,13 @@
 //! is done when every changed repo's PR has merged. Only repos with a URL are asked about; a task with none finishes
 //! through Mark done instead.
 use crate::agents::{AgentService, Clock, ServiceError};
+use crate::forge::{parse_timestamp, RepoRef};
 use crate::personas::{PersonaEnv, Personas};
 use crate::repos::Repos;
 use crate::store::Store;
 use fleet_api::{
-    parse_date, task_id, task_outcome, AgentId, EventKind, PrState, Status, Task, TaskOutcome,
-    TaskPr, TaskState,
+    task_id, task_outcome, AgentId, EventKind, PrState, Status, Task, TaskOutcome, TaskPr,
+    TaskState,
 };
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -29,21 +30,6 @@ pub const MERGE_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// Refusal of Mark done on a task GitHub can tell about.
 pub const HAS_GITHUB_REPO: &str = "this task has a GitHub repo; it is done when its PR merges";
 
-/// `<host>/<owner>/<repo>` for `gh -R`, so a GitHub Enterprise host is asked, not github.com. None for a URL that
-/// does not name exactly an owner and a repo.
-pub fn gh_repo(url: &str) -> Option<String> {
-    let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let rest = rest.trim_end_matches('/');
-    let rest = rest.strip_suffix(".git").unwrap_or(rest);
-    let parts: Vec<&str> = rest.split('/').collect();
-    match parts[..] {
-        [host, owner, repo] if [host, owner, repo].iter().all(|p| !p.is_empty()) => {
-            Some(format!("{host}/{owner}/{repo}"))
-        }
-        _ => None,
-    }
-}
-
 /// One entry of `gh pr list --json url,state,mergedAt`.
 #[derive(Deserialize)]
 struct GhPr {
@@ -51,19 +37,6 @@ struct GhPr {
     state: String,
     #[serde(rename = "mergedAt")]
     merged_at: Option<String>,
-}
-
-/// `2026-10-26T10:00:00Z` as Unix seconds. gh prints UTC; anything else is None.
-pub(crate) fn parse_timestamp(s: &str) -> Option<i64> {
-    let (date, time) = s.split_once('T')?;
-    let time = time.strip_suffix('Z')?;
-    let time = time.split_once('.').map_or(time, |(t, _)| t);
-    let mut hms = time.split(':').map(|p| p.parse::<i64>().ok());
-    let (h, m, sec) = (hms.next()??, hms.next()??, hms.next()??);
-    if hms.next().is_some() || h > 23 || m > 59 || sec > 60 {
-        return None;
-    }
-    Some(parse_date(date)? * 86_400 + h * 3600 + m * 60 + sec)
 }
 
 fn parse_reply(repo: &str, stdout: &[u8]) -> Result<Vec<TaskPr>, String> {
@@ -245,7 +218,7 @@ impl MergeChecker {
         let mut changed_repos = Vec::new();
         for ask in &asks {
             let repo = &ask.repo;
-            let Some(slug) = gh_repo(&ask.url) else {
+            let Some(slug) = RepoRef::from_url(&ask.url).map(|r| r.slug()) else {
                 warn!(task = %t.id.0, repo = %repo, "cannot check PRs: the repo URL names no GitHub owner and repo");
                 return Checked::Failed(format!(
                     "the URL of {repo} names no GitHub owner and repo"
@@ -604,35 +577,6 @@ mod tests {
     fn a_merge_check_gives_up_after_30_seconds() {
         let opts = crate::agents::ServiceOptions::new("http://127.0.0.1:1");
         assert_eq!(opts.merge_check_timeout, Duration::from_secs(30));
-    }
-
-    #[test]
-    fn gh_repo_keeps_the_host() {
-        for url in [
-            "https://ghe.example.com/acme/core",
-            "https://ghe.example.com/acme/core.git",
-            "https://ghe.example.com/acme/core/",
-            "https://ghe.example.com/acme/core.git/",
-        ] {
-            assert_eq!(
-                gh_repo(url).as_deref(),
-                Some("ghe.example.com/acme/core"),
-                "{url}"
-            );
-        }
-        assert_eq!(gh_repo("https://github.com/acme"), None);
-        assert_eq!(gh_repo("https://gitlab.example.com/a/b/c"), None);
-    }
-
-    #[test]
-    fn timestamps_are_utc_seconds() {
-        assert_eq!(
-            parse_timestamp("2026-10-26T10:00:05Z"),
-            Some(20752 * 86_400 + 36_005)
-        );
-        assert_eq!(parse_timestamp("1970-01-01T00:00:00.5Z"), Some(0));
-        assert_eq!(parse_timestamp("2026-10-26 10:00:00"), None);
-        assert_eq!(parse_timestamp("2026-10-26T25:00:00Z"), None);
     }
 
     #[test]

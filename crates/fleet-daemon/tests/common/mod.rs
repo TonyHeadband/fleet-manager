@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod fake_forge;
 pub mod net;
 use fleet_api::{AgentId, Effort, PermissionMode, RepoPick};
 use fleet_daemon::agents::{AgentService, Clock, ServiceOptions};

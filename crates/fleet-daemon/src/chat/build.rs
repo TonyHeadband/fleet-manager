@@ -1,6 +1,6 @@
 use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
 use crate::chat::summary::{result_of, summarize};
-use crate::merges::parse_timestamp;
+use crate::forge::parse_timestamp;
 use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom};
 use serde_json::Value;
 use std::collections::HashMap;
