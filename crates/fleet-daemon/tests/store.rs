@@ -981,7 +981,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 15);
+        assert_eq!(user_version(&path).await, 14);
     }
 }
 
@@ -996,7 +996,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 15);
+    assert_eq!(user_version(&fresh).await, 14);
 }
 
 #[tokio::test]
