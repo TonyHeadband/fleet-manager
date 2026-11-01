@@ -7,7 +7,6 @@ use crate::forge::token::{
     read_token, token_from_gh, token_path, write_token, write_token_if_absent,
 };
 use crate::forge::{self, ForgeConfig, ForgeError, RepoRef};
-use crate::git::REMOTE_TIMEOUT;
 use crate::store::{PersonaRow, Store, StoreError};
 use crate::tools::Tools;
 use fleet_api::{
@@ -22,6 +21,9 @@ use std::time::Duration;
 use tokio::process::Command;
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the login check and a token being set wait for the forge to say whose the token is: under the 25 s
+/// fleet-client gives a check, so a slow forge is an answer rather than a client timeout.
+const WHOAMI_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The persona's nicknames for its specialists, in its folder beside its logins: only the app shows them.
 const NICKNAMES_FILE: &str = "nicknames.json";
@@ -773,7 +775,7 @@ impl Personas {
 
     /// Asks the forge who `token` belongs to, as a recorded call of the persona.
     async fn whoami(&self, row: &PersonaRow, token: String) -> Result<String, ForgeError> {
-        let forge = forge::github(&row.host, token, &self.forge, REMOTE_TIMEOUT);
+        let forge = forge::github(&row.host, token, &self.forge, WHOAMI_TIMEOUT);
         let ctx = CallCtx {
             persona: row.id.clone(),
             task: None,
