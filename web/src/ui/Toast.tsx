@@ -46,7 +46,7 @@ export function useToasts() {
 }
 
 export function ToastStack({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
-  if (toasts.length === 0) return null;
+  // Mounted while empty: a live region that appears together with its first toast is not announced.
   return (
     <div className="toast-stack" role="status">
       {toasts.map((t) => (

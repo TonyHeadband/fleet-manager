@@ -32,6 +32,15 @@ describe("Toast", () => {
     expect(window.location.hash).toBe("#supervisor?c=s1");
   });
 
+  it("the_status_region_is_there_before_the_first_toast_so_it_is_announced", () => {
+    const { rerender } = render(<ToastStack toasts={[]} onDismiss={vi.fn()} />);
+    const region = screen.getByRole("status");
+    expect(region).toBeEmptyDOMElement();
+    rerender(<ToastStack toasts={[{ id: 1, ...item() }]} onDismiss={vi.fn()} />);
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region).toHaveTextContent("wants you");
+  });
+
   it("styles_use_the_chat_tones_and_motion_stays_gated", () => {
     const css = readFileSync("src/ui/ui.css", "utf8");
     expect(css).toMatch(/\.toast-mark\[data-tone="accent"\] \{[^}]*background: var\(--fill\);/);
