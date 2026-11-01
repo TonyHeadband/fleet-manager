@@ -19,3 +19,10 @@
   from { clip-path: inset(0 100% 0 0); }
   to { clip-path: inset(0); }
 }
+
+.chart-stat { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); }
+.chart-stat-head { display: flex; align-items: flex-end; gap: var(--space-picker-gap); }
+.chart-stat-value { font-family: var(--font-mono); font-size: var(--size-stat); line-height: 1; color: var(--text-high); }
+.chart-stat-delta { font-family: var(--font-mono); font-size: var(--size-small); }
+.chart-spark { width: 100%; }
+.chart-spark svg { display: block; overflow: visible; }

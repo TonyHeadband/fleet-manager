@@ -247,6 +247,8 @@ pub mod size {
     pub const DOT: f32 = 7.0;
     /// The drawer footer's connection dot.
     pub const LIVE_DOT: f32 = 8.0;
+    /// A stat block's big number.
+    pub const STAT: f32 = 40.0;
 }
 
 /// The app's name wherever a person reads it. Ids, paths and binaries keep `fleet-manager`.
@@ -310,6 +312,8 @@ pub mod layout {
     pub const CHART_COMPACT: f32 = 180.0;
     /// Below this chart width the tick labels go too.
     pub const CHART_TINY: f32 = 120.0;
+    /// A stat block's sparkline height.
+    pub const CHART_SPARK: f32 = 56.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.

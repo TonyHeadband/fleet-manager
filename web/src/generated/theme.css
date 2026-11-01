@@ -21,6 +21,7 @@
   --size-code: 11.5px;
   --size-dot: 7px;
   --size-live-dot: 8px;
+  --size-stat: 40px;
   --layout-header: 40px;
   --layout-strip: 28px;
   --layout-column-header: 36px;
@@ -51,6 +52,7 @@
   --layout-chart-line: 2px;
   --layout-chart-compact: 180px;
   --layout-chart-tiny: 120px;
+  --layout-chart-spark: 56px;
   --layout-canvas-pad: 10px;
   --layout-canvas-gap: 8px;
   --layout-grid: 20px;

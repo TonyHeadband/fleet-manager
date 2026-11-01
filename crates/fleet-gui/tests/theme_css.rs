@@ -133,7 +133,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 46] = [
+const LAYOUT: [(&str, &str, f32); 47] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -168,6 +168,7 @@ const LAYOUT: [(&str, &str, f32); 46] = [
     ("chart-line", "chartLine", layout::CHART_LINE),
     ("chart-compact", "chartCompact", layout::CHART_COMPACT),
     ("chart-tiny", "chartTiny", layout::CHART_TINY),
+    ("chart-spark", "chartSpark", layout::CHART_SPARK),
     ("canvas-pad", "canvasPad", canvas::PAD),
     ("canvas-gap", "canvasGap", canvas::GAP),
     ("grid", "grid", canvas::GRID),
@@ -475,6 +476,7 @@ fn css() -> String {
             ("code", size::CODE),
             ("dot", size::DOT),
             ("live-dot", size::LIVE_DOT),
+            ("stat", size::STAT),
         ],
     );
     let layouts = px_vars("layout", &css_names(&LAYOUT))
@@ -735,8 +737,10 @@ fn the_chart_sizes_are_exported() {
     assert!(css.contains("--layout-chart-line: 2px;"), "{css}");
     assert!(css.contains("--layout-chart-compact: 180px;"), "{css}");
     assert!(css.contains("--layout-chart-tiny: 120px;"), "{css}");
+    assert!(css.contains("--layout-chart-spark: 56px;"), "{css}");
+    assert!(css.contains("--size-stat: 40px;"), "{css}");
     let ts = layout_ts();
-    for want in ["chartLine: 2", "chartCompact: 180", "chartTiny: 120"] {
+    for want in ["chartLine: 2", "chartCompact: 180", "chartTiny: 120", "chartSpark: 56"] {
         assert!(ts.contains(want), "{want} in {ts}");
     }
 }
