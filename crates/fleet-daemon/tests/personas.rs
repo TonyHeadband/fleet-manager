@@ -39,6 +39,7 @@ fn personas_with(fx: &Fx, claude: Vec<String>, gh: String) -> Personas {
         fx.state_dir.clone(),
         fx.svc.options().tools.clone(),
         fx.svc.options().forge.clone(),
+        fx.svc.options().daemon_exe.clone(),
     )
 }
 
@@ -216,7 +217,7 @@ fn env_has_no_token_and_clears_helpers() {
         ready: true,
         created_at: 0,
     };
-    let env = persona_env(&row, Path::new("/p"), "/bin/gh");
+    let env = persona_env(&row, Path::new("/p"), Path::new("/bin/fleet-daemon"));
     assert!(env.vars.iter().all(|(k, _)| !k.contains("TOKEN")));
     let get = |k: &str| {
         env.vars
@@ -232,13 +233,20 @@ fn env_has_no_token_and_clears_helpers() {
     );
     assert_eq!(
         get("GIT_CONFIG_VALUE_1"),
-        Some("!/bin/gh auth git-credential")
+        Some("!/bin/fleet-daemon git-credential /p/home/forge/token")
     );
+    assert!(!get("GIT_CONFIG_VALUE_1")
+        .unwrap()
+        .contains("auth git-credential"));
     // git runs the helper through `sh -c`.
-    let spaced = persona_env(&row, Path::new("/p"), "/opt/my tools/it's/gh");
+    let spaced = persona_env(
+        &row,
+        Path::new("/p q"),
+        Path::new("/opt/my tools/it's/daemon"),
+    );
     assert!(spaced.vars.contains(&(
         "GIT_CONFIG_VALUE_1".into(),
-        r"!'/opt/my tools/it'\''s/gh' auth git-credential".into()
+        r"!'/opt/my tools/it'\''s/daemon' git-credential '/p q/home/forge/token'".into()
     )));
     let under = |leaf: &str| Path::new("/p").join("home").join(leaf);
     assert_eq!(
@@ -261,6 +269,50 @@ fn env_has_no_token_and_clears_helpers() {
 }
 
 #[test]
+fn git_asks_the_helper_for_the_personas_host() {
+    let tmp = tempfile::tempdir().unwrap();
+    let personas = tmp.path().join("my personas");
+    let row = PersonaRow {
+        id: "home".into(),
+        name: "Home".into(),
+        host: "github.com".into(),
+        commit_name: "T".into(),
+        commit_email: "t@e".into(),
+        github_auth: GithubAuth::Gh,
+        ready: true,
+        created_at: 0,
+    };
+    let token = fleet_daemon::forge::token::token_path(&personas, "home");
+    std::fs::create_dir_all(token.parent().unwrap()).unwrap();
+    std::fs::write(&token, "ghp_secret\n").unwrap();
+    let env = persona_env(
+        &row,
+        &personas,
+        Path::new(env!("CARGO_BIN_EXE_fleet-daemon")),
+    );
+    let fill = |host: &str| {
+        use std::io::Write;
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["credential", "fill"])
+            .env("HOME", tmp.path())
+            .envs(env.vars.iter().map(|(k, v)| (k, v)))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let mut child = cmd.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(format!("protocol=https\nhost={host}\n\n").as_bytes())
+            .unwrap();
+        String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+    };
+    assert!(fill("github.com").contains("password=ghp_secret\n"));
+    assert!(!fill("example.com").contains("password="));
+}
+
+#[test]
 fn the_owners_git_config_is_invisible_to_a_persona() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
@@ -277,7 +329,11 @@ fn the_owners_git_config_is_invisible_to_a_persona() {
         ready: true,
         created_at: 0,
     };
-    let env = persona_env(&row, &tmp.path().join("personas"), "/bin/gh");
+    let env = persona_env(
+        &row,
+        &tmp.path().join("personas"),
+        Path::new("/bin/fleet-daemon"),
+    );
     let user_keys = |isolated: bool| {
         let mut cmd = std::process::Command::new("git");
         cmd.args(["config", "--get-regexp", r"user\."])
@@ -489,6 +545,7 @@ async fn the_claude_check_follows_an_npm_shim_to_its_exe() {
         fx.state_dir.clone(),
         fx.svc.options().tools.clone(),
         fx.svc.options().forge.clone(),
+        fx.svc.options().daemon_exe.clone(),
     );
     let p = ps.create(new_persona("Npm")).await.unwrap();
     log_in(&p, true, true);
@@ -532,7 +589,11 @@ async fn delete_removes_its_clones_and_leaves_the_products_repos() {
     log_in(&other, true, true);
     assert!(ps.check(&other.id).await.unwrap().ready);
     let row = fx.store.persona("other").await.unwrap().unwrap();
-    let env = persona_env(&row, &fx._tmp.path().join("personas"), &fake_gh());
+    let env = persona_env(
+        &row,
+        &fx._tmp.path().join("personas"),
+        Path::new(env!("CARGO_BIN_EXE_fleet-daemon")),
+    );
     fx.repos
         .resolve(PRODUCT, &pick(&fx, "core"), &env)
         .await
@@ -577,6 +638,7 @@ async fn the_claude_check_runs_the_whole_command() {
         fx.state_dir.clone(),
         fx.svc.options().tools.clone(),
         fx.svc.options().forge.clone(),
+        fx.svc.options().daemon_exe.clone(),
     );
     let p = ps.create(new_persona("Home")).await.unwrap();
     log_in(&p, true, true);
@@ -645,6 +707,7 @@ async fn delete_keeps_clones_from_before_products() {
             fake_claude(),
         ),
         std::sync::Arc::new(fleet_daemon::forge::ForgeConfig::default()),
+        std::path::PathBuf::from(env!("CARGO_BIN_EXE_fleet-daemon")),
     );
     let old = make_repo(&state.join("repos/p/core"));
     git(&old, &["branch", "fleet/kept-work"]);

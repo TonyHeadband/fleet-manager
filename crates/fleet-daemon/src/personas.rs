@@ -197,8 +197,8 @@ impl PersonaEnv {
 }
 
 /// The environment a persona's agent (and its git and gh) runs under. No token goes in: `gh` finds its login in
-/// `GH_CONFIG_DIR`, and git asks `gh` for credentials.
-pub fn persona_env(row: &PersonaRow, personas_dir: &Path, gh: &str) -> PersonaEnv {
+/// `GH_CONFIG_DIR`, and git asks the daemon binary, which reads the token file, for credentials.
+pub fn persona_env(row: &PersonaRow, personas_dir: &Path, daemon_exe: &Path) -> PersonaEnv {
     let dir = personas_dir.join(&row.id);
     let path = |p: PathBuf| p.to_string_lossy().into_owned();
     let v = |k: &str, val: String| (k.to_string(), val);
@@ -221,14 +221,18 @@ pub fn persona_env(row: &PersonaRow, personas_dir: &Path, gh: &str) -> PersonaEn
             // Empty value first: it clears every helper inherited from the user's own git config.
             v("GIT_CONFIG_KEY_0", "credential.helper".into()),
             v("GIT_CONFIG_VALUE_0", String::new()),
-            // Scoped to the host, so gh is never asked for another one even if a URL slipped past the host rule.
+            // Scoped to the host, so the token is never offered to another one even if a URL slipped past the host rule.
             v(
                 "GIT_CONFIG_KEY_1",
                 format!("credential.https://{}.helper", row.host),
             ),
             v(
                 "GIT_CONFIG_VALUE_1",
-                format!("!{} auth git-credential", sh_quote(gh)),
+                format!(
+                    "!{} git-credential {}",
+                    sh_quote(&daemon_exe.to_string_lossy()),
+                    sh_quote(&path(token_path(personas_dir, &row.id)))
+                ),
             ),
             v("GIT_TERMINAL_PROMPT", "0".into()),
             // Set and empty: git then asks no askpass program at all, not even core.askPass or SSH_ASKPASS.
@@ -239,7 +243,7 @@ pub fn persona_env(row: &PersonaRow, personas_dir: &Path, gh: &str) -> PersonaEn
     }
 }
 
-/// Quotes `s` for `sh -c`, which is how git runs a `!` helper: a gh path with a space would otherwise split.
+/// Quotes `s` for `sh -c`, which is how git runs a `!` helper: a path with a space would otherwise split.
 /// fleet-client has the same function, but the daemon only takes that crate for its tests.
 fn sh_quote(s: &str) -> String {
     let plain = !s.is_empty()
@@ -441,6 +445,8 @@ pub struct Personas {
     /// The PATH the CLIs are looked for on, and how to install one that is missing.
     tools: Tools,
     forge: Arc<ForgeConfig>,
+    /// What git runs as the credential helper.
+    daemon_exe: PathBuf,
 }
 
 impl Personas {
@@ -454,6 +460,7 @@ impl Personas {
         state_dir: PathBuf,
         tools: Tools,
         forge: Arc<ForgeConfig>,
+        daemon_exe: PathBuf,
     ) -> Personas {
         Personas {
             store,
@@ -466,6 +473,7 @@ impl Personas {
             create_lock: tokio::sync::Mutex::new(()),
             tools,
             forge,
+            daemon_exe,
         }
     }
 
@@ -817,14 +825,14 @@ impl Personas {
                 return Err(login.refusal(&row.name, which));
             }
         }
-        Ok(persona_env(&row, &self.personas_dir, &self.gh))
+        Ok(persona_env(&row, &self.personas_dir, &self.daemon_exe))
     }
 
     /// The persona's environment as stored, without asking either CLI: enough to find what its sessions left on disk,
     /// even once a login has lapsed.
     pub async fn env(&self, id: &str) -> Result<PersonaEnv, PersonaError> {
         let row = self.row(id).await?;
-        Ok(persona_env(&row, &self.personas_dir, &self.gh))
+        Ok(persona_env(&row, &self.personas_dir, &self.daemon_exe))
     }
 
     /// The environment to ask GitHub under, after asking `gh` alone: watching for merges needs no Claude login, so a
@@ -841,6 +849,6 @@ impl Personas {
         if !github.state.ok {
             return Err(github.refusal(&row.name, "GitHub"));
         }
-        Ok(persona_env(&row, &self.personas_dir, &self.gh))
+        Ok(persona_env(&row, &self.personas_dir, &self.daemon_exe))
     }
 }

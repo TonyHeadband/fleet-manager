@@ -24,6 +24,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 const USAGE: &str = "\
 Usage: fleet-daemon [--config <path>]
+       fleet-daemon git-credential <token-file> <get|store|erase>
 
 Runs the Fleet Manager daemon: the HTTP API on loopback, and the agents' terminals.
 
@@ -31,6 +32,8 @@ Options:
   --config <path>  Config file (default: ~/.config/fleet-manager/config.toml; Windows: %APPDATA%\\fleet-manager\\config.toml)
   --version        Print the version and exit
   -h, --help       Print this help and exit
+
+git-credential is git's credential helper for a persona's agents: `get` prints the token in <token-file>.
 
 Stops on Ctrl-C, SIGTERM or POST /api/shutdown; the agents stop with it and resume at the next start.";
 
@@ -116,6 +119,8 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         }
     }
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));
+    opts.daemon_exe =
+        std::env::current_exe().map_err(|e| format!("cannot find the daemon binary: {e}"))?;
     opts.claude = cfg.claude_command.clone();
     // Test seam for the real-binary test, which points the forge at a fake API. The persona tokens are sent to
     // whatever this names, so only a loopback http address is taken.
@@ -293,8 +298,45 @@ fn shutdown_signal(
     }
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// git's credential helper protocol: `get` answers with the token, `store` and `erase` have nothing to do because
+/// the token is only ever changed through the daemon. No token (or no file) answers nothing, and git fails the push
+/// with its own "could not read Username".
+fn git_credential(token_file: &std::path::Path, op: &str) -> ExitCode {
+    if op == "get" {
+        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+        if let Some(token) = fleet_daemon::forge::token::read_token(token_file) {
+            print!("username=x-access-token\npassword={token}\n");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn main() -> ExitCode {
+    // Before the config, the logger or the runtime: git starts this for every credential lookup.
+    let mut args = std::env::args().skip(1);
+    let first = args.next();
+    if first.as_deref() == Some("git-credential") {
+        return match (args.next(), args.next(), args.next()) {
+            (Some(file), Some(op), None) => git_credential(std::path::Path::new(&file), &op),
+            _ => {
+                eprintln!("fleet-daemon: git-credential needs a token file and an operation");
+                ExitCode::from(2)
+            }
+        };
+    }
+    match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt.block_on(daemon()),
+        Err(e) => {
+            eprintln!("fleet-daemon: cannot start the async runtime: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn daemon() -> ExitCode {
     let config_path = match parse_args(std::env::args().skip(1)) {
         Ok(Cli::Run { config }) => {
             config.unwrap_or_else(|| config::default_path(&config::home_dir()))

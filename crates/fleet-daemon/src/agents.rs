@@ -143,6 +143,8 @@ pub struct ServiceOptions {
     pub tools: crate::tools::Tools,
     /// Where the forge clients connect; tests point it at a fake forge.
     pub forge: Arc<crate::forge::ForgeConfig>,
+    /// The binary git runs as the personas' credential helper.
+    pub daemon_exe: PathBuf,
 }
 
 /// See `ServiceOptions::request_gate`: `reached` is notified when a request gets to the gap, which it leaves once
@@ -177,6 +179,7 @@ impl ServiceOptions {
                 vec!["claude".into()],
             ),
             forge: Arc::new(crate::forge::ForgeConfig { api_override: None }),
+            daemon_exe: std::env::current_exe().unwrap_or_else(|_| "fleet-daemon".into()),
         }
     }
 }
@@ -1059,6 +1062,7 @@ impl AgentService {
             cfg.state_dir.clone(),
             opts.tools.clone(),
             opts.forge.clone(),
+            opts.daemon_exe.clone(),
         ));
         let internal = Arc::new(Internal::new(cfg.state_dir.join(INTERNAL_DIR)));
         AgentService {

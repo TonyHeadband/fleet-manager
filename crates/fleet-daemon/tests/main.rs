@@ -549,3 +549,59 @@ fn daemon_log_records_the_agent_lifecycle_and_shutdown() {
     find("shutdown signal received");
     find("daemon stopped");
 }
+
+fn git_credential(token_file: &Path, op: &str, stdin: &str) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fleet-daemon"))
+        .arg("git-credential")
+        .arg(token_file)
+        .arg(op)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn git_credential_get_prints_the_token() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("token");
+    std::fs::write(&file, "ghp_secret\n").unwrap();
+    let out = git_credential(&file, "get", "protocol=https\nhost=github.com\n\n");
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "username=x-access-token\npassword=ghp_secret\n"
+    );
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn git_credential_without_a_token_prints_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("token");
+    let missing = git_credential(&file, "get", "host=github.com\n\n");
+    assert!(missing.status.success() && missing.stdout.is_empty());
+    std::fs::write(&file, "  \n").unwrap();
+    let blank = git_credential(&file, "get", "host=github.com\n\n");
+    assert!(blank.status.success() && blank.stdout.is_empty());
+}
+
+#[test]
+fn git_credential_store_and_erase_do_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("token");
+    std::fs::write(&file, "ghp_secret").unwrap();
+    for op in ["store", "erase"] {
+        let out = git_credential(&file, op, "host=github.com\npassword=x\n\n");
+        assert!(out.status.success() && out.stdout.is_empty(), "{op}");
+    }
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "ghp_secret");
+}

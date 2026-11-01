@@ -1215,7 +1215,8 @@ mod tests {
             ready: true,
             created_at: 0,
         };
-        let persona = crate::personas::persona_env(&row, dir, "/nonexistent/gh").vars;
+        let persona =
+            crate::personas::persona_env(&row, dir, Path::new("/nonexistent/fleet-daemon")).vars;
         let mut cmd = test_git();
         cmd.env("HOME", dir)
             .env("XDG_CONFIG_HOME", dir)
@@ -1277,8 +1278,8 @@ mod tests {
             ready: true,
             created_at: 0,
         };
-        let gh = gh_dir.join("gh").display().to_string();
-        let env = crate::personas::persona_env(&row, dir, &gh).vars;
+        let exe = gh_dir.join("gh");
+        let env = crate::personas::persona_env(&row, dir, &exe).vars;
         let mut cmd = test_git();
         cmd.env("HOME", dir)
             .env("XDG_CONFIG_HOME", dir)
