@@ -1,6 +1,6 @@
 use fleet_daemon::git::{
-    branch_exists, changed_files, clone, commit_subjects, create, diff, has_changes, merge_ff_only,
-    remove, show_file, slugify, uncommitted_files, GitError,
+    branch_exists, changed_files, clone, commit_file, commit_subjects, create, diff, has_changes,
+    merge_ff_only, remove, show_file, slugify, uncommitted_files, GitError,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -409,6 +409,33 @@ async fn merge_ff_only_is_false_only_for_diverged_branches() {
     assert_eq!(git(repo, &["rev-parse", "HEAD"]), before);
 
     assert!(merge_ff_only(repo, no_hooks, "no-such-rev").await.is_err());
+}
+
+#[tokio::test]
+async fn commit_file_commits_only_its_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path();
+    let no_hooks = tempfile::tempdir().unwrap();
+    git(repo, &["init", "-q", "-b", "main"]);
+    git(repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    std::fs::write(repo.join("other.md"), "staged by someone else").unwrap();
+    git(repo, &["add", "other.md"]);
+
+    commit_file(
+        repo,
+        no_hooks.path(),
+        "notes/plan.md",
+        "plan",
+        "add the plan",
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        git(repo, &["show", "--name-only", "--format=", "HEAD"]),
+        "notes/plan.md"
+    );
+    assert_eq!(git(repo, &["diff", "--cached", "--name-only"]), "other.md");
 }
 
 #[tokio::test]

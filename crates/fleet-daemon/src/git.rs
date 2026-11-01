@@ -909,7 +909,8 @@ pub async fn commit_file(
         .is_empty()
     {
         let mut args = daemon_ident(no_hooks)?;
-        args.extend(["commit", "-q", "--no-verify", "-m", message].map(String::from));
+        // Only `path`: anything else staged in the clone is not this commit's.
+        args.extend(["commit", "-q", "--no-verify", "-m", message, "--", path].map(String::from));
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         git_env(repo, &args, &daemon_ident_env()).await?;
     }
