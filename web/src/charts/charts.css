@@ -77,3 +77,12 @@
 .chart-cross { stroke: var(--fill); stroke-width: 1px; fill: none; pointer-events: none; }
 .chart-ts-hit { fill: transparent; pointer-events: all; }
 .chart-ts-line { stroke-linejoin: round; }
+
+.chart-tl { position: relative; display: flex; flex-direction: column; font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-tl-row { display: grid; grid-template-columns: var(--layout-chart-label-w) minmax(0, 1fr); gap: var(--space-button-gap); align-items: center; }
+.chart-tl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.chart-tl-lane { position: relative; height: calc(var(--layout-bar-h) + 2 * var(--layout-caption-gap)); }
+.chart-tl-band { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; }
+.chart-tl-fill { display: block; width: 100%; height: var(--layout-bar-h); }
+.chart-tl-axis svg { display: block; overflow: visible; }
+.chart-tl .chart-legend { margin-top: var(--space-header-gap); }

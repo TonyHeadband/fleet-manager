@@ -7,6 +7,7 @@ import { NoData } from "./NoData";
 import { paintVar, type Paint } from "./paint";
 import { ScaleTicks } from "./ScaleTicks";
 import { finite, linear, niceTicks, plainFormat, type Format } from "./scale";
+import { clockFormat, timeTicks } from "./timeAxis";
 import { useChartEntry } from "./useChartEntry";
 import { useSize } from "./useSize";
 import "./charts.css";
@@ -14,12 +15,6 @@ import "./charts.css";
 type Point = { t: number; v: number | null };
 type Series = { label: string; paint: Paint; points: Point[] };
 type Dot = { t: number; v: number };
-
-const pad2 = (n: number) => String(n).padStart(2, "0");
-const clockFormat = (t: number) => {
-  const d = new Date(t * 1000);
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-};
 
 /** Runs of consecutive drawable points; a null (or non-finite time) ends a run. */
 function runs(points: Point[]): Dot[][] {
@@ -80,8 +75,7 @@ export function TimeSeries({ label, from, to, series, formatX = clockFormat, for
   const y = linear(0, yTop, plotH, 0);
   const drawY = (v: number) => y(Math.max(v, 0));
   const showLabels = width >= layout.chartTiny;
-  const xSteps = span ? (plotW >= 2 * layout.chartCompact ? 4 : 2) : 0;
-  const xTicks = Array.from({ length: xSteps + 1 }, (_, i) => (xSteps ? (span * i) / xSteps : 0));
+  const xTicks = timeTicks(span, plotW);
   const showLegend = series.length >= 2 && width >= layout.chartCompact;
 
   const rows: [string, string][] = series.flatMap((s) =>
