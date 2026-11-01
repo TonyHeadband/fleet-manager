@@ -141,7 +141,12 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
     const key = keyOf(kind, name);
     const asked = saves.current[key];
     const fresh = () => saves.current[key] === asked;
-    update((s) => ({ ...s, picks: { ...s.picks, [active]: { kind, name } } }));
+    // A new definition not saved yet (a draft with no file) is dropped by opening anything else.
+    update((s) => ({
+      ...s,
+      drafts: Object.fromEntries(Object.entries(s.drafts).filter(([k]) => k in s.files || k === key)),
+      picks: { ...s.picks, [active]: { kind, name } },
+    }));
     read(kind, name).then(
       (file) => fresh() && update((s) => ({ ...s, ...loaded(s, key, file) })),
       (e: unknown) => fresh() && fail(key)(e),
@@ -162,6 +167,16 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
       const file = now.current.files[key];
       if (file) update((s) => ({ ...s, drafts: { ...s.drafts, [key]: file.text } }));
     },
+    /** An unsaved draft with no file: the first Save writes it, and until then the list does not show it. */
+    create: (kind: DefKind, name: string, text: string) => {
+      const key = keyOf(kind, name);
+      update((s) => ({
+        ...s,
+        drafts: { ...s.drafts, [key]: text },
+        errors: without(s.errors, key),
+        picks: { ...s.picks, [active]: { kind, name } },
+      }));
+    },
     save: (kind: DefKind, name: string) => {
       const key = keyOf(kind, name);
       const text = now.current.drafts[key];
@@ -172,7 +187,11 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
       put.then(
         () => {
           bump(key);
-          update((s) => ({ ...s, ...saved(s) }));
+          // A new definition has no file yet: what it sent is the file now.
+          update((s) => {
+            const n = saved(s);
+            return { ...s, ...n, files: key in n.files ? n.files : { ...n.files, [key]: { kind, name, text, builtin: false } } };
+          });
           say("success", `${name} saved`);
           reload(kind);
         },
@@ -187,6 +206,15 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
       await client.setNickname(persona, name, nickname);
       loadList();
       onNicknameChanged?.();
+    },
+    /** Moves the persona's file to the other role, then reopens it there; a refusal is for the caller to show. */
+    move: async (kind: DefKind, name: string, to: DefKind) => {
+      if (persona === null) throw new Error("No persona is active");
+      await client.movePersonaDefinition(persona, kind, name, to);
+      const key = keyOf(kind, name);
+      update((s) => ({ ...s, ...reset(s, key) }));
+      loadList();
+      open(to, name);
     },
     revert: (key: DefKey) =>
       update((s) => {

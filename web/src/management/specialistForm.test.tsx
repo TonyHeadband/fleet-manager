@@ -9,6 +9,7 @@ import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
 import { fakeClient } from "../test/fixtures";
 import { useDefinitions } from "./definitions";
+import { Definitions } from "./Definitions";
 import { SpecialistForm } from "./SpecialistForm";
 
 const TEXT = [
@@ -48,18 +49,21 @@ function Host(p: {
   persona?: string;
   name?: string;
   onNick?: () => void;
+  roleFixed?: boolean;
 }) {
   const persona = p.persona ?? "a";
   const name = p.name ?? "rust";
   const defs = useDefinitions(p.client, persona, vi.fn(), p.onNick);
-  const kind = (p.kind ?? "specialist") as "specialist" | "orchestrator";
+  // A move reopens the definition under its new kind.
+  const picked = defs.st.selected?.kind;
+  const kind = (picked === "orchestrator" || picked === "specialist" ? picked : (p.kind ?? "specialist")) as "specialist" | "orchestrator";
   useEffect(() => {
     defs.loadList();
     defs.open(kind, name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persona, name]);
   const listed = defs.st.list?.find((d) => d.name === name) ?? { ...p.info, name };
-  return <SpecialistForm persona={persona} kind={kind} name={name} info={listed} defs={defs} skills={p.skills ?? SKILLS} roleFixed />;
+  return <SpecialistForm persona={persona} kind={kind} name={name} info={listed} defs={defs} skills={p.skills ?? SKILLS} roleFixed={p.roleFixed ?? true} />;
 }
 
 async function form(file: Partial<DefFile> = {}, over: Partial<DefInfo> = {}, clientOver: Record<string, unknown> = {}, host: Partial<Parameters<typeof Host>[0]> = {}) {
@@ -276,6 +280,46 @@ describe("SpecialistForm", () => {
     expect(client.savePersonaDefinition).toHaveBeenCalledWith("a", "specialist", "rust", TEXT.replace("model: sonnet\n", ""));
   });
 
+  describe("moving between roles", () => {
+    const movable = (over: Record<string, unknown> = {}) =>
+      form(ownCopy, { builtin: false, overridden: true }, { movePersonaDefinition: vi.fn().mockResolvedValue(undefined), ...over }, { roleFixed: false });
+
+    it("role_change_moves_and_reopens", async () => {
+      const client = await movable();
+      await userEvent.click(screen.getByRole("combobox", { name: "Role" }));
+      await userEvent.click(screen.getByRole("option", { name: "Orchestrator" }));
+      expect(client.movePersonaDefinition).toHaveBeenCalledWith("a", "specialist", "rust", "orchestrator");
+      await waitFor(() => expect(client.personaDefinition).toHaveBeenCalledWith("a", "orchestrator", "rust"));
+      await waitFor(() => expect(client.personaDefinitions).toHaveBeenCalledTimes(2));
+      expect(await screen.findByRole("combobox", { name: "Role" })).toHaveTextContent("Orchestrator");
+    });
+
+    it("a_refused_move_keeps_the_form_and_shows_why", async () => {
+      const message = "orchestrators/rust.md already exists";
+      const client = await movable({ movePersonaDefinition: vi.fn().mockRejectedValue(new FleetError(message)) });
+      await userEvent.click(screen.getByRole("combobox", { name: "Role" }));
+      await userEvent.click(screen.getByRole("option", { name: "Orchestrator" }));
+      const shown = await screen.findByText(message);
+      expect(shown).toHaveClass("error-line");
+      expect(screen.getByText("Role").closest("div")).toContainElement(shown);
+      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent("Specialist");
+      expect(field("Summary")).toHaveValue("Rust code");
+      expect(client.personaDefinition).toHaveBeenCalledTimes(1);
+    });
+
+    it("a_dirty_form_cannot_move", async () => {
+      await movable();
+      await userEvent.type(field("Summary"), "!");
+      expect(screen.getByRole("combobox", { name: "Role" })).toBeDisabled();
+    });
+
+    it("an_unmodified_builtin_keeps_its_role_read_only", async () => {
+      await form({}, {}, {}, { roleFixed: false });
+      expect(screen.queryByRole("combobox", { name: "Role" })).toBeNull();
+      expect(screen.getByText("Specialist")).toBeInTheDocument();
+    });
+  });
+
   it("form_css_uses_tokens_only", () => {
     const css = readFileSync("src/management/specialistForm.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
@@ -286,3 +330,95 @@ describe("SpecialistForm", () => {
   });
 });
 
+
+describe("New definition", () => {
+  const list = [
+    info(),
+    info({ name: "go", builtin: false }),
+    info({ kind: "orchestrator", name: "lead", builtin: false }),
+    info({ name: "rust2", builtin: true, overridden: true }),
+  ];
+
+  let latest: ReturnType<typeof useDefinitions>;
+
+  function Tab(p: { client: ReturnType<typeof fakeClient>; kind?: DefKind; roleFixed?: boolean }) {
+    const defs = useDefinitions(p.client, "a", vi.fn());
+    latest = defs;
+    useEffect(() => {
+      defs.loadList();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    // With the role free, the tab shows whichever role is open, as the merged tab list will.
+    const kind = p.roleFixed === false ? (defs.st.selected?.kind ?? p.kind ?? "specialist") : (p.kind ?? "specialist");
+    return <Definitions kind={kind} defs={defs} roleFixed={p.roleFixed} />;
+  }
+
+  async function dialog(kind: DefKind = "specialist", roleFixed = true) {
+    const client = fakeClient({
+      personaDefinitions: vi.fn().mockResolvedValue(list),
+      personaDefinition: vi.fn(async (_p: string, k: DefKind, name: string) => ({ kind: k, name, text: TEXT, builtin: true })),
+    });
+    render(<Tab client={client} kind={kind} roleFixed={roleFixed} />);
+    await userEvent.click(await screen.findByRole("button", { name: kind === "specialist" ? "+ New specialist" : "+ New orchestrator" }));
+    return client;
+  }
+
+  it("new_refuses_a_builtin_name", async () => {
+    await dialog();
+    await userEvent.type(field("Name"), "rust");
+    expect(screen.getByText("That's a built-in: open it and Override.")).toHaveClass("error-line");
+    expect(button("OK")).toBeDisabled();
+  });
+
+  it("new_refuses_a_name_the_persona_has", async () => {
+    await dialog();
+    await userEvent.type(field("Name"), "lead");
+    expect(screen.getByText("This persona already has lead.")).toBeInTheDocument();
+    expect(button("OK")).toBeDisabled();
+    await userEvent.clear(field("Name"));
+    await userEvent.type(field("Name"), "rust2");
+    expect(screen.getByText("This persona already has rust2.")).toBeInTheDocument();
+  });
+
+  it("new_refuses_a_name_the_daemon_would", async () => {
+    await dialog();
+    await userEvent.type(field("Name"), "-bad name");
+    expect(screen.getByText(/letters, digits/)).toHaveClass("error-line");
+    expect(button("OK")).toBeDisabled();
+  });
+
+  it("new_opens_an_unsaved_draft_under_the_chosen_role", async () => {
+    const client = await dialog("specialist", false);
+    await userEvent.type(field("Name"), "scout");
+    await userEvent.click(screen.getByRole("combobox", { name: "Role" }));
+    await userEvent.click(screen.getByRole("option", { name: "Orchestrator" }));
+    await userEvent.click(button("OK"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(client.savePersonaDefinition).not.toHaveBeenCalled();
+    expect(field("Name")).toHaveValue("scout");
+    expect(field("Name")).toHaveAttribute("readonly");
+    expect(field("Instructions")).toHaveValue("# scout\n");
+    expect(screen.queryByRole("button", { name: "Override" })).toBeNull();
+    await userEvent.type(field("Summary"), "Scouts");
+    await userEvent.click(button("Save"));
+    expect(client.savePersonaDefinition).toHaveBeenCalledWith("a", "orchestrator", "scout", "---\nname: scout\nsummary: Scouts\n---\n# scout\n");
+    await waitFor(() => expect(client.personaDefinitions).toHaveBeenCalledTimes(2));
+  });
+
+  it("new_with_a_fixed_role_presets_the_tab_kind", async () => {
+    await dialog("orchestrator");
+    expect(screen.getByRole("combobox", { name: "Role" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent("Orchestrator");
+  });
+
+  it("selecting_another_row_drops_an_unsaved_draft", async () => {
+    const client = await dialog();
+    await userEvent.type(field("Name"), "scout");
+    await userEvent.click(button("OK"));
+    expect(field("Name")).toHaveValue("scout");
+    await userEvent.click(screen.getByRole("button", { name: /^go / }));
+    await waitFor(() => expect(client.personaDefinition).toHaveBeenCalledWith("a", "specialist", "go"));
+    await waitFor(() => expect(field("Name")).toHaveValue("go"));
+    expect(Object.keys(latest.st.drafts).some((k) => k.endsWith("/scout"))).toBe(false);
+  });
+});

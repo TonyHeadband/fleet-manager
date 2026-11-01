@@ -24,6 +24,10 @@ const MODES: { value: PermissionMode | ""; label: string }[] = [
   { value: "manual", label: "Manual" },
   { value: "dontAsk", label: "Don't ask" },
 ];
+const ROLES = [
+  { value: "specialist", label: "Specialist" },
+  { value: "orchestrator", label: "Orchestrator" },
+];
 const EFFORTS: { value: Effort; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -57,8 +61,9 @@ function Field(props: { label: string; wide?: boolean; error: string | null; chi
 
 export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFixed }: Props) {
   const key = defs.key(kind, name);
-  const file = defs.st.files[key];
   const draft = defs.st.drafts[key];
+  // A new definition has a draft and no file until its first Save: it reads as an override not saved yet.
+  const file = defs.st.files[key] ?? (draft === undefined ? undefined : { kind, name, text: "", builtin: true });
   const error = defs.st.errors[key];
   const saved = info?.nickname ?? "";
 
@@ -68,9 +73,11 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
   const [nickError, setNickError] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
   if (nick.identity !== identity) {
     setNick({ identity, text: saved });
     setNickError(null);
+    setRoleError(null);
   }
   const nickText = nick.identity === identity ? nick.text : saved;
 
@@ -106,6 +113,17 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
     setNickError(null);
   };
 
+  // Only the persona's own file can move, and not with unsaved changes: the move works on the file as saved.
+  const ownFile = info !== undefined && (info.overridden || !info.builtin);
+  const move = async (to: string) => {
+    setRoleError(null);
+    try {
+      await defs.move(kind, name, to as typeof kind);
+    } catch (e) {
+      setRoleError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const { fields } = parsed;
 
   return (
@@ -134,10 +152,21 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
             </Field>
             <div className="form-field wide">
               <span className="mono-label caption">Role</span>
-              {/* Task 7 lets a role change where roleFixed is false. */}
-              <span className="form-role" data-fixed={roleFixed || undefined}>
-                {kind === "orchestrator" ? "Orchestrator" : "Specialist"}
-              </span>
+              {roleFixed || !ownFile ? (
+                <span className="form-role" data-fixed={roleFixed || undefined}>
+                  {kind === "orchestrator" ? "Orchestrator" : "Specialist"}
+                </span>
+              ) : (
+                <Select
+                  label="Role"
+                  value={kind}
+                  options={ROLES}
+                  disabled={fileDirty || nickDirty || defs.st.saving !== null}
+                  title={fileDirty || nickDirty ? "Save or revert first" : undefined}
+                  onChange={(to) => void move(to)}
+                />
+              )}
+              {roleError !== null && <ErrorLine text={roleError} />}
             </div>
           </div>
         </div>

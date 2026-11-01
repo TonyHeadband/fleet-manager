@@ -9,8 +9,10 @@ import { Mark } from "../ui/icons";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { SaveBar } from "../ui/SaveBar";
+import { NewDefinitionDialog } from "./NewDefinitionDialog";
 import { SpecialistForm } from "./SpecialistForm";
 import { defDirty, usable, type DefinitionsApi } from "./definitions";
+import { writeDef } from "./frontmatter";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs: one kind's definitions, built-in or the user's, with
 // the selected one's file. A built-in is read-only until Override copies it into a draft that saves as the user's file.
@@ -33,8 +35,14 @@ function tag(d: DefInfo) {
 /** `auto · high`: what the definition's agents start with; nothing for a file that names neither. */
 const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · ");
 
-export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsApi }) {
+/** The file a new definition starts as: its name and a heading, with no summary yet. */
+const newText = (name: string) =>
+  writeDef("", { fields: { name, summary: "", skills: [], model: null, mode: null, effort: null }, body: `# ${name}\n` });
+
+/** `roleFixed`: the tab fixes each definition's role. The merged tab list lifts it. */
+export function Definitions({ kind, defs, roleFixed = true }: { kind: DefKind; defs: DefinitionsApi; roleFixed?: boolean }) {
   const { st } = defs;
+  const [creating, setCreating] = useState(false);
   const all = kind === "pr_style" ? st.styles : st.list;
   if (all === null) {
     return (
@@ -52,6 +60,23 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
       detailLabel={selected ?? "Definition"}
       list={
         <>
+          {(kind === "specialist" || kind === "orchestrator") && (
+            <div className="definition-new">
+              <Button onClick={() => setCreating(true)}>+ New {kind}</Button>
+            </div>
+          )}
+          {creating && (kind === "specialist" || kind === "orchestrator") && (
+            <NewDefinitionDialog
+              list={all}
+              kind={kind}
+              roleFixed={roleFixed}
+              onClose={() => setCreating(false)}
+              onCreate={(role, name) => {
+                setCreating(false);
+                defs.create(role, name, newText(name));
+              }}
+            />
+          )}
           {listed.length === 0 && <p className="note">None yet.</p>}
           <ul>
             {listed.map((d) => (
@@ -84,7 +109,14 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
         selected === null ? (
           <p className="note">No definition selected.</p>
         ) : (
-          <Editor kind={kind} name={selected} info={listed.find((d) => d.name === selected)} defs={defs} skills={usable(st.list ?? [], "skill")} />
+          <Editor
+            kind={kind}
+            name={selected}
+            info={listed.find((d) => d.name === selected)}
+            defs={defs}
+            skills={usable(st.list ?? [], "skill")}
+            roleFixed={roleFixed}
+          />
         )
       }
     />
@@ -93,8 +125,8 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
 
 /** egui's `editor`: read-only with Override for a built-in, else the draft with Save / Revert and, over a built-in,
  * Reset to built-in. The last error stays under it, and the draft with it. */
-function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; defs: DefinitionsApi; skills: string[] }) {
-  const { kind, name, info, defs, skills } = p;
+function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; defs: DefinitionsApi; skills: string[]; roleFixed: boolean }) {
+  const { kind, name, info, defs, skills, roleFixed } = p;
   const captionId = useId();
   const [confirm, setConfirm] = useState(false);
   const key = defs.key(kind, name);
@@ -103,10 +135,13 @@ function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; def
   const error = defs.st.errors[key];
 
   const body = () => {
-    if (!file) return error !== undefined ? <ErrorLine text={error} /> : <p className="note">Loading…</p>;
+    // A new definition has a draft and no file until its first Save.
+    if (!file && !(draft !== undefined && (kind === "orchestrator" || kind === "specialist")))
+      return error !== undefined ? <ErrorLine text={error} /> : <p className="note">Loading…</p>;
     // Orchestrators and specialists are a form; it draws its own bar, Override and Reset.
     if (kind === "orchestrator" || kind === "specialist")
-      return <SpecialistForm persona={defs.persona} kind={kind} name={name} info={info} defs={defs} skills={skills} roleFixed />;
+      return <SpecialistForm persona={defs.persona} kind={kind} name={name} info={info} defs={defs} skills={skills} roleFixed={roleFixed} />;
+    if (!file) return null;
     if (draft === undefined)
       return (
         <>
