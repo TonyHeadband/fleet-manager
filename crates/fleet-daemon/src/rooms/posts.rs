@@ -331,9 +331,17 @@ impl AgentService {
         }
         if let Some(last) = posts.last() {
             let owner = MemberRef::Owner.key();
-            self.store
-                .add_member(&room.id, owner, self.opts.clock.now())
-                .await?;
+            let joined = self
+                .store
+                .room_members(&room.id)
+                .await?
+                .iter()
+                .any(|m| m.member == owner && m.left_at.is_none());
+            if !joined {
+                self.store
+                    .add_member(&room.id, owner, self.opts.clock.now())
+                    .await?;
+            }
             self.store.set_read_upto(&room.id, owner, last.id).await?;
         }
         Ok(posts)
