@@ -47,6 +47,20 @@ describe("Avatar", () => {
     for (const c of outline) expect(scan.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("scan_lines_keep_butt_caps_so_their_gaps_stay_open", () => {
+    // A square cap adds half the weight at each end, and a 1.1 row would close the 0.8 breaks the owner tuned.
+    const { container } = render(<Avatar seed="ada" />);
+    for (const l of container.querySelectorAll("svg line")) expect(l.getAttribute("stroke-linecap") ?? "butt").toBe("butt");
+  });
+
+  it("traces_have_square_caps_and_miter_joins", () => {
+    const { container } = render(<Avatar kind="specialist" seed="rust" />);
+    for (const p of container.querySelectorAll("svg polyline")) {
+      expect(p).toHaveAttribute("stroke-linecap", "square");
+      expect(p).toHaveAttribute("stroke-linejoin", "miter");
+    }
+  });
+
   it("a_specialist_avatar_draws_its_traces", () => {
     const { container } = render(<Avatar kind="specialist" seed="rust" />);
     expect(container.querySelector("span.avatar")).toHaveAttribute("data-kind", "specialist");

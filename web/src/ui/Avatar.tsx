@@ -2,7 +2,8 @@ import { useId, useMemo } from "react";
 import { AVATAR_H, AVATAR_W, FIGURE, avatar, type AvatarKind, type Ink } from "./avatarArt";
 
 const paint = (ink: Ink, hue: number) => ({ stroke: `oklch(var(${ink === "main" ? "--avatar-l" : "--avatar-l2"}) var(--avatar-c) ${hue})` });
-const LINE = { strokeLinecap: "square", strokeLinejoin: "miter", fill: "none" } as const;
+// Traces turn at right angles, so square caps and miter joins; scan runs keep butt caps so their short gaps stay open.
+const TRACE = { strokeLinecap: "square", strokeLinejoin: "miter", fill: "none" } as const;
 
 /**
  * An avatar in the app's portrait shape, 3:4: a picture generated from `seed` (a persona's figure or a specialist's
@@ -35,9 +36,9 @@ export function Avatar({ title, kind = "persona", seed }: { title?: string; kind
           <g clipPath={kind === "persona" ? `url(#${figure})` : undefined}>
             {art.shapes.map((s, i) =>
               s.type === "line" ? (
-                <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} strokeWidth={s.width} opacity={s.opacity} style={paint(s.ink, art.hue)} {...LINE} />
+                <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} strokeWidth={s.width} opacity={s.opacity} style={paint(s.ink, art.hue)} />
               ) : (
-                <polyline key={i} points={s.points.join(" ")} strokeWidth={s.width} opacity={s.opacity} style={paint(s.ink, art.hue)} {...LINE} />
+                <polyline key={i} points={s.points.join(" ")} strokeWidth={s.width} opacity={s.opacity} style={paint(s.ink, art.hue)} {...TRACE} />
               ),
             )}
           </g>
