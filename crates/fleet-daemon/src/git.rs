@@ -126,7 +126,7 @@ async fn output(cmd: Command) -> std::io::Result<std::process::Output> {
     let guard = KillTree(Some(tree));
     let out = child.wait_with_output().await;
     // Reaped: on Unix the group id may be reused from here. Dropping the Windows job still ends what git left.
-    drop(guard.disarm());
+    let _ = guard.disarm();
     out
 }
 

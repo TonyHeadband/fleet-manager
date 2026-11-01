@@ -438,7 +438,7 @@ async fn backfill_leaves_agents_of_another_task_alone() {
         let s = Store::open(&db).await.unwrap();
         assert_eq!(s.backfill_tasks().await.unwrap(), (0, 0));
         let ids: Vec<_> = s.tasks().await.unwrap().into_iter().map(|t| t.id).collect();
-        assert_eq!(ids, [lead.clone()]);
+        assert_eq!(ids, std::slice::from_ref(&lead));
     }
 }
 
