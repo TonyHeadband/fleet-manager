@@ -131,11 +131,11 @@ describe("Definitions", () => {
   it("definitions_show_one_specialists_tab_with_roles", async () => {
     const h = await defsTab("Specialists", [def("orchestrator", "direct"), def("specialist", "rust"), def("skill", "tdd")]);
     expect(screen.queryByRole("tab", { name: "Orchestrators" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Specialists" })).toBeInTheDocument();
     const direct = await row("direct built-in");
-    const rust = row("rust built-in");
     expect(within(direct).getByTitle("Role")).toHaveTextContent("orchestrator");
-    expect(within(await rust).getByTitle("Role")).toHaveTextContent("rust");
     expect(within(direct).getByTitle("Role")).toHaveClass("badge");
+    expect(within(await row("rust built-in")).queryByTitle("Role"), "a specialist's role is its name, already shown").toBeNull();
     expect(screen.queryByRole("button", { name: "tdd built-in" })).toBeNull();
     // Each opens from its own folder.
     await userEvent.click(direct);

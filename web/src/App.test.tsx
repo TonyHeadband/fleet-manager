@@ -28,7 +28,7 @@ describe("App", () => {
     // The board and the product's repos come back too, not only the drawer.
     expect(screen.getByRole("region", { name: "Working" })).toBeInTheDocument();
     await userEvent.click(newTask);
-    expect(await screen.findByRole("button", { name: "core" })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "core" })).toBeInTheDocument();
     vi.useRealTimers();
     localStorage.clear();
   });
@@ -636,7 +636,7 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Start task" })).not.toBeInTheDocument();
     await waitFor(() => expect(newTask).toBeEnabled());
     await userEvent.click(newTask);
-    await userEvent.click(await screen.findByRole("button", { name: "core" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "core" }));
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(screen.getByRole("button", { name: "Start task" }));
     expect(spawn).toHaveBeenCalledWith({ ...spawnRequest("p1", "me", ["core"], "go"), release: null, title: null, kind: "orchestrator", role: "direct" });
@@ -657,7 +657,7 @@ describe("App", () => {
     const newTask = await screen.findByRole("button", { name: "New task" });
     await waitFor(() => expect(newTask).toBeEnabled());
     await userEvent.click(newTask);
-    await userEvent.click(await screen.findByRole("button", { name: "core" }));
+    await userEvent.click(await screen.findByRole("radio", { name: "core" }));
     await userEvent.type(screen.getByLabelText("Goal"), "go");
     await userEvent.click(screen.getByRole("button", { name: "Start task" }));
     const footer = screen.getByRole("contentinfo");

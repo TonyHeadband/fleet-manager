@@ -21,11 +21,11 @@ import { writeDef } from "./frontmatter";
 /** egui's `ROWS`: the editor's height in lines. */
 const EDITOR_ROWS = 24;
 
-const KINDS: Record<DefKind, { label: string; folder: string }> = {
-  orchestrator: { label: "Orchestrators", folder: "orchestrators" },
-  specialist: { label: "Specialists", folder: "specialists" },
-  skill: { label: "Skills", folder: "skills" },
-  pr_style: { label: "PR styles", folder: "pr-styles" },
+const KINDS: Record<DefKind, { folder: string }> = {
+  orchestrator: { folder: "orchestrators" },
+  specialist: { folder: "specialists" },
+  skill: { folder: "skills" },
+  pr_style: { folder: "pr-styles" },
 };
 
 const ORIGIN_TEXT = { builtin: "built-in", copy: "your copy · overrides built-in", yours: "yours" } as const;
@@ -40,11 +40,8 @@ const ORIGIN_SHORT = { ...ORIGIN_TEXT, copy: "your copy" } as const;
 
 const tag = (d: DefInfo) => ORIGIN_SHORT[origin(d)];
 
-/** What an agent from this definition is in a task: `orchestrator`, or the specialist's own name. */
-function role(d: DefInfo) {
-  if (d.kind === "orchestrator") return "orchestrator";
-  return d.kind === "specialist" ? d.name : null;
-}
+/** The role column: orchestrators are marked; a specialist's role is its name, already shown. */
+const role = (d: DefInfo) => (d.kind === "orchestrator" ? "orchestrator" : null);
 
 /** `auto · high`: what the definition's agents start with; nothing for a file that names neither. */
 const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · ");
@@ -57,10 +54,12 @@ const newText = (name: string) =>
 
 /** `roleFixed`: the tab fixes each definition's role. The merged tab list lifts it. */
 export function Definitions({
+  label,
   kinds,
   defs,
   roleFixed = true,
 }: {
+  label: string;
   kinds: readonly DefKind[];
   defs: DefinitionsApi;
   roleFixed?: boolean;
@@ -82,7 +81,7 @@ export function Definitions({
   return (
     <ListDetail
       width="management"
-      listLabel={KINDS[kinds[0]!].label}
+      listLabel={label}
       detailLabel={selected?.name ?? "Definition"}
       list={
         <>

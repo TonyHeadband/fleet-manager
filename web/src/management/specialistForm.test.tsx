@@ -371,7 +371,7 @@ describe("New definition", () => {
     }, [p.persona]);
     // With the role free, the tab lists both roles, as the merged Specialists tab does.
     const kinds: DefKind[] = p.roleFixed === false ? ["orchestrator", "specialist"] : [p.kind ?? "specialist"];
-    return <Definitions kinds={kinds} defs={defs} roleFixed={p.roleFixed} />;
+    return <Definitions label="Specialists" kinds={kinds} defs={defs} roleFixed={p.roleFixed} />;
   }
 
   async function dialog(kind: DefKind = "specialist", roleFixed = true, over: Record<string, unknown> = {}) {

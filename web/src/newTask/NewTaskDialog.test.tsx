@@ -41,7 +41,7 @@ async function reopen() {
 }
 
 const startButton = () => screen.getByRole("button", { name: "Start task" });
-const pick = (name: string) => userEvent.click(within(screen.getByRole("group", { name: /^Repo/ })).getByRole("button", { name }));
+const pick = (name: string) => userEvent.click(within(screen.getByRole("radiogroup", { name: /^Repo/ })).getByRole("radio", { name }));
 const lastSpawn = (client: ReturnType<typeof fakeClient>) => (client.spawn as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
 
 describe("New task, as Lite's dialog", () => {
@@ -63,7 +63,7 @@ describe("New task, as Lite's dialog", () => {
     const asked = (client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length;
     await choose("Persona", "work");
     await waitFor(() => expect((client.repos as ReturnType<typeof vi.fn>).mock.calls.filter(([p]) => p === "p1").length).toBe(asked + 1));
-    expect(within(screen.getByRole("group", { name: /^Repo/ })).getByRole("button", { name: "core" }), "the picks go with the persona").toHaveAttribute("aria-pressed", "false");
+    expect(within(screen.getByRole("radiogroup", { name: /^Repo/ })).getByRole("radio", { name: "core" }), "the picks go with the persona").toHaveAttribute("aria-checked", "false");
   });
 
   it("a_failed_repo_load_shows_in_the_dialog", async () => {
@@ -84,18 +84,19 @@ describe("New task, as Lite's dialog", () => {
     await openDialog();
     expect(screen.queryByRole("combobox", { name: "Type" })).toBeNull();
     expect(screen.queryByText("Solo")).toBeNull();
-    expect(screen.getByRole("group", { name: "Repo" })).toBeInTheDocument();
+    const repos = screen.getByRole("radiogroup", { name: "Repo" });
+    expect(within(repos).getAllByRole("radio").map((r) => r.textContent), "a task takes exactly one repo").toEqual(["core", "portal"]);
   });
 
   it("a_new_task_takes_one_repo", async () => {
     await openDialog();
     await pick("core");
     await pick("portal");
-    const group = within(screen.getByRole("group", { name: "Repo" }));
-    expect(group.getByRole("button", { name: "portal" })).toHaveAttribute("aria-pressed", "true");
-    expect(group.getByRole("button", { name: "core" }), "the newest pick replaces the old one").toHaveAttribute("aria-pressed", "false");
+    const group = within(screen.getByRole("radiogroup", { name: "Repo" }));
+    expect(group.getByRole("radio", { name: "portal" })).toHaveAttribute("aria-checked", "true");
+    expect(group.getByRole("radio", { name: "core" }), "the newest pick replaces the old one").toHaveAttribute("aria-checked", "false");
     await pick("portal");
-    expect(group.getByRole("button", { name: "portal" }), "a pick unticks").toHaveAttribute("aria-pressed", "false");
+    expect(group.getByRole("radio", { name: "portal" }), "a pick unticks").toHaveAttribute("aria-checked", "false");
   });
 
   it("new_task_needs_a_repo", async () => {
@@ -338,7 +339,7 @@ describe("New task, as Lite's dialog", () => {
       await userEvent.click(startButton());
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       await reopen();
-      expect(within(screen.getByRole("group", { name: /^Repo/ })).getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "false");
+      expect(within(screen.getByRole("radiogroup", { name: /^Repo/ })).getByRole("radio", { name: "core" })).toHaveAttribute("aria-checked", "false");
     });
 
     it("reopening_drops_the_picks_the_refetched_repos_lack", async () => {
@@ -350,7 +351,7 @@ describe("New task, as Lite's dialog", () => {
       await pick("core");
       await userEvent.click(screen.getByRole("button", { name: "Close" }));
       await reopen();
-      await within(screen.getByRole("group", { name: /^Repo/ })).findByRole("button", { name: "web" });
+      await within(screen.getByRole("radiogroup", { name: /^Repo/ })).findByRole("radio", { name: "web" });
       await userEvent.type(screen.getByLabelText("Goal"), "go");
       expect(startButton()).toHaveAttribute("title", "Pick a repo");
       await pick("portal");
@@ -365,7 +366,7 @@ describe("New task, as Lite's dialog", () => {
       await userEvent.click(screen.getByRole("button", { name: "Close" }));
       await reopen();
       expect(screen.getByLabelText("Goal")).toHaveValue("kept");
-      expect(within(screen.getByRole("group", { name: /^Repo/ })).getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "true");
+      expect(within(screen.getByRole("radiogroup", { name: /^Repo/ })).getByRole("radio", { name: "core" })).toHaveAttribute("aria-checked", "true");
     });
 
     it("spawn_success_after_closing_does_not_reopen", async () => {

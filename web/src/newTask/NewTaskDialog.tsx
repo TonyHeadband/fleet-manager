@@ -95,14 +95,14 @@ export function NewTaskDialog({ draft, onDraft, personas, product, repos, reposE
         onChange={(v) => onDraft({ ...draft, release: v === "" ? null : Number(v) })}
       />
 
-      <div className="new-task-repos" role="group" aria-labelledby={ids.repos}>
+      <div className="new-task-repos" role="radiogroup" aria-labelledby={ids.repos}>
         <span className="caption" id={ids.repos}>Repo</span>
         {repos.length === 0 ? (
           <p className="note">This product has no repos; add them in Products</p>
         ) : (
           <div className="chips">
             {repos.map((r) => (
-              <Chip key={r.name} selected={draft.chosen.includes(r.name)} onClick={() => onDraft(toggleRepo(draft, r.name))}>
+              <Chip key={r.name} radio selected={draft.chosen.includes(r.name)} onClick={() => onDraft(toggleRepo(draft, r.name))}>
                 {r.name}
               </Chip>
             ))}

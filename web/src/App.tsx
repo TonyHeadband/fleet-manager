@@ -38,6 +38,7 @@ import { Footer, useMessages } from "./shell/Footer";
 import { carryNotice, takeCarriedNotice, type Notice } from "./shell/messages";
 import { layoutOf, usePanel, useWidth } from "./shell/panel";
 import {
+  FLEET_TABS,
   navigate,
   settingsHref,
   tasksRouteFromHash,
@@ -820,7 +821,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
               case "specialists":
               case "skills":
               case "pr-styles":
-                return <Definitions kinds={DEF_TABS[tab]} defs={definitions} roleFixed={tab !== "specialists"} />;
+                return (
+                  <Definitions
+                    label={FLEET_TABS.find((t) => t.id === tab)!.label}
+                    kinds={DEF_TABS[tab]}
+                    defs={definitions}
+                    roleFixed={tab !== "specialists"}
+                  />
+                );
               default:
                 return <NotYet />;
             }
