@@ -426,4 +426,26 @@ describe("the Chat in the app", () => {
     const css = readFileSync("src/chat/chat.css", "utf8");
     expect(css).not.toMatch(/\d+(vw|vh|vmin|vmax)\b|position: fixed/);
   });
+  it("a_long_failed_call_line_wraps_inside_the_chat", () => {
+    const long = 'set title failed: this task already has a title: Definitions say "No active persona" instead of loading forever (#478)';
+    start();
+    page([call("Bash", "set_title", "failed", long, `${"x".repeat(300)}\n${long}`), reply("y".repeat(300))]);
+    const result = screen.getByText(long, { selector: ".chat-call-result" });
+    expect(result).toBeInTheDocument();
+    expect(document.querySelector(".chat-call-output")).toHaveTextContent("x".repeat(300));
+    const css = readFileSync("src/chat/chat.css", "utf8");
+    const rule = (sel: string) => css.match(new RegExp(`(?:^|\\n|\\})\\s*${sel.replace(/[.[\]="]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
+    // The result shrinks and wraps (not flex: none), and every box in a call row can shrink below its content.
+    expect(rule(".chat-call-result")).not.toMatch(/flex: none/);
+    expect(rule(".chat-call-result")).toMatch(/min-width: 0/);
+    expect(rule(".chat-call")).toMatch(/min-width: 0/);
+    expect(rule(".chat-calls")).toMatch(/min-width: 0/);
+    expect(rule(".chat-section")).toMatch(/min-width: 0/);
+    expect(rule(".chat-event-title")).toMatch(/min-width: 0/);
+    // Boxes of output and code scroll or wrap inside themselves.
+    expect(rule(".chat-call-output")).toMatch(/overflow: auto/);
+    expect(rule(".markdown pre")).toMatch(/overflow-x: auto/);
+    // The feed never scrolls on x.
+    expect(rule(".chat-feed")).toMatch(/overflow-x: hidden/);
+  });
 });
