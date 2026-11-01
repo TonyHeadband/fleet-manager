@@ -304,6 +304,12 @@ pub mod layout {
     /// The web only: a scrollbar's thickness, drawn so it stays visible, and its thumb's, beside the track's ticks.
     pub const SCROLLBAR: f32 = 16.0;
     pub const SCROLLBAR_THUMB: f32 = 6.0;
+    /// A chart's data line.
+    pub const CHART_LINE: f32 = 2.0;
+    /// Below this chart width the legend moves into the hidden table.
+    pub const CHART_COMPACT: f32 = 180.0;
+    /// Below this chart width the tick labels go too.
+    pub const CHART_TINY: f32 = 120.0;
 }
 
 /// The startup screens: the intro, and the card the failure and the first-run steps sit on.
@@ -341,6 +347,31 @@ pub fn avatar_oklch(dark: bool) -> (f32, f32, f32) {
         (0.74, 0.14, 0.58)
     } else {
         (0.56, 0.15, 0.70)
+    }
+}
+
+/// The chart categories' colours, in a fixed order that never follows rank: blue, pink, ochre, violet, green, teal.
+/// Each is its mode's own set, none a status tone or the accent, and each passes the dataviz palette check against
+/// that mode's `surface`.
+pub fn series(dark: bool) -> [Color32; 6] {
+    if dark {
+        [
+            rgb(0x3f86e0),
+            rgb(0xd9569a),
+            rgb(0xa98720),
+            rgb(0x9a6fe0),
+            rgb(0x4aa83a),
+            rgb(0x2aa3c4),
+        ]
+    } else {
+        [
+            rgb(0x3f7bcf),
+            rgb(0xc23a82),
+            rgb(0x9a7208),
+            rgb(0x8a52d6),
+            rgb(0x3f8f1f),
+            rgb(0x0e7fa0),
+        ]
     }
 }
 

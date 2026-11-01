@@ -87,6 +87,9 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
     writeln!(out, "  --avatar-l: {l};").unwrap();
     writeln!(out, "  --avatar-c: {c};").unwrap();
     writeln!(out, "  --avatar-l2: {l2};").unwrap();
+    for (i, c) in theme::series(dark).into_iter().enumerate() {
+        writeln!(out, "  --series-{i}: {};", hex(c)).unwrap();
+    }
     let (strong, soft) = theme::selection_alpha(dark);
     writeln!(out, "  --selection-alpha-strong: {strong};").unwrap();
     writeln!(out, "  --selection-alpha-soft: {soft};").unwrap();
@@ -130,7 +133,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 43] = [
+const LAYOUT: [(&str, &str, f32); 46] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -162,6 +165,9 @@ const LAYOUT: [(&str, &str, f32); 43] = [
     ("card-gap", "cardGap", layout::CARD_GAP),
     ("scrollbar", "scrollbar", layout::SCROLLBAR),
     ("scrollbar-thumb", "scrollbarThumb", layout::SCROLLBAR_THUMB),
+    ("chart-line", "chartLine", layout::CHART_LINE),
+    ("chart-compact", "chartCompact", layout::CHART_COMPACT),
+    ("chart-tiny", "chartTiny", layout::CHART_TINY),
     ("canvas-pad", "canvasPad", canvas::PAD),
     ("canvas-gap", "canvasGap", canvas::GAP),
     ("grid", "grid", canvas::GRID),
@@ -650,4 +656,87 @@ fn the_new_task_sizes_are_exported() {
     let ts = layout_ts();
     assert!(ts.contains("export const newTask = { width: 440"), "{ts}");
     assert!(ts.contains("promptRows: 4"), "{ts}");
+}
+
+#[test]
+fn the_series_palette_is_exported_for_both_themes() {
+    let css = css();
+    for dark in [true, false] {
+        for (i, c) in theme::series(dark).into_iter().enumerate() {
+            let want = format!("--series-{i}: {};", hex(c));
+            assert!(css.contains(&want), "{want} in {css}");
+        }
+    }
+    // Dark is written twice (the system preference and the explicit attribute), light once.
+    assert_eq!(css.matches("--series-").count(), 18, "{css}");
+}
+
+#[test]
+fn the_series_palette_avoids_the_status_tones_and_the_accent() {
+    for dark in [true, false] {
+        let p = theme::palette(dark);
+        let t = &p.tones;
+        let taken = [
+            t.neutral,
+            t.active,
+            t.attention,
+            t.done,
+            t.muted,
+            t.caution,
+            t.danger,
+            p.tokens.fill,
+        ];
+        let series = theme::series(dark);
+        for (i, c) in series.iter().enumerate() {
+            assert!(
+                !taken.contains(c),
+                "series {i} ({}) is a tone, dark={dark}",
+                hex(*c)
+            );
+            assert_eq!(
+                series.iter().filter(|o| *o == c).count(),
+                1,
+                "series {i} repeats, dark={dark}"
+            );
+        }
+    }
+}
+
+/// The hue of an sRGB colour in OKLCh, in degrees.
+fn oklch_hue(c: Color32) -> f32 {
+    let lin = |v: u8| {
+        let v = v as f32 / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (lin(c.r()), lin(c.g()), lin(c.b()));
+    let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
+    let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
+    let s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).cbrt();
+    let a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    let bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    bb.atan2(a).to_degrees().rem_euclid(360.0)
+}
+
+#[test]
+fn series_0_is_a_blue() {
+    for dark in [true, false] {
+        let h = oklch_hue(theme::series(dark)[0]);
+        assert!((200.0..=260.0).contains(&h), "hue {h}, dark={dark}");
+    }
+}
+
+#[test]
+fn the_chart_sizes_are_exported() {
+    let css = css();
+    assert!(css.contains("--layout-chart-line: 2px;"), "{css}");
+    assert!(css.contains("--layout-chart-compact: 180px;"), "{css}");
+    assert!(css.contains("--layout-chart-tiny: 120px;"), "{css}");
+    let ts = layout_ts();
+    for want in ["chartLine: 2", "chartCompact: 180", "chartTiny: 120"] {
+        assert!(ts.contains(want), "{want} in {ts}");
+    }
 }

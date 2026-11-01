@@ -48,6 +48,9 @@
   --layout-card-gap: 10px;
   --layout-scrollbar: 16px;
   --layout-scrollbar-thumb: 6px;
+  --layout-chart-line: 2px;
+  --layout-chart-compact: 180px;
+  --layout-chart-tiny: 120px;
   --layout-canvas-pad: 10px;
   --layout-canvas-gap: 8px;
   --layout-grid: 20px;
@@ -258,6 +261,12 @@
   --avatar-l: 0.56;
   --avatar-c: 0.15;
   --avatar-l2: 0.7;
+  --series-0: #3f7bcf;
+  --series-1: #c23a82;
+  --series-2: #9a7208;
+  --series-3: #8a52d6;
+  --series-4: #3f8f1f;
+  --series-5: #0e7fa0;
   --selection-alpha-strong: 0.18;
   --selection-alpha-soft: 0.05;
   --chip-alpha: 0.090;
@@ -311,6 +320,12 @@
     --avatar-l: 0.74;
     --avatar-c: 0.14;
     --avatar-l2: 0.58;
+    --series-0: #3f86e0;
+    --series-1: #d9569a;
+    --series-2: #a98720;
+    --series-3: #9a6fe0;
+    --series-4: #4aa83a;
+    --series-5: #2aa3c4;
     --selection-alpha-strong: 0.26;
     --selection-alpha-soft: 0.08;
     --chip-alpha: 0.122;
@@ -364,6 +379,12 @@
   --avatar-l: 0.74;
   --avatar-c: 0.14;
   --avatar-l2: 0.58;
+  --series-0: #3f86e0;
+  --series-1: #d9569a;
+  --series-2: #a98720;
+  --series-3: #9a6fe0;
+  --series-4: #4aa83a;
+  --series-5: #2aa3c4;
   --selection-alpha-strong: 0.26;
   --selection-alpha-soft: 0.08;
   --chip-alpha: 0.122;
