@@ -86,12 +86,14 @@ export function AskMessage({ agentId, ask, client, onAnswered }: Props) {
 
 /**
  * Claude's questions, each with its options. A lone single-choice question answers on a press; otherwise the options
- * toggle and Send answers them all. One free-text answer stands for the one question no option answers.
+ * toggle and Send answers them all. One free-text answer stands for the one question no option answers; it is sent
+ * only by its own submit (Send or Enter), never by an option's press.
  */
 function Questions({ questions, sending, onSend }: { questions: AskQuestion[]; sending: boolean; onSend: (a: AskAnswer, label: string) => void }) {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [text, setText] = useState("");
   const direct = questions.length === 1 && !questions[0]!.multi_select;
+  const ready = !sending && (picked.size > 0 || text.trim() !== "");
 
   const label = (ids: ReadonlySet<string>, free: string) => {
     const parts = questions.map((q) =>
@@ -104,12 +106,9 @@ function Questions({ questions, sending, onSend }: { questions: AskQuestion[]; s
     if (blank >= 0 && free) parts[blank] = free;
     return parts.filter((p) => p !== "").join("; ");
   };
-  const submit = (ids: ReadonlySet<string>) => {
-    const free = text.trim();
-    onSend({ choice: [...ids].join(","), text: free || null }, label(ids, free));
-  };
+  const submit = (ids: ReadonlySet<string>, free: string) => onSend({ choice: [...ids].join(","), text: free || null }, label(ids, free));
   const press = (q: number, id: string) => {
-    if (direct) return submit(new Set([id]));
+    if (direct) return submit(new Set([id]), "");
     const next = new Set(picked);
     if (next.has(id)) next.delete(id);
     else {
@@ -136,12 +135,18 @@ function Questions({ questions, sending, onSend }: { questions: AskQuestion[]; s
           </div>
         </div>
       ))}
-      <div className="chat-ask-free">
+      <form
+        className="chat-ask-free"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) submit(picked, text.trim());
+        }}
+      >
         <input type="text" aria-label="Another answer" placeholder="Another answer…" value={text} onChange={(e) => setText(e.target.value)} disabled={sending} />
-        <Button variant="primary" disabled={sending || (picked.size === 0 && text.trim() === "")} onClick={() => submit(picked)}>
+        <Button type="submit" variant="primary" disabled={!ready}>
           Send
         </Button>
-      </div>
+      </form>
     </>
   );
 }

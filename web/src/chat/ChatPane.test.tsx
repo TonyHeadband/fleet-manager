@@ -228,6 +228,41 @@ describe("ChatPane", () => {
     expect(ask).toHaveTextContent("Answered · SQLite");
   });
 
+  it("an_option_press_never_sends_the_typed_answer", async () => {
+    const client = start();
+    page([]);
+    const question = (id: string): ChatAsk => ({
+      id,
+      kind: {
+        type: "question",
+        questions: [
+          {
+            header: "",
+            question: "Which database?",
+            options: [
+              { id: "0.0", label: "Postgres", description: null },
+              { id: "0.1", label: "SQLite", description: null },
+            ],
+            multi_select: false,
+          },
+        ],
+      },
+      answered: null,
+    });
+    asks(question("q1"));
+    let ask = screen.getByRole("group", { name: "Asks" });
+    await userEvent.type(within(ask).getByRole("textbox", { name: "Another answer" }), "a flat file");
+    await userEvent.click(within(ask).getByRole("button", { name: "SQLite" }));
+    expect(client.answerAsk).toHaveBeenLastCalledWith("a1", "q1", { choice: "0.1", text: null });
+    expect(ask).toHaveTextContent("Answered · SQLite");
+    // The typed answer goes only by its own submit: Enter in its field.
+    asks(question("q2"));
+    ask = screen.getAllByRole("group", { name: "Asks" }).at(-1)!;
+    await userEvent.type(within(ask).getByRole("textbox", { name: "Another answer" }), "a flat file{Enter}");
+    expect(client.answerAsk).toHaveBeenLastCalledWith("a1", "q2", { choice: "", text: "a flat file" });
+    expect(ask).toHaveTextContent("Answered · a flat file");
+  });
+
   it("a_screen_ask_shows_the_screen", () => {
     start();
     page([]);
