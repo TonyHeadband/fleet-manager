@@ -315,6 +315,8 @@ describe("ChatPane", () => {
     const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/\.chat-ask-options\[data-row\] \{[^}]*flex-wrap: nowrap;/);
     expect(css).toMatch(/\.chat-ask-options\[data-row\] button \{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis;/);
+    // The default control padding leaves the three labels a few px short in the 420px panel.
+    expect(css).toMatch(/\.chat-ask-options\[data-row\] button \{[^}]*padding-inline: var\(--layout-badge-x\);/);
   });
 
   it("chat_css_uses_tokens_only", () => {

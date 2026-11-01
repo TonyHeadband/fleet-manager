@@ -63,9 +63,10 @@
 .chat-ask-screen { white-space: pre; padding: var(--layout-list-row-y) var(--layout-list-row-x); border: 1px solid var(--border); background: var(--sunken); }
 .chat-ask-options { display: flex; flex-wrap: wrap; gap: var(--space-button-gap); }
 .chat-ask-options[data-stack] { flex-direction: column; align-items: stretch; }
-/* A permission's options stay one row; a label too long for the pane is cut, never wrapped. */
+/* A permission's options stay one row: the badge padding fits all three labels in the detail panel, and a label
+   still too long is cut, never wrapped. */
 .chat-ask-options[data-row] { flex-wrap: nowrap; }
-.chat-ask-options[data-row] button { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-ask-options[data-row] button { min-width: 0; padding-inline: var(--layout-badge-x); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-ask-options[data-stack] button { display: flex; flex-direction: column; align-items: flex-start; gap: var(--panel-gap-xs); text-align: left; }
 .chat-option-description { font-family: var(--font-sans); font-size: var(--size-small); letter-spacing: normal; text-transform: none; color: var(--text-low); }
 .chat-question { display: flex; flex-direction: column; gap: var(--panel-gap-s); }
