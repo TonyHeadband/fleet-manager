@@ -34,6 +34,17 @@ pub struct Room {
     pub archived_at: Option<i64>,
     /// Posts the owner has not read.
     pub unread: u32,
+    /// The agents in the room now, whom the owner can address: never the owner or the daemon.
+    #[serde(default)]
+    pub members: Vec<RoomMember>,
+}
+
+/// An agent in a room, named as its posts are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct RoomMember {
+    pub id: AgentId,
+    pub name: String,
 }
 
 /// Who is in a room or sent a post.

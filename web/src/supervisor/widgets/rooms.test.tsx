@@ -10,11 +10,17 @@ import { ROOMS } from "./Rooms";
 
 beforeEach(() => FakeEventSource.reset());
 
-const room = (id: string, title: string, over: Partial<Room> = {}): Room => ({ id, kind: "operation", title, conversation: "s1", persona: "me", unread: 0, ...over });
+const room = (id: string, title: string, over: Partial<Room> = {}): Room => ({ id, kind: "operation", title, conversation: "s1", persona: "me", unread: 0, members: [], ...over });
 let next = 1;
 const post = (over: Partial<Post>): Post => ({ id: next++, room: "r1", sender: "daemon", sender_name: "Fleet Manager", kind: "message", text: "", at: 1, ...over });
 
-const ROOM_LIST = [room("r1", "Login fix", { unread: 3 }), room("r2", "Core", { kind: "product", conversation: null, unread: 2 })];
+// Write docs is in the room but has not posted.
+const MEMBERS = [
+  { id: "t1", name: "Fix login" },
+  { id: "s1", name: "supervisor" },
+  { id: "t2", name: "Write docs" },
+];
+const ROOM_LIST = [room("r1", "Login fix", { unread: 3, members: MEMBERS }), room("r2", "Core", { kind: "product", conversation: null, unread: 2 })];
 const FROM_TASK = post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "on it" });
 const FROM_SUPERVISOR = post({ sender: { agent: "s1" }, sender_name: "supervisor", text: "go ahead" });
 const FROM_OWNER = post({ sender: "owner", sender_name: "owner", text: "thanks" });
@@ -38,17 +44,23 @@ const show = (client = clientWith()) => {
 const roomButton = (name: RegExp) => screen.findByRole("button", { name });
 const log = () => screen.findByRole("log", { name: "Room posts" });
 const menu = () => document.querySelector<HTMLElement>(".menu")!;
+const streams = () => FakeEventSource.instances.filter((i) => i.url.endsWith("/api/events") && !i.closed);
+const emit = (...posts: Post[]) => act(() => posts.forEach((p, i) => streams().forEach((s) => s.emit("event", { seq: 100 + i, kind: { type: "room_post", post: p } }, String(100 + i)))));
+/** The trailing read after live posts waits this long; the tests wait past it. */
+const SETTLE = 700;
+const settle = () => act(() => new Promise((r) => setTimeout(r, SETTLE)));
 
 describe("Rooms widget", () => {
   it("the_list_shows_rooms_with_unread_counts", async () => {
     show();
     const second = await roomButton(/Core/);
     expect(second).toHaveTextContent("Product");
-    expect(within(second).getByLabelText("2 unread")).toHaveTextContent("02");
+    expect(second).toHaveTextContent("02");
+    expect(within(second).getByText("2 unread")).toHaveClass("visually-hidden");
     // The first room opens, and once read it has no count.
     const first = await roomButton(/Login fix/);
     expect(first).toHaveTextContent("Operation");
-    await waitFor(() => expect(within(first).queryByLabelText(/unread/)).toBeNull());
+    await waitFor(() => expect(within(first).queryByText(/unread/)).toBeNull());
     expect(ROOMS).toMatchObject({ id: "rooms", source: "rooms", minW: 4, minH: 3 });
   });
 
@@ -57,17 +69,46 @@ describe("Rooms widget", () => {
     const first = await roomButton(/Login fix/);
     await waitFor(() => expect(first).toHaveAttribute("aria-current", "true"));
     expect(await within(await log()).findByText("on it")).toBeInTheDocument();
+    const before = streams();
     await userEvent.click(await roomButton(/Core/));
     expect(client.roomPosts).toHaveBeenCalledWith("r2");
+    // The previous room's stream is closed: one stream stays open, the new room's.
+    expect(before.every((s) => s.closed)).toBe(true);
+    expect(streams()).toHaveLength(1);
     expect(await roomButton(/Core/)).toHaveAttribute("aria-current", "true");
     expect(first).not.toHaveAttribute("aria-current");
     await waitFor(() => expect(within(screen.getByRole("log", { name: "Room posts" })).queryByText("on it")).toBeNull());
     // A new post in the open room arrives on the stream and is merged by id, once.
     const arrived = post({ room: "r2", sender: { agent: "t1" }, sender_name: "Fix login", text: "core is green" });
-    const stream = FakeEventSource.instances.filter((i) => i.url.endsWith("/api/events") && !i.closed);
-    act(() => stream.forEach((s) => s.emit("event", { seq: 9, kind: { type: "room_post", post: arrived } }, "9")));
-    act(() => stream.forEach((s) => s.emit("event", { seq: 10, kind: { type: "room_post", post: arrived } }, "10")));
+    emit(arrived);
+    emit(arrived);
     expect(within(await log()).getAllByText("core is green")).toHaveLength(1);
+  });
+
+  it("live_posts_in_the_open_room_are_marked_read_once_per_burst", async () => {
+    const client = show();
+    await within(await log()).findByText("on it");
+    const reads = () => vi.mocked(client.roomPosts).mock.calls.filter(([id]) => id === "r1").length;
+    expect(reads()).toBe(1);
+    emit(post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "one" }));
+    await waitFor(() => expect(reads()).toBe(2), { timeout: 2000 });
+    emit(...["a", "b", "c"].map((text) => post({ sender: { agent: "t1" }, sender_name: "Fix login", text })));
+    await settle();
+    expect(reads()).toBe(3);
+    // Another room's post reads nothing here.
+    emit(post({ room: "r2", sender: { agent: "t1" }, sender_name: "Fix login", text: "elsewhere" }));
+    await settle();
+    expect(reads()).toBe(3);
+  });
+
+  it("a_pending_read_is_flushed_when_the_room_closes", async () => {
+    const client = show();
+    await within(await log()).findByText("on it");
+    emit(post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "last words" }));
+    await userEvent.click(await roomButton(/Core/));
+    expect(vi.mocked(client.roomPosts).mock.calls.map(([id]) => id)).toEqual(["r1", "r1", "r2"]);
+    await settle();
+    expect(client.roomPosts).toHaveBeenCalledTimes(3);
   });
 
   it("senders_show_name_and_agent_avatar", async () => {
@@ -89,12 +130,34 @@ describe("Rooms widget", () => {
     expect(daemon.querySelector(".avatar")).toBeNull();
   });
 
+  it("a_supervisor_is_known_by_its_kind_in_a_product_room", async () => {
+    const ask = post({ room: "r2", sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: { agent: "s1" }, text: "Merge order?" });
+    const said = post({ room: "r2", sender: { agent: "s1" }, sender_name: "supervisor", text: "core first" });
+    const client = clientWith({ r1: [], r2: [ask, said] });
+    show(client);
+    await userEvent.click(await roomButton(/Core/));
+    const feed = await log();
+    const reply = (await within(feed).findByText("core first")).closest(".chat-reply")!;
+    expect(reply.querySelector(".avatar")).toHaveAttribute("data-seed", "supervisor:me");
+    // An ask to the supervisor is the owner's to answer too, in a product room as well.
+    const group = within(feed).getByText("Merge order?").closest<HTMLElement>(".chat-ask")!;
+    expect(within(group).getByRole("textbox", { name: "Answer" })).toBeInTheDocument();
+  });
+
+  it("the_owners_announcement_reads_as_an_announcement", async () => {
+    show(clientWith({ r1: [post({ sender: "owner", sender_name: "owner", kind: "announcement", text: "freeze main" })] }));
+    const line = await within(await log()).findByText(/freeze main/);
+    expect(line).toHaveClass("chat-line");
+    expect(line).toHaveTextContent("owner · freeze main");
+    expect(line.closest(".chat-prompt")).toBeNull();
+  });
+
   it("the_owner_posts_with_to_and_kind", async () => {
     const client = show();
     await within(await log()).findByText("on it");
     await userEvent.click(screen.getByRole("button", { name: "Recipient" }));
-    // The room's agents only: never the owner, never the daemon, and All first.
-    expect(within(menu()).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Fix login", "supervisor"]);
+    // The room's members, whether or not they have posted (never the owner or the daemon), and All first.
+    expect(within(menu()).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Fix login", "supervisor", "Write docs"]);
     await userEvent.click(within(menu()).getByRole("button", { name: "Fix login" }));
     await userEvent.click(screen.getByRole("button", { name: "Post kind" }));
     expect(within(menu()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Message", "Announcement"]);
@@ -102,7 +165,8 @@ describe("Rooms widget", () => {
     await userEvent.type(screen.getByPlaceholderText("Post…"), "freeze main");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(client.postToRoom).toHaveBeenCalledWith("r1", { kind: "announcement", to: { agent: "t1" }, text: "freeze main" });
-    expect(await within(await log()).findByText("freeze main")).toBeInTheDocument();
+    // An announcement, the owner's too, reads as a system line.
+    expect(await within(await log()).findByText("owner · freeze main")).toHaveClass("chat-line");
     expect(screen.getByPlaceholderText("Post…")).toHaveValue("");
   });
 

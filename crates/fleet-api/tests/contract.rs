@@ -199,6 +199,7 @@ fn the_openapi_document_lists_the_rooms_routes() {
     for s in [
         "Room",
         "RoomKind",
+        "RoomMember",
         "MemberRef",
         "Post",
         "PostKind",
@@ -928,6 +929,7 @@ fn ts_bindings_export() {
     PrRules::export_all(&cfg).unwrap();
     fleet_api::Conversation::export_all(&cfg).unwrap();
     fleet_api::Room::export_all(&cfg).unwrap();
+    fleet_api::RoomMember::export_all(&cfg).unwrap();
     fleet_api::MemberRef::export_all(&cfg).unwrap();
     fleet_api::Post::export_all(&cfg).unwrap();
     fleet_api::NewPost::export_all(&cfg).unwrap();
@@ -963,6 +965,7 @@ fn ts_bindings_export() {
         "TaskEventKind.ts",
         "Room.ts",
         "RoomKind.ts",
+        "RoomMember.ts",
         "MemberRef.ts",
         "Post.ts",
         "PostKind.ts",

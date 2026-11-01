@@ -46,8 +46,9 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
             {r.unread > 0 && (
               <>
                 <span className="rooms-mark" aria-hidden="true" />
-                <span className="rooms-unread" aria-label={`${r.unread} unread`}>
-                  {pad2(r.unread)}
+                <span className="rooms-unread">
+                  <span aria-hidden="true">{pad2(r.unread)}</span>
+                  <span className="visually-hidden">{r.unread} unread</span>
                 </span>
               </>
             )}

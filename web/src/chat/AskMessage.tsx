@@ -5,7 +5,7 @@ import type { AskQuestion } from "../api/generated/AskQuestion";
 import type { ChatAsk } from "../api/generated/ChatAsk";
 import { screenText } from "../ui/screenText";
 import { Button } from "../ui/Button";
-import { ErrorLine } from "../ui/ErrorLine";
+import { AskFrame } from "./AskFrame";
 import type { ChatClient } from "./ChatPane";
 
 interface Props {
@@ -49,11 +49,9 @@ export function AskMessage({ agentId, ask, client, onAnswered }: Props) {
     }
   };
 
-  let body;
-  if (ask.answered !== null) {
-    body = <p className="chat-ask-answered">{ask.answered ? `Answered · ${ask.answered}` : "Answered"}</p>;
-  } else if (kind.type === "permission") {
-    body = (
+  let controls;
+  if (kind.type === "permission") {
+    controls = (
       <div className="chat-ask-options" data-row>
         {kind.options.map((o, i) => (
           <Button key={o.id} variant={i === 0 ? "primary" : "default"} disabled={sending} onClick={() => send({ choice: o.id, text: null }, o.label)}>
@@ -63,14 +61,13 @@ export function AskMessage({ agentId, ask, client, onAnswered }: Props) {
       </div>
     );
   } else if (kind.type === "question") {
-    body = <Questions questions={kind.questions} sending={sending} onSend={send} />;
+    controls = <Questions questions={kind.questions} sending={sending} onSend={send} />;
   } else {
-    body = <p className="chat-ask-note">Answer it in the reply box.</p>;
+    controls = <p className="chat-ask-note">Answer it in the reply box.</p>;
   }
 
   return (
-    <div role="group" aria-label={CAPTION[kind.type]} className="chat-ask">
-      <p className="chat-ask-caption">{CAPTION[kind.type]}</p>
+    <AskFrame caption={CAPTION[kind.type]} answered={ask.answered} error={error}>
       {kind.type === "permission" && (
         <div className="chat-ask-call">
           <span className="chat-call-tool">{kind.tool}</span>
@@ -78,9 +75,8 @@ export function AskMessage({ agentId, ask, client, onAnswered }: Props) {
         </div>
       )}
       {kind.type === "screen" && <pre className="chat-ask-screen">{screenText(kind.text)}</pre>}
-      {body}
-      {error && <ErrorLine text={error} />}
-    </div>
+      {ask.answered === null && controls}
+    </AskFrame>
   );
 }
 

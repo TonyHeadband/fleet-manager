@@ -1850,6 +1850,80 @@ async fn rooms_list_counts_the_owners_unread() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rooms_list_their_present_agent_members_by_name() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let gone = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    fx.store.remove_member(&room, &gone.0, 7).await.unwrap();
+    // The owner gains a member row by reading; it is still no recipient.
+    let (status, v) = post_as_owner(
+        &srv,
+        &room,
+        json!({ "kind": "announcement", "text": "hello" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    read_posts(&srv, &room, "").await;
+    assert!(fx
+        .store
+        .room_members(&room)
+        .await
+        .unwrap()
+        .iter()
+        .any(|m| m.member == "owner"));
+
+    let listed = listed(&srv, PERSONA).await;
+    let r = listed.iter().find(|r| r.id == room).unwrap();
+    let got: Vec<(String, String)> = r
+        .members
+        .iter()
+        .map(|m| (m.id.0.clone(), m.name.clone()))
+        .collect();
+    // Nobody has posted: the members come from the room, named as their posts would be.
+    assert_eq!(
+        got,
+        vec![
+            (sup.0.clone(), "supervisor".to_string()),
+            (a.0.clone(), task_name(&fx, &a).await)
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_owners_post_with_no_recipient_is_to_everyone() {
+    let fx = fixture().await;
+    let srv = serve(&fx).await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let (status, v) = post_as_owner(
+        &srv,
+        &op_room(&sup),
+        json!({ "kind": "message", "to": null, "text": "everyone" }),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let p: Post = serde_json::from_value(v).unwrap();
+    assert_eq!(p.to, None);
+    // A message to everyone wakes every agent in the room: the orchestrator gets it in its inbox.
+    assert!(
+        wait_until(|| async {
+            fx.store
+                .task(&a)
+                .await
+                .unwrap()
+                .unwrap()
+                .inbox
+                .iter()
+                .any(|e| e.kind == fleet_api::FleetEventKind::RoomPost)
+        })
+        .await
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reading_a_room_clears_the_owners_unread() {
     let fx = fixture().await;
     let srv = serve(&fx).await;

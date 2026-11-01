@@ -58,7 +58,7 @@ pub use requests::{
     RefuseRepoRequest, RepoInfo, RepoList, RepoPick, SetToken, SpawnRequest, SpawnResponse,
     WorkflowState, WorkspaceDiff,
 };
-pub use rooms::{AskReply, MemberRef, NewPost, Post, PostKind, Room, RoomKind};
+pub use rooms::{AskReply, MemberRef, NewPost, Post, PostKind, Room, RoomKind, RoomMember};
 pub use status::{BlockedReason, Status, StopCause};
 pub use supervisor::{
     Conversation, ConversationMessage, NewConversation, TaskEvent, TaskEventKind, TaskMark,
@@ -282,6 +282,7 @@ use utoipa::OpenApi;
         ConversationMessage,
         Room,
         RoomKind,
+        RoomMember,
         MemberRef,
         Post,
         PostKind,

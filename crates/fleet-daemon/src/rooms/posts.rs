@@ -177,15 +177,7 @@ impl AgentService {
         room: &RoomRow,
         m: &MemberRef,
     ) -> Result<String, ServiceError> {
-        Ok(match m {
-            MemberRef::Owner => "owner".into(),
-            MemberRef::Daemon => "Fleet Manager".into(),
-            MemberRef::Agent(a) if room.conversation.as_ref() == Some(a) => "supervisor".into(),
-            MemberRef::Agent(a) => match self.store.task(a).await? {
-                Some(t) => t.title.filter(|t| !t.is_empty()).unwrap_or(t.name),
-                None => a.0.clone(),
-            },
-        })
+        Ok(super::member_name(&self.store, room, m).await?)
     }
 
     /// Names, stores, broadcasts and logs the post; returns it with its id.

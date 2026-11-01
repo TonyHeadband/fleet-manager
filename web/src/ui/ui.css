@@ -326,3 +326,15 @@
 .toast-mark[data-tone="danger"] { background: var(--danger); }
 .toast-title { font-size: var(--size-title); }
 .toast-text { grid-column: 2; color: var(--text-low); font-size: var(--size-small); overflow-wrap: anywhere; }
+/* Read by assistive tech, never drawn: the words a padded readout stands for. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

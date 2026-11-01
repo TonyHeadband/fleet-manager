@@ -6,6 +6,7 @@ import type { AskReply } from "../../api/generated/AskReply";
 import type { ChatBody } from "../../api/generated/ChatBody";
 import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
+import { AskFrame } from "../../chat/AskFrame";
 import { Entry, type Speaker } from "../../chat/ChatPane";
 import { ReplyBox } from "../../components/ReplyBox";
 import { Avatar } from "../../ui/Avatar";
@@ -38,6 +39,8 @@ const KINDS: { id: OwnerKind; name: string }[] = [
 const ALL = "all";
 /** Within this many pixels of the end, the reader is at the latest: new posts keep them there. */
 const AT_END = 2;
+/** Live posts in the open room are marked read this long after the last of a burst, in one read. */
+const READ_AFTER_MS = 400;
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const byId = (prev: Post[], next: Post[]) => {
@@ -74,17 +77,49 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
   const heard = useRef({ onPost, onRead });
   heard.current = { onPost, onRead };
 
-  const read = () =>
-    client.roomPosts(room.id).then(
-      (ps) => {
-        setPosts((prev) => byId(prev, ps));
-        setLoaded(true);
-        heard.current.onRead?.();
-      },
-      (e) => setError(message(e)),
-    );
+  // A read moves the owner's mark on the server; at most one is in flight, and one asked meanwhile follows it.
+  const reading = useRef(false);
+  const readAgain = useRef(false);
+  const pendingRead = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const read = () => {
+    if (reading.current) {
+      readAgain.current = true;
+      return;
+    }
+    reading.current = true;
+    client
+      .roomPosts(room.id)
+      .then(
+        (ps) => {
+          setPosts((prev) => byId(prev, ps));
+          setLoaded(true);
+          heard.current.onRead?.();
+        },
+        (e) => setError(message(e)),
+      )
+      .finally(() => {
+        reading.current = false;
+        if (readAgain.current) {
+          readAgain.current = false;
+          read();
+        }
+      });
+  };
+  const readSoon = () => {
+    clearTimeout(pendingRead.current);
+    pendingRead.current = setTimeout(() => {
+      pendingRead.current = undefined;
+      read();
+    }, READ_AFTER_MS);
+  };
   useEffect(() => {
     read();
+    // Leaving the room with a read still waiting makes it now, so what was shown is not left unread.
+    return () => {
+      if (pendingRead.current === undefined) return;
+      clearTimeout(pendingRead.current);
+      read();
+    };
     // Once per room: the component is keyed by it.
   }, []);
 
@@ -93,7 +128,10 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
       subscribeRoomPosts(
         baseUrl,
         (p) => {
-          if (p.room === room.id) setPosts((prev) => byId(prev, [p]));
+          if (p.room === room.id) {
+            setPosts((prev) => byId(prev, [p]));
+            readSoon();
+          }
           heard.current.onPost?.(p);
         },
         factory,
@@ -106,12 +144,13 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [posts, mine]);
 
+  // An orchestrator posts as its task: its agent is the task's own id, or names the task.
+  const agentFor = (id: string | null) => (id === null ? undefined : (agents.find((a) => a.id === id) ?? agents.find((a) => a.kind === "orchestrator" && a.task === id)));
   const speakerOf = (p: Post): Speaker => {
     if (p.sender === "owner") return { name: p.sender_name, avatar: <Avatar seed={persona} title={persona} /> };
-    const id = agentOf(p.sender);
-    if (id !== null && id === room.conversation) return { name: p.sender_name, avatar: <Avatar kind="specialist" seed={`supervisor:${persona}`} title="supervisor" /> };
-    // An orchestrator posts as its task: its agent is the task's own id, or names the task.
-    const role = (agents.find((a) => a.id === id) ?? agents.find((a) => a.kind === "orchestrator" && a.task === id))?.role;
+    const sender = agentFor(agentOf(p.sender));
+    if (sender?.kind === "supervisor") return { name: p.sender_name, avatar: <Avatar kind="specialist" seed={`supervisor:${persona}`} title="supervisor" /> };
+    const role = sender?.role;
     return { name: p.sender_name, avatar: role ? <Avatar kind="specialist" seed={role} title={role} /> : <Avatar /> };
   };
   const item = (p: Post, body: ChatBody) => <Entry key={p.id} item={{ seq: p.id, at: p.at, body }} speaker={body.type === "reply" || p.sender === "owner" ? speakerOf(p) : undefined} />;
@@ -122,10 +161,10 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
     // An answer is drawn under its ask; one whose ask is not loaded stands on its own.
     if (p.kind === "answer" && p.reply_to != null && asked.has(p.reply_to)) return [];
     if (p.sender === "daemon") return [item(p, { type: "prompt", text: p.text, from: "system" })];
-    if (p.sender === "owner") return [item(p, { type: "prompt", text: p.text, from: "owner" })];
     if (p.kind === "announcement") return [item(p, { type: "prompt", text: `${p.sender_name} · ${p.text}`, from: "system" })];
+    if (p.sender === "owner") return [item(p, { type: "prompt", text: p.text, from: "owner" })];
     if (p.kind === "ask") {
-      const forOwner = p.to === "owner" || (agentOf(p.to) !== null && agentOf(p.to) === room.conversation);
+      const forOwner = p.to === "owner" || agentFor(agentOf(p.to))?.kind === "supervisor";
       return [
         <RoomAsk
           key={p.id}
@@ -142,14 +181,8 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
     return [item(p, { type: "reply", text: p.text })];
   });
 
-  // Who can be addressed: the agents who have posted here. The owner is not a recipient, and nobody addresses the
-  // daemon.
-  const members = new Map<string, string>();
-  for (const p of posts) {
-    const id = agentOf(p.sender);
-    if (id !== null && !members.has(id)) members.set(id, p.sender_name);
-  }
-  const recipients = [{ id: ALL, name: "All" }, ...[...members].map(([id, name]) => ({ id, name }))];
+  // The room's agents, as the daemon lists them: never the owner or the daemon.
+  const recipients = [{ id: ALL, name: "All" }, ...room.members];
 
   const send = (body: string) => {
     setBusy(true);
@@ -240,43 +273,36 @@ function RoomAsk({ ask, speaker, answer, answerable, client, onAnswered, onStale
     if (ready) reply({ text: text.trim() }, text.trim());
   };
 
-  let foot: ReactNode = null;
-  if (answer !== null) foot = <p className="chat-ask-answered">{`Answered · ${answer}`}</p>;
-  else if (ask.answered_at != null) foot = <p className="chat-ask-answered">Answered</p>;
-  else if (answerable)
-    foot = (
-      <form className="chat-ask-free" onSubmit={submit}>
-        <input
-          type="text"
-          aria-label={breakdown === null ? "Answer" : "Changes"}
-          placeholder={breakdown === null ? "Answer…" : "Changes…"}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          disabled={sending}
-        />
-        {breakdown === null ? (
-          <Button type="submit" variant="primary" disabled={!ready}>
-            Send
-          </Button>
-        ) : (
-          <>
-            <Button variant="primary" disabled={sending} onClick={() => reply({ approve: true }, "Approved")}>
-              Approve
-            </Button>
-            <Button type="submit" disabled={!ready}>
-              Request changes
-            </Button>
-          </>
-        )}
-      </form>
-    );
-
+  const open = answer === null && ask.answered_at == null;
   return (
-    <div role="group" aria-label="Asks" className="chat-ask">
-      <p className="chat-ask-caption">{breakdown === null ? "Asks" : `Asks · breakdown v${breakdown}`}</p>
+    <AskFrame caption={breakdown === null ? "Asks" : `Asks · breakdown v${breakdown}`} answered={answer ?? (open ? null : "")} error={error}>
       <Entry item={{ seq: ask.id, at: ask.at, body: { type: "reply", text: ask.text } }} speaker={speaker} />
-      {foot}
-      {error && <ErrorLine text={error} />}
-    </div>
+      {open && answerable && (
+        <form className="chat-ask-free" onSubmit={submit}>
+          <input
+            type="text"
+            aria-label={breakdown === null ? "Answer" : "Changes"}
+            placeholder={breakdown === null ? "Answer…" : "Changes…"}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={sending}
+          />
+          {breakdown === null ? (
+            <Button type="submit" variant="primary" disabled={!ready}>
+              Send
+            </Button>
+          ) : (
+            <>
+              <Button variant="primary" disabled={sending} onClick={() => reply({ approve: true }, "Approved")}>
+                Approve
+              </Button>
+              <Button type="submit" disabled={!ready}>
+                Request changes
+              </Button>
+            </>
+          )}
+        </form>
+      )}
+    </AskFrame>
   );
 }

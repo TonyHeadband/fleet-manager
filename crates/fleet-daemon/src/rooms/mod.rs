@@ -15,7 +15,9 @@ pub mod posts;
 mod watch;
 
 use crate::store::{RoomRow, Store, StoreError};
-use fleet_api::{Agent, AgentId, AgentKind, MemberRef, PrState, Room, RoomKind, Task, TaskState};
+use fleet_api::{
+    Agent, AgentId, AgentKind, MemberRef, PrState, Room, RoomKind, RoomMember, Task, TaskState,
+};
 use std::collections::HashSet;
 
 pub use deliver::{repost_stale_asks, start_delivery_watcher};
@@ -131,15 +133,48 @@ pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreEr
 }
 
 async fn view(store: &Store, r: RoomRow, agents: &[Agent]) -> Result<Room, StoreError> {
+    let mut members = Vec::new();
+    for m in store.room_members(&r.id).await? {
+        // The owner joins by reading and the daemon only announces: neither is someone to address.
+        if m.left_at.is_some() {
+            continue;
+        }
+        let m = MemberRef::from_key(&m.member);
+        if let MemberRef::Agent(id) = &m {
+            members.push(RoomMember {
+                name: member_name(store, &r, &m).await?,
+                id: id.clone(),
+            });
+        }
+    }
     Ok(Room {
         title: title_with(store, &r, agents).await?,
         unread: store.unread_posts(&r.id, MemberRef::Owner.key()).await?,
+        members,
         id: r.id,
         kind: r.kind,
         product: r.product,
         conversation: r.conversation,
         persona: r.persona,
         archived_at: r.archived_at,
+    })
+}
+
+/// A member as people read it: the task's title or name, `supervisor` for the room's conversation, `owner`, or
+/// `Fleet Manager`.
+pub(crate) async fn member_name(
+    store: &Store,
+    room: &RoomRow,
+    m: &MemberRef,
+) -> Result<String, StoreError> {
+    Ok(match m {
+        MemberRef::Owner => "owner".into(),
+        MemberRef::Daemon => "Fleet Manager".into(),
+        MemberRef::Agent(a) if room.conversation.as_ref() == Some(a) => "supervisor".into(),
+        MemberRef::Agent(a) => match store.task(a).await? {
+            Some(t) => t.title.filter(|t| !t.is_empty()).unwrap_or(t.name),
+            None => a.0.clone(),
+        },
     })
 }
 
