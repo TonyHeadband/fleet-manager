@@ -159,8 +159,11 @@ pub fn tools(kind: AgentKind) -> Value {
                 &["title", "body"],
             ),
         ]),
-        // Its tools arrive with the supervisor's launch path.
-        AgentKind::Supervisor => list.clear(),
+        AgentKind::Supervisor => {
+            list.clear();
+            list.push(set_title_tool());
+            list.extend(supervisor_tools());
+        }
         AgentKind::Specialist => list.push(tool(
             "finish_step",
             "Report your step as done once everything is committed. Your session ends right after.",
@@ -171,13 +174,63 @@ pub fn tools(kind: AgentKind) -> Value {
     Value::Array(list)
 }
 
+fn supervisor_tools() -> [Value; 4] {
+    let repo_list = json!({ "type": "array", "items": { "type": "string" } });
+    [
+        tool(
+            "fleet_overview",
+            "Every task of this persona that is not archived, one line each: product, title, status, steps done of total, PR state.",
+            json!({}),
+            &[],
+        ),
+        tool(
+            "file_issue",
+            "File an issue on one of a product's repos, as this persona. Returns the issue URL.",
+            json!({
+                "product": { "type": "string" },
+                "repo": { "type": "string", "description": "A repo name of the product." },
+                "title": { "type": "string" },
+                "body": { "type": "string" },
+                "labels": { "type": "array", "items": { "type": "string" } },
+            }),
+            &["product", "repo", "title", "body"],
+        ),
+        tool(
+            "write_doc",
+            "Write a spec or a plan to the product's internal repo and commit it on main (not pushed). \
+                `path` is specs/<name>.md or plans/<name>.md.",
+            json!({
+                "product": { "type": "string" },
+                "path": { "type": "string" },
+                "content": { "type": "string" },
+                "message": { "type": "string", "description": "The commit message." },
+            }),
+            &["product", "path", "content", "message"],
+        ),
+        tool(
+            "start_task",
+            "Start a task on the board for this persona and own it: you are told when it needs the owner or opens a PR.",
+            json!({
+                "product": { "type": "string" },
+                "repos": repo_list,
+                "prompt": { "type": "string", "description": "What the task is to do and how it knows it is done." },
+                "title": { "type": "string", "description": "3 to 6 words, like a ticket." },
+                "kind": { "enum": ["solo", "orchestrator"] },
+                "role": { "type": "string", "description": "The orchestrator type, for kind orchestrator." },
+                "plan": { "type": "string", "description": "A plans/<name>.md path in the internal repo the task follows." },
+            }),
+            &["product", "repos", "prompt", "kind"],
+        ),
+    ]
+}
+
 fn offers(kind: AgentKind, name: &str) -> bool {
     tools(kind)
         .as_array()
         .is_some_and(|l| l.iter().any(|t| t["name"] == name))
 }
 
-const ALL_TOOLS: [&str; 9] = [
+const ALL_TOOLS: [&str; 13] = [
     "list_repos",
     "set_title",
     "request_repo",
@@ -187,6 +240,10 @@ const ALL_TOOLS: [&str; 9] = [
     "fleet_status",
     "open_pr",
     "finish_step",
+    "fleet_overview",
+    "file_issue",
+    "write_doc",
+    "start_task",
 ];
 
 async fn call(svc: &Arc<AgentService>, id: &AgentId, params: &Value) -> Value {
@@ -213,6 +270,10 @@ async fn call(svc: &Arc<AgentService>, id: &AgentId, params: &Value) -> Value {
             return text(format!("{name} is not available to this agent"), true)
         }
         _ => {}
+    }
+    if kind == AgentKind::Supervisor && crate::supervisor::tools::NAMES.contains(&name) {
+        let (reply, failed) = crate::supervisor::tools::call(svc, id, name, &args).await;
+        return text(reply, failed);
     }
     match name {
         "list_repos" => list_repos(svc, id).await,
@@ -335,7 +396,7 @@ fn approval_word(a: Approval) -> &'static str {
     }
 }
 
-fn status_word(s: Status) -> &'static str {
+pub(crate) fn status_word(s: Status) -> &'static str {
     match s {
         Status::Queued => "queued",
         Status::Working => "working",

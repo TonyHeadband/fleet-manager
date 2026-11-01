@@ -77,6 +77,11 @@ fn main() {
             std::fs::write(d.join("token"), token).unwrap();
             exit(0);
         }
+        // The issue a supervisor files; the argv in argv.log is what a test checks.
+        ("issue", "create") => {
+            println!("https://example.test/issue/1");
+            exit(0);
+        }
         _ => {
             eprintln!("fake gh: unsupported: {}", args.join(" "));
             exit(2);

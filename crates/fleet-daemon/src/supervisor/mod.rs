@@ -1,6 +1,7 @@
 //! A persona's supervisor: one agent of kind `Supervisor` per conversation, with no task and no product, running in
 //! the persona's own folder.
 mod files;
+pub(crate) mod tools;
 
 pub use files::folder;
 

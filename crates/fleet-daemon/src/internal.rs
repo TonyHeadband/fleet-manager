@@ -198,6 +198,27 @@ impl Internal {
         Ok(dir)
     }
 
+    /// Writes one file on `main` and commits it, returning the short sha. Local only: nothing is pushed, so the
+    /// commit waits for the next `push_pending` or `merge_task` of a connected repo. `path` is relative to the repo.
+    pub async fn write_main(
+        &self,
+        product: &str,
+        path: &str,
+        content: &str,
+        message: &str,
+        _env: Option<GitEnv<'_>>,
+    ) -> Result<String, InternalError> {
+        let plain = Path::new(path)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if path.is_empty() || !plain {
+            return Err(InternalError::BadPath(path.to_string()));
+        }
+        let _guard = self.lock(product).await;
+        let repo = self.ensure_locked(product).await?;
+        Ok(git::commit_file(&repo, &self.no_hooks(), path, content, message).await?)
+    }
+
     pub async fn branch_exists(&self, product: &str, branch: &str) -> Result<bool, InternalError> {
         match self.existing(product).await {
             Ok(dir) => Ok(git::branch_exists(&dir, branch).await?),

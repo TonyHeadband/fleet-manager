@@ -889,6 +889,33 @@ pub async fn init_main(
     git_env(dir, &args, &daemon_ident_env()).await.map(|_| ())
 }
 
+/// Writes `content` at `path` in `repo`'s checkout, commits it with the daemon's identity and returns the short
+/// sha of `HEAD`. A file that already reads `content` makes no commit and returns the current `HEAD`.
+pub async fn commit_file(
+    repo: &Path,
+    no_hooks: &Path,
+    path: &str,
+    content: &str,
+    message: &str,
+) -> Result<String, GitError> {
+    let file = repo.join(path);
+    if let Some(parent) = file.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(&file, content).await?;
+    git(repo, &["add", "--", path]).await?;
+    if !git(repo, &["status", "--porcelain", "--", path])
+        .await?
+        .is_empty()
+    {
+        let mut args = daemon_ident(no_hooks)?;
+        args.extend(["commit", "-q", "--no-verify", "-m", message].map(String::from));
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        git_env(repo, &args, &daemon_ident_env()).await?;
+    }
+    git(repo, &["rev-parse", "--short", "HEAD"]).await
+}
+
 /// Checks out the existing `branch` at `dest`, without the user's hooks (`post-checkout`).
 pub async fn worktree_add_branch(
     repo: &Path,
