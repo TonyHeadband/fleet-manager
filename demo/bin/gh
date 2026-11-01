@@ -1,8 +1,9 @@
 #!/bin/sh
-# Stands in for gh in the demo: a version, logged in, no credential helper, nothing else.
+# Stands in for gh in the demo: a version, logged in, and a token that fleet-demo-forge takes as baker's.
 [ "$1" = "--version" ] && { echo "gh version 2.81.0 (demo)"; exit 0; }
 case "$1 $2" in
   "auth status") echo "Logged in to github.com account baker"; exit 0 ;;
+  "auth token") echo "ghp_demo"; exit 0 ;;
   "auth git-credential") exit 1 ;;
   *) exit 2 ;;
 esac

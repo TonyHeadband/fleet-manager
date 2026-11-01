@@ -52,6 +52,13 @@ echo "Recipes for the bakery." > "$W/bakery/README.txt"
 git -C "$W/bakery" add README.txt
 git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Start the bakery"
 
+# The persona's login check asks GitHub who the token is: the stand-in answers baker.
+"$bin/fleet-demo-forge" --addr-file "$W/forge.addr" >"$W/forge.out" 2>&1 &
+PIDS+=($!)
+for _ in $(seq 50); do [ -s "$W/forge.addr" ] && break; sleep 0.1; done
+FLEET_FORGE_API=$(cat "$W/forge.addr")
+export FLEET_FORGE_API
+
 "$bin/fleet-daemon" >"$W/daemon.out" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 150); do

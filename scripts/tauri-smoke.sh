@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Tauri app's smoke test, as CI runs it on Ubuntu: a throwaway HOME with a daemon up and a ready persona (the
-# demo's stand-ins for claude and gh, as scripts/demo.sh), then WebdriverIO drives the release app through
+# demo's stand-ins for claude, gh and GitHub's API, as scripts/demo.sh), then WebdriverIO drives the release app through
 # tauri-driver under Xvfb. Needs: the release binaries (fleet-gui-tauri, fleet-daemon, fleet-demo-*), xvfb-run,
 # tauri-driver and WebKitWebDriver. Your own daemon and settings are never read or touched.
 set -euo pipefail
@@ -8,9 +8,10 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 bin=$root/target/release
 
 W=$(mktemp -d /tmp/fleet-smoke.XXXXXX)
-DAEMON_PID=
+DAEMON_PID= FORGE_PID=
 cleanup() {
   [ -z "$DAEMON_PID" ] || kill "$DAEMON_PID" 2>/dev/null || true
+  [ -z "$FORGE_PID" ] || kill "$FORGE_PID" 2>/dev/null || true
   # Anything still naming this run's folder; the escaped dot keeps the pattern to it.
   pkill -f -- "${W//./\\.}/" 2>/dev/null || true
   rm -rf "$W"
@@ -34,6 +35,13 @@ git init -q "$W/bakery"
 echo "Recipes for the bakery." > "$W/bakery/README.txt"
 git -C "$W/bakery" add README.txt
 git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Start the bakery"
+
+# The persona's login check asks GitHub who the token is: the stand-in answers baker.
+"$bin/fleet-demo-forge" --addr-file "$W/forge.addr" > "$W/forge.out" 2>&1 &
+FORGE_PID=$!
+for _ in $(seq 50); do [ -s "$W/forge.addr" ] && break; sleep 0.1; done
+FLEET_FORGE_API=$(cat "$W/forge.addr")
+export FLEET_FORGE_API
 
 "$bin/fleet-daemon" > "$W/daemon.out" 2>&1 &
 DAEMON_PID=$!

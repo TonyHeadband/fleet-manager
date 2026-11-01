@@ -96,7 +96,7 @@ stop_pid() {
   wait "$pid" 2>/dev/null || true
 }
 
-FFMPEG_PID= DIRECTOR_PID= GUI_PID= DAEMON_PID= XVFB_PID= W= CLEANED=
+FFMPEG_PID= DIRECTOR_PID= GUI_PID= DAEMON_PID= FORGE_PID= XVFB_PID= W= CLEANED=
 # Only what this run started, by recorded PID: the owner's daemon is never touched.
 cleanup() {
   [ -z "$CLEANED" ] || return 0
@@ -105,6 +105,7 @@ cleanup() {
   stop_pid "$DIRECTOR_PID"
   stop_pid "$GUI_PID"
   stop_pid "$DAEMON_PID"
+  stop_pid "$FORGE_PID"
   stop_pid "$XVFB_PID"
   if [ -n "$W" ]; then
     # Anything still naming the run's folder, such as a daemon the GUI restarted on its own (it passes
@@ -180,6 +181,13 @@ EOF
   XVFB_PID=$!
   wait_for "Xvfb :$display" 10 test -e "/tmp/.X11-unix/X$display"
   export DISPLAY=:$display
+
+  # The persona's login check asks GitHub who the token is: the stand-in answers baker.
+  "$bin/fleet-demo-forge" --addr-file "$W/forge.addr" >"$W/forge.out" 2>&1 &
+  FORGE_PID=$!
+  wait_for "the demo forge" 5 test -s "$W/forge.addr"
+  FLEET_FORGE_API=$(cat "$W/forge.addr")
+  export FLEET_FORGE_API
 
   "$bin/fleet-daemon" >"$W/daemon.out" 2>&1 &
   DAEMON_PID=$!
