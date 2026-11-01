@@ -56,7 +56,7 @@ export function TimeSeries({ label, from, to, series, formatX = clockFormat, for
   formatX?: (t: number) => string;
   formatY?: Format;
 }) {
-  const [ref, { width }] = useSize<HTMLDivElement>();
+  const [ref, { width, height: measured }] = useSize<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverT, setHoverT] = useState<number | null>(null);
   const hasData = series.some((s) => s.points.length > 0);
@@ -66,7 +66,9 @@ export function TimeSeries({ label, from, to, series, formatX = clockFormat, for
   const left = layout.chartValueW;
   const top = layout.captionGap;
   const plotW = Math.max(width - left, 0);
-  const plotH = layout.chartPlot;
+  // Below the plot: tick, label gap and marker room. The region holds all of it; the plot takes what is left.
+  const below = column.tickLen + layout.captionGap + layout.markerH;
+  const plotH = Math.max(layout.chartPlot, measured - top - below);
   const span = Number.isFinite(to - from) ? Math.max(to - from, 0) : 0;
   const x = linear(from, from + span, 0, plotW);
   const max = Math.max(0, ...series.flatMap((s) => s.points.map((p) => (p.v === null ? 0 : finite(p.v)))));
@@ -94,11 +96,11 @@ export function TimeSeries({ label, from, to, series, formatX = clockFormat, for
   };
 
   return (
-    <div ref={ref} className="chart-ts" role="group" aria-label={label}>
+    <div className="chart-ts" role="group" aria-label={label}>
       {!hasData && <NoData />}
-      {drawn && (
-        <>
-          <svg ref={svgRef} width={width} height={top + plotH + column.tickLen + layout.captionGap + layout.markerH} aria-hidden="true">
+      <div ref={ref} className="chart-plot" style={{ minHeight: drawn ? top + layout.chartPlot + below : undefined }}>
+        {drawn && (
+          <svg ref={svgRef} width={width} height={top + plotH + below} aria-hidden="true">
             <g transform={`translate(${left} ${top})`}>
               {yTicks.map((t, i) => (
                 <g key={t}>
@@ -153,6 +155,10 @@ export function TimeSeries({ label, from, to, series, formatX = clockFormat, for
               <rect className="chart-ts-hit" x={0} y={0} width={plotW} height={plotH} onMouseMove={move} onMouseLeave={() => setHoverT(null)} />
             </g>
           </svg>
+        )}
+      </div>
+      {drawn && (
+        <>
           {showLegend && <Legend items={series.map((s) => ({ label: s.label, paint: s.paint }))} />}
           {hoverT !== null && (
             <ChartTooltip

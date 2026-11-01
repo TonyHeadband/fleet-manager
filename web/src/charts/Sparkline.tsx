@@ -7,8 +7,9 @@ import "./charts.css";
 
 /** A line with no axes: the block's trend at a glance. A single point is a marker alone. */
 export function Sparkline({ values, paint = { series: 0 } }: { values: number[]; paint?: Paint }) {
-  const [ref, { width }] = useSize<HTMLDivElement>();
-  const height = layout.chartSpark;
+  const [ref, { width, height: measured }] = useSize<HTMLDivElement>();
+  // The region's basis is the token height; it grows into a taller container and shrinks in a short one (Stat's cell).
+  const height = measured > 0 ? Math.max(measured, layout.markerH) : layout.chartSpark;
   const ys = values.map((v) => (Number.isFinite(v) ? v : 0));
   const drawn = width > 0 && ys.length > 0;
   const entering = useChartEntry(drawn);
@@ -49,10 +50,12 @@ export function Sparkline({ values, paint = { series: 0 } }: { values: number[];
   }
 
   return (
-    <div ref={ref} className="chart-spark">
-      <svg width={width} height={height} aria-hidden="true">
-        {body}
-      </svg>
+    <div className="chart-spark">
+      <div ref={ref} className="chart-plot" style={{ flexBasis: layout.chartSpark, minHeight: layout.markerH }}>
+        <svg width={width} height={height} aria-hidden="true">
+          {body}
+        </svg>
+      </div>
     </div>
   );
 }

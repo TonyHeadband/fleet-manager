@@ -11,7 +11,7 @@ import { useChartEntry } from "./useChartEntry";
 import { useSize } from "./useSize";
 import "./charts.css";
 
-/** Parts of a whole end to end on a scale up to `max`; a total over `max` clamps the drawing, never the readings. */
+/** Parts of a whole end to end on a scale up to `max` (the total when `max` is not positive); a total over `max` clamps the drawing, never the readings. */
 export function SegmentedBar({ label, segments, max, format = plainFormat }: {
   label: string;
   segments: { label: string; value: number; paint: Paint }[];
@@ -25,7 +25,7 @@ export function SegmentedBar({ label, segments, max, format = plainFormat }: {
   const drawn = width > 0 && !empty;
   const entering = useChartEntry(drawn);
 
-  const limit = Math.max(finite(max), 0);
+  const limit = finite(max) > 0 ? finite(max) : total;
   const ticks = limitTicks(limit);
   const x = linear(0, limit, 0, width);
   const barH = layout.barH;

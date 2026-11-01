@@ -29,7 +29,7 @@ afterEach(() => {
   delete document.documentElement.dataset.animations;
 });
 
-const size = (width: number) => act(() => observed?.([{ contentRect: { width, height: 100 } }]));
+const size = (width: number) => act(() => observed?.([{ contentRect: { width, height: 0 } }]));
 const motionOff = () => (document.documentElement.dataset.animations = "off");
 const cells = () => Array.from(document.querySelectorAll(".chart-hidden td")).map((c) => c.textContent);
 const noNaN = (c: HTMLElement) => expect(c.innerHTML).not.toMatch(/NaN|Infinity/);

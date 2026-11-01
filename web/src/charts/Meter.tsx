@@ -18,7 +18,7 @@ export function Meter({ label, value, max, marks = [], format = plainFormat }: {
   format?: Format;
 }) {
   const [ref, { width }] = useSize<HTMLDivElement>();
-  const [hover, setHover] = useState<{ x: number; lines: string[] } | null>(null);
+  const [hover, setHover] = useState<{ kind: "fill" } | { mark: number } | null>(null);
   const drawn = width > 0;
   const entering = useChartEntry(drawn);
 
@@ -31,6 +31,9 @@ export function Meter({ label, value, max, marks = [], format = plainFormat }: {
   const barY = top + layout.captionGap;
   const bottom = barY + layout.barH;
   const fill = clamp(value);
+  const tip = !hover ? null : "mark" in hover
+    ? marks[hover.mark] && { x: clamp(marks[hover.mark]!.at), lines: [marks[hover.mark]!.label, format(finite(marks[hover.mark]!.at))] }
+    : { x: fill / 2, lines: [label, format(finite(value))] };
   const rows: [string, string][] = [[label, format(finite(value))], ...marks.map((m): [string, string] => [m.label, format(finite(m.at))])];
 
   return (
@@ -53,7 +56,7 @@ export function Meter({ label, value, max, marks = [], format = plainFormat }: {
             y={barY}
             width={width}
             height={layout.barH}
-            onMouseEnter={() => setHover({ x: fill / 2, lines: [label, format(finite(value))] })}
+            onMouseEnter={() => setHover({ kind: "fill" })}
             onMouseLeave={() => setHover(null)}
           />
           {marks.map((m, i) => {
@@ -68,7 +71,7 @@ export function Meter({ label, value, max, marks = [], format = plainFormat }: {
                   y={top}
                   width={layout.cardPadding}
                   height={bottom + layout.captionGap - top}
-                  onMouseEnter={() => setHover({ x: mx, lines: [m.label, format(finite(m.at))] })}
+                  onMouseEnter={() => setHover({ mark: i })}
                   onMouseLeave={() => setHover(null)}
                 />
               </g>
@@ -79,7 +82,7 @@ export function Meter({ label, value, max, marks = [], format = plainFormat }: {
           </g>
         </svg>
       )}
-      {hover && <ChartTooltip x={hover.x} y={bottom} lines={hover.lines} />}
+      {tip && <ChartTooltip x={tip.x} y={bottom} lines={tip.lines} />}
       <HiddenTable caption={label} rows={rows} />
     </div>
   );

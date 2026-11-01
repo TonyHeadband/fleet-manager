@@ -42,8 +42,8 @@ export function ChartCatalog() {
             <span className="chart-catalog-min">min {e.minW}×{e.minH}</span>
           </h2>
           <p className="chart-catalog-purpose">{e.purpose}</p>
-          {/* Blocks fill their container: a grid cell is half the drawer's width, so the minimum size gives a definite one. */}
-          <div className="chart-catalog-preview" style={{ width: `calc(${e.minW} * var(--layout-drawer) / 2)`, minHeight: `calc(${e.minH} * var(--layout-drawer) / 4)` }}>
+          {/* Blocks fill their container: a cell is half the drawer square, so the minimum size gives a definite width and height. */}
+          <div className="chart-catalog-preview" style={{ width: `calc(${e.minW} * var(--layout-drawer) / 2)`, height: `calc(${e.minH} * var(--layout-drawer) / 2)` }}>
             {e.preview()}
           </div>
         </section>

@@ -100,7 +100,7 @@ describe("ColumnBars", () => {
     const l = container.querySelector(".chart-col-label")!;
     expect(l.className).toContain("chart-col-label");
     const css = readFileSync("src/charts/charts.css", "utf8");
-    expect(css).toMatch(/\.chart-col-label \{[^}]*text-overflow: ellipsis/);
+    expect(css).toMatch(/\.chart-col-label \{[^}]*-webkit-line-clamp: 2/);
     expect(heads()).toEqual([long]);
     fireEvent.mouseEnter(container.querySelector(".chart-col-hit")!);
     expect(screen.getByRole("tooltip").textContent).toContain(long);

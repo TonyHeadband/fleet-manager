@@ -11,16 +11,17 @@ import { useSize } from "./useSize";
 import "./charts.css";
 
 const RING = layout.cardPadding;
-const OUTER = layout.chartPlot / 2;
-const MID = OUTER - RING / 2;
-const SIZE = layout.chartPlot + 2 * column.tickLen;
-const C = SIZE / 2;
+/** Radius of the ring's centre line in a square of `size`, leaving room for the quarter ticks. */
+const midRadius = (size: number) => size / 2 - column.tickLen - RING / 2;
+const MIN = layout.chartPlot + 2 * column.tickLen;
 const WHOLE = 1 - 1e-6;
 
 /** Point on the mid-ring at `share` of a turn clockwise from 12 o'clock. */
-function at(share: number): [number, number] {
+function at(share: number, size: number): [number, number] {
+  const C = size / 2;
   const a = share * 2 * Math.PI;
-  return [C + MID * Math.sin(a), C - MID * Math.cos(a)];
+  const mid = midRadius(size);
+  return [C + mid * Math.sin(a), C - mid * Math.cos(a)];
 }
 
 const percent = (share: number) => `${Math.round(share * 100)}%`;
@@ -31,10 +32,15 @@ export function Donut({ label, slices, center, format = plainFormat }: {
   center?: string;
   format?: Format;
 }) {
-  const [ref, { width }] = useSize<HTMLDivElement>();
+  const [ref, { width, height: measured }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<{ i: number; x: number } | null>(null);
   const total = slices.reduce((sum, s) => sum + Math.max(finite(s.value), 0), 0);
   const empty = total <= 0;
+  // Square, as tall as the container gives; never wider than the width left beside the legend.
+  const legend = !empty && slices.length >= 2 && width >= layout.chartCompact;
+  const SIZE = Math.max(MIN, Math.min(measured, legend ? width / 2 : width));
+  const C = SIZE / 2;
+  const MID = midRadius(SIZE);
   const drawn = width > 0 && !empty;
   const entering = useChartEntry(drawn);
 
@@ -75,14 +81,14 @@ export function Donut({ label, slices, center, format = plainFormat }: {
                 strokeDasharray: 100,
                 pointerEvents: "stroke" as const,
                 onMouseEnter: () => {
-                  const [mx] = at(a.from + a.share / 2);
+                  const [mx] = at(a.from + a.share / 2, SIZE);
                   setHover({ i, x: mx });
                 },
                 onMouseLeave: () => setHover((h) => (h?.i === i ? null : h)),
               };
               if (a.share >= WHOLE) return <circle key={i} {...common} cx={C} cy={C} r={MID} transform={`rotate(-90 ${C} ${C})`} />;
-              const [x0, y0] = at(a.from);
-              const [x1, y1] = at(a.from + a.share);
+              const [x0, y0] = at(a.from, SIZE);
+              const [x1, y1] = at(a.from + a.share, SIZE);
               return <path key={i} {...common} d={`M ${x0} ${y0} A ${MID} ${MID} 0 ${a.share > 0.5 ? 1 : 0} 1 ${x1} ${y1}`} />;
             })
           )}
@@ -94,7 +100,7 @@ export function Donut({ label, slices, center, format = plainFormat }: {
           {center && <text className="chart-donut-center" x={C} y={C} textAnchor="middle" dominantBaseline="central">{center}</text>}
         </svg>
       )}
-      {drawn && slices.length >= 2 && width >= layout.chartCompact && (
+      {drawn && legend && (
         <Legend items={slices.map((s, i) => ({ label: `${s.label} ${percent(share(i))}`, paint: s.paint }))} />
       )}
       {hover && slices[hover.i] && (

@@ -20,19 +20,24 @@
   to { clip-path: inset(0); }
 }
 
-.chart-stat { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); }
+.chart-stat { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); height: 100%; }
 .chart-stat-head { display: flex; align-items: flex-end; gap: var(--space-picker-gap); }
 .chart-stat-value { font-family: var(--font-mono); font-size: var(--size-stat); line-height: 1; color: var(--text-high); }
 .chart-stat-delta { font-family: var(--font-mono); font-size: var(--size-small); }
-.chart-spark { width: 100%; }
-.chart-spark svg { display: block; overflow: visible; }
+/* A block takes the height its container gives; with none, its region's min-height (the token plot) is its size. */
+.chart-plot { position: relative; flex: 1 1 auto; min-width: 0; }
+.chart-plot > svg { position: absolute; top: 0; left: 0; display: block; overflow: visible; }
+.chart-spark { width: 100%; height: 100%; display: flex; flex-direction: column; }
+.chart-spark .chart-plot { flex-grow: 1; flex-shrink: 1; min-height: 0; }
+.chart-stat .chart-spark { height: auto; flex: 1 1 auto; min-height: 0; }
 
 .chart-bars, .chart-rank { position: relative; }
-.chart-bars svg { display: block; overflow: visible; }
+.chart-bars { display: flex; flex-direction: column; height: 100%; }
 .chart-col-value { fill: var(--text-high); font-family: var(--font-mono); font-size: var(--size-meta); text-anchor: middle; }
 .chart-col-hit { fill: transparent; pointer-events: all; }
 .chart-col-labels { display: grid; margin-top: var(--space-summary-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text); }
-.chart-col-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; padding: 0 var(--space-chip-gap); }
+/* Two lines at most, ellipsis on the second: five bars in a 2×2 cell leave a label about six characters a line. */
+.chart-col-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; text-align: center; padding: 0 var(--space-chip-gap); }
 
 .chart-rank { display: flex; flex-direction: column; gap: var(--space-header-gap); font-family: var(--font-mono); font-size: var(--size-meta); }
 .chart-rank-row { display: grid; grid-template-columns: var(--layout-chart-label-w) minmax(0, 1fr) var(--layout-chart-value-w); gap: var(--space-button-gap); align-items: center; }
@@ -56,7 +61,7 @@
 .chart-outline { fill: none; stroke: var(--border); stroke-width: 1px; }
 .chart-seg-hit { fill: transparent; pointer-events: all; }
 .chart-mark-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); }
-.chart-donut { flex-direction: row; align-items: center; gap: var(--space-item); }
+.chart-donut { height: 100%; flex-direction: row; align-items: center; gap: var(--space-item); }
 .chart-donut-arc { fill: none; }
 .chart-donut-center { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-small); }
 
@@ -70,8 +75,7 @@
 }
 .chart-meter-mark { stroke-width: 1px; fill: none; }
 
-.chart-ts { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); }
-.chart-ts svg { display: block; overflow: visible; }
+.chart-ts { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); height: 100%; }
 .chart-ts .chart-ytick { text-anchor: end; }
 .chart-grid { stroke: var(--border); stroke-width: 1px; fill: none; }
 .chart-cross { stroke: var(--fill); stroke-width: 1px; fill: none; pointer-events: none; }

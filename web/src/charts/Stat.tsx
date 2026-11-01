@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "../generated/layout";
 import { HiddenTable } from "./HiddenTable";
+import { NoData } from "./NoData";
 import { plainFormat, type Format } from "./scale";
 import { Sparkline } from "./Sparkline";
 import { useChartEntry } from "./useChartEntry";
@@ -22,7 +23,8 @@ function useStepUp(value: number, entering: boolean): number {
     let frame = requestAnimationFrame(function step(ts) {
       start ??= ts;
       const t = Math.min(1, (ts - start) / motion.wipe);
-      setShown(latest.current * t);
+      const v = latest.current * t;
+      setShown(Number.isInteger(latest.current) ? Math.round(v) : v);
       if (t < 1) frame = requestAnimationFrame(step);
       else setDone(true);
     });
@@ -33,29 +35,36 @@ function useStepUp(value: number, entering: boolean): number {
 
 export function Stat({ label, value, format = plainFormat, delta, spark }: {
   label: string;
-  value: number;
+  /** `null` is no data yet: the block says so, and the entry waits for the first number. */
+  value: number | null;
   format?: Format;
   delta?: Delta;
   spark?: number[];
 }) {
-  const safe = Number.isFinite(value) ? value : 0;
-  const entering = useChartEntry(true);
+  const safe = value !== null && Number.isFinite(value) ? value : 0;
+  const entering = useChartEntry(value !== null);
   const shown = useStepUp(safe, entering);
   const deltaText = delta ? `${format(Math.abs(delta.value))} / ${delta.period}` : "";
-  const rows: [string, string][] = [["Value", format(safe)]];
-  if (delta) rows.push(["Change", `${delta.value < 0 ? "-" : ""}${deltaText}`]);
+  const rows: [string, string][] = value === null ? [] : [["Value", format(safe)]];
+  if (value !== null && delta) rows.push(["Change", `${delta.value < 0 ? "-" : ""}${deltaText}`]);
 
   return (
     <div className="chart-stat" role="group" aria-label={label}>
-      <div className="chart-stat-head">
-        <span className="chart-stat-value" aria-hidden="true">{format(shown)}</span>
-        {delta && (
-          <span className="chart-stat-delta" aria-hidden="true" style={{ color: DELTA_COLOR[delta.tone] }}>
-            {delta.value < 0 ? "▼" : "▲"} {deltaText}
-          </span>
-        )}
-      </div>
-      {spark && spark.length > 0 && <Sparkline values={spark} />}
+      {value === null ? (
+        <NoData />
+      ) : (
+        <>
+          <div className="chart-stat-head">
+            <span className="chart-stat-value" aria-hidden="true">{format(shown)}</span>
+            {delta && (
+              <span className="chart-stat-delta" aria-hidden="true" style={{ color: DELTA_COLOR[delta.tone] }}>
+                {delta.value < 0 ? "▼" : "▲"} {deltaText}
+              </span>
+            )}
+          </div>
+          {spark && spark.length > 0 && <Sparkline values={spark} />}
+        </>
+      )}
       <HiddenTable caption={label} rows={rows} />
     </div>
   );

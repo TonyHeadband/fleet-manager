@@ -17,12 +17,14 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
   bars: { label: string; value: number; paint: Paint }[];
   format?: Format;
 }) {
-  const [ref, { width }] = useSize<HTMLDivElement>();
+  const [ref, { width, height: measured }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const drawn = width > 0 && bars.length > 0;
   const entering = useChartEntry(drawn);
 
-  const plot = layout.chartPlot;
+  // The measured region holds the plot and its tick; whatever it is given beyond the minimum goes to the plot.
+  const minRegion = layout.chartPlot + column.tickLen;
+  const plot = Math.max(layout.chartPlot, measured - column.tickLen);
   const band = bars.length ? width / bars.length : 0;
   const barW = Math.max(band - column.gap, SLIVER);
   const max = Math.max(0, ...bars.map((b) => finite(b.value)));
@@ -31,10 +33,10 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
   const rows: [string, string][] = bars.map((b) => [b.label, format(finite(b.value))]);
 
   return (
-    <div ref={ref} className="chart-bars" role="group" aria-label={label}>
+    <div className="chart-bars" role="group" aria-label={label}>
       {bars.length === 0 && <NoData />}
-      {drawn && (
-        <>
+      <div ref={ref} className="chart-plot" style={{ minHeight: drawn ? minRegion : undefined }}>
+        {drawn && (
           <svg width={width} height={plot + column.tickLen} aria-hidden="true">
             {bars.map((b, i) => {
               const v = finite(b.value);
@@ -73,6 +75,10 @@ export function ColumnBars({ label, bars, format = plainFormat }: {
             })}
             <line className="chart-baseline" x1={0} x2={width} y1={plot} y2={plot} />
           </svg>
+        )}
+      </div>
+      {drawn && (
+        <>
           <div className="chart-col-labels" style={{ gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))` }} aria-hidden="true">
             {bars.map((b, i) => (
               <span key={i} className="chart-col-label">{b.label}</span>
