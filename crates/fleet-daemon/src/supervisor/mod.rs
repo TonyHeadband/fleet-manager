@@ -279,6 +279,16 @@ impl Supervisor {
     /// Types `text` into the conversation `id` once its TUI is ready, resuming its process first when it has exited.
     /// Messages to one conversation are typed in the order they came.
     pub async fn message(&self, id: &AgentId, text: &str) -> Result<(), SupervisorError> {
+        self.send(id, text, false).await.map(|_| ())
+    }
+
+    /// `message`, unless the conversation is working or needs you once its turn lock is held: then nothing is typed
+    /// and it returns false. For the daemon's notices, which must never land in a running turn.
+    pub async fn message_if_idle(&self, id: &AgentId, text: &str) -> Result<bool, SupervisorError> {
+        self.send(id, text, true).await
+    }
+
+    async fn send(&self, id: &AgentId, text: &str, if_idle: bool) -> Result<bool, SupervisorError> {
         let text = text.trim();
         if text.is_empty() {
             return Err(SupervisorError::EmptyText);
@@ -288,6 +298,9 @@ impl Supervisor {
         let _turn = turn.lock().await;
         // Read again under the lock: the message before this one may have resumed it, or the reaper ended it.
         let a = self.conversation(id).await?;
+        if if_idle && matches!(a.status, Status::Working | Status::NeedsYou) {
+            return Ok(false);
+        }
         if a.status == Status::Stopped {
             self.svc
                 .resume_stopped(&a)
@@ -301,7 +314,7 @@ impl Supervisor {
             .touch_conversation(id, self.clock.now())
             .await?;
         info!(agent_id = %id.0, persona = %a.persona, resumed = a.status == Status::Stopped, "supervisor message sent");
-        Ok(())
+        Ok(true)
     }
 
     async fn conversation(&self, id: &AgentId) -> Result<Agent, SupervisorError> {

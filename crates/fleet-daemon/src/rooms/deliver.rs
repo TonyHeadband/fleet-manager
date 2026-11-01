@@ -16,7 +16,7 @@ use fleet_api::{
     AgentId, AgentKind, EventKind, FleetEvent, FleetEventKind, MemberRef, Post, PostKind, Status,
     TaskEventKind,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -33,6 +33,10 @@ pub struct Notices {
     /// goes idle is typed by the queueing side or by the watcher, never by both and never by neither.
     lock: tokio::sync::Mutex<()>,
     queue: Mutex<HashMap<AgentId, Vec<String>>>,
+    /// Agents just typed into whose turn has not shown yet: the status stays Review until Claude's hook reports
+    /// Working, and a second line typed meanwhile would land in the turn the first one started. Set and cleared
+    /// under `lock`; cleared by the next status other than Review (a turn, a stop, an exit).
+    awaiting: Mutex<HashSet<AgentId>>,
 }
 
 impl Notices {
@@ -62,6 +66,31 @@ impl Notices {
             }
         }
         q.insert(agent.clone(), lines);
+    }
+
+    fn awaiting(&self, agent: &AgentId) -> bool {
+        self.awaiting
+            .lock()
+            .expect("notices poisoned")
+            .contains(agent)
+    }
+
+    fn set_awaiting(&self, agent: &AgentId, on: bool) {
+        let mut a = self.awaiting.lock().expect("notices poisoned");
+        if on {
+            a.insert(agent.clone());
+        } else {
+            a.remove(agent);
+        }
+    }
+
+    fn all_awaiting(&self) -> Vec<AgentId> {
+        self.awaiting
+            .lock()
+            .expect("notices poisoned")
+            .iter()
+            .cloned()
+            .collect()
     }
 
     fn waiting(&self) -> Vec<AgentId> {
@@ -162,6 +191,9 @@ pub(crate) async fn notify(
 /// Types the agent's queued notices, as one line, if it can take them now; else leaves them queued.
 async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
     let _l = svc.notices.lock.lock().await;
+    if svc.notices.awaiting(id) {
+        return;
+    }
     let a = match svc.find(id).await {
         Ok(a) => a,
         // Gone for good: nobody is left to read them.
@@ -175,7 +207,7 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
         }
     };
     if a.kind == AgentKind::Supervisor {
-        // `message` resumes an exited conversation and waits for its input box; a prompt may be up at Needs you.
+        // Queued (starting) is let through on purpose: `message` waits for the input box before it types.
         if matches!(a.status, Status::Working | Status::NeedsYou) {
             return;
         }
@@ -183,11 +215,21 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
         if lines.is_empty() {
             return;
         }
-        // Off the caller: a resume can take seconds, and the poster carries on.
+        svc.notices.set_awaiting(id, true);
+        // Off the caller: a resume can take seconds, and the poster carries on. Under the turn lock it checks again
+        // that no turn has started (the owner's message may have got there first); if one has, the lines go back.
         let (svc, id) = (svc.clone(), id.clone());
         tokio::spawn(async move {
-            if let Err(e) = Supervisor::new(svc).message(&id, &lines.join(" ")).await {
-                warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot tell the supervisor of a room post; it is in the room");
+            let sent = Supervisor::new(svc.clone())
+                .message_if_idle(&id, &lines.join(" "))
+                .await;
+            if let Err(e) = &sent {
+                warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot tell the supervisor of a room post");
+            }
+            if !matches!(sent, Ok(true)) {
+                let _l = svc.notices.lock.lock().await;
+                svc.notices.restore(&id, lines);
+                svc.notices.set_awaiting(&id, false);
             }
         });
         return;
@@ -199,9 +241,18 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
     if lines.is_empty() {
         return;
     }
-    if !svc.type_line(&a, &lines.join(" ")).await {
+    if svc.type_line(&a, &lines.join(" ")).await {
+        svc.notices.set_awaiting(id, true);
+    } else {
         svc.notices.restore(id, lines);
     }
+}
+
+/// The agent's turn showed, or it stopped or exited: what it was typed has been taken, and its next Review may
+/// type again. A lagged watcher clears every agent no longer at Review.
+async fn turn_seen(svc: &AgentService, id: &AgentId) {
+    let _l = svc.notices.lock.lock().await;
+    svc.notices.set_awaiting(id, false);
 }
 
 /// Puts the post in the owner's view: a `TaskEvent` routed to the sender's task's conversation, so it is a chat row
@@ -239,24 +290,33 @@ pub async fn repost_stale_asks(svc: &AgentService) -> Result<(), ServiceError> {
     Ok(())
 }
 
-/// Types an agent's queued notices when it reaches Review. A lagged receiver may have missed a transition, so it
-/// tries every agent with notices waiting.
+/// Types an agent's queued notices when it reaches Review, and clears its awaiting mark on any other status. A
+/// lagged receiver may have missed a transition, so it re-reads the marked agents and tries every agent with notices
+/// waiting.
 pub fn start_delivery_watcher(svc: Arc<AgentService>) -> JoinHandle<()> {
     let mut events = svc.store.subscribe();
     tokio::spawn(async move {
         loop {
             match events.recv().await {
-                Ok(ev) => {
-                    if let EventKind::StatusChanged {
+                Ok(ev) => match ev.kind {
+                    EventKind::StatusChanged {
                         id,
                         status: Status::Review,
                         ..
-                    } = ev.kind
-                    {
-                        flush(&svc, &id).await;
+                    } => flush(&svc, &id).await,
+                    EventKind::StatusChanged { id, .. } => turn_seen(&svc, &id).await,
+                    EventKind::AgentRemoved { id } => {
+                        turn_seen(&svc, &id).await;
+                        svc.notices.take(&id);
                     }
-                }
+                    _ => {}
+                },
                 Err(broadcast::error::RecvError::Lagged(_)) => {
+                    for id in svc.notices.all_awaiting() {
+                        if !matches!(svc.find(&id).await, Ok(a) if a.status == Status::Review) {
+                            turn_seen(&svc, &id).await;
+                        }
+                    }
                     for id in svc.notices.waiting() {
                         flush(&svc, &id).await;
                     }

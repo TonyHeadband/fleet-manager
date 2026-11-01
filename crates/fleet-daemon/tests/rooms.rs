@@ -903,6 +903,8 @@ async fn a_message_to_a_working_orchestrator_waits_for_review() {
         let args = json!({ "kind": "message", "text": text, "to": a.0, "room": room });
         async move { posted_id(&tool(&svc, &sup, "room_post", args).await) }
     };
+    // Working, not merely Queued: the notice waits because of the turn, not because the screen is starting.
+    assert_eq!(agent(&fx, &a).await.status, Status::Working);
     say("rebase when free").await;
     say("and run the migrations").await;
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1173,4 +1175,70 @@ async fn an_answer_given_while_the_asker_works_is_typed_once_after_review() {
     // `wait_for_fleet` has it too.
     let (text, _) = tool(&svc, &a, "wait_for_fleet", json!({})).await;
     assert_eq!(text, format!("owner answered your ask {ask}: port 7070"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_notice_waits_for_the_turn_the_first_one_started() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    set_status(&fx, &a, Status::Review).await;
+    let op = op_room(&sup);
+    let product = format!("product:{PRODUCT}");
+    let say = |room: &str| {
+        let (svc, sup, a) = (fx.svc.clone(), sup.clone(), a.clone());
+        let args = json!({ "kind": "message", "text": "look", "to": a.0, "room": room });
+        async move { posted_id(&tool(&svc, &sup, "room_post", args).await) }
+    };
+    let first = format!("{NOTICE} new message from supervisor in {op}; call room_read.");
+    // Outside its own operation room the supervisor goes by its id.
+    let second = format!(
+        "{NOTICE} new message from {} in {product}; call room_read.",
+        sup.0
+    );
+
+    say(&op).await;
+    assert!(pane_contains(&fx, &a, &first).await);
+    // Still Review: the hook has not reported the turn the first line started.
+    say(&product).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !screen(&fx.sessions, &a).contains(&second),
+        "typed into the turn the first notice started"
+    );
+
+    set_status(&fx, &a, Status::Working).await;
+    set_status(&fx, &a, Status::Review).await;
+    assert!(pane_contains(&fx, &a, &second).await);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pane = screen(&fx.sessions, &a);
+    assert_eq!(pane.matches(&first).count(), 1, "{pane}");
+    assert_eq!(pane.matches(&second).count(), 1, "{pane}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_supervisor_notice_never_lands_in_a_running_turn() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let session = agent(&fx, &sup).await.session;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains("ready")).await;
+    set_status(&fx, &sup, Status::Working).await;
+    let sent = Supervisor::new(fx.svc.clone())
+        .message_if_idle(&sup, "Fleet Manager: new message")
+        .await
+        .unwrap();
+    assert!(!sent, "busy");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!fx.sessions.screen_text(&session).unwrap().contains(NOTICE));
+
+    set_status(&fx, &sup, Status::Review).await;
+    assert!(Supervisor::new(fx.svc.clone())
+        .message_if_idle(&sup, "Fleet Manager: new message")
+        .await
+        .unwrap());
+    wait_screen_in(&fx.sessions, &session, |s| {
+        s.contains("entry<<Fleet Manager: new message>>")
+    })
+    .await;
 }
