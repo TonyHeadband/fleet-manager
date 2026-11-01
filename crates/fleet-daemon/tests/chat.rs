@@ -50,7 +50,7 @@ fn prompt_line(text: &str) -> String {
         .to_string()
 }
 
-/// Where the persona's Claude keeps `session`'s transcript.
+/// Where the persona's Claude keeps `session`'s transcript: the fake Claude's project folder.
 fn transcript(srv: &Server, session: &str) -> PathBuf {
     let dir = srv
         .fx
@@ -58,7 +58,7 @@ fn transcript(srv: &Server, session: &str) -> PathBuf {
         .config()
         .personas_dir
         .join(PERSONA)
-        .join("claude/projects/chat-cwd");
+        .join("claude/projects/fake-cwd");
     std::fs::create_dir_all(&dir).unwrap();
     dir.join(format!("{session}.jsonl"))
 }
@@ -84,6 +84,11 @@ async fn session(srv: &Server, id: &AgentId, session: &str, at: i64, lines: &[St
         .add_claude_session(id, session, at)
         .await
         .unwrap();
+}
+
+/// The Claude session the agent was launched with.
+async fn own(srv: &Server, id: &AgentId) -> String {
+    srv.fx.store.claude_session(id).await.unwrap().unwrap()
 }
 
 fn chat_path(id: &AgentId) -> String {
@@ -123,7 +128,8 @@ async fn streams_the_latest_page_then_new_items() {
     let srv = start().await;
     let a = spawn_ready(&srv.fx).await;
     let head = up_to_first_call();
-    session(&srv, &a.id, "s-1", 10, &head).await;
+    let s1 = own(&srv, &a.id).await;
+    session(&srv, &a.id, &s1, 10, &head).await;
     let mut sse = SseClient::connect(srv.addr, &chat_path(&a.id), &[]).await;
     let page = page_of(&mut sse).await;
     assert_eq!(page.earlier, 0);
@@ -135,7 +141,7 @@ async fn streams_the_latest_page_then_new_items() {
     assert_eq!(seqs, (0..page.items.len() as u64).collect::<Vec<_>>());
 
     let rest = fixture_lines("tools")[head.len()..].to_vec();
-    append(&transcript(&srv, "s-1"), &rest);
+    append(&transcript(&srv, &s1), &rest);
     let mut fresh = Vec::new();
     while !fresh.iter().any(|i: &ChatItem| i.seq == running[0].0) {
         fresh.extend(items_of(&mut sse).await);
@@ -149,13 +155,14 @@ async fn streams_the_latest_page_then_new_items() {
 async fn joins_sessions_with_a_new_session_marker() {
     let srv = start().await;
     let a = spawn_ready(&srv.fx).await;
-    session(&srv, &a.id, "s-1", 10, &up_to_first_call()).await;
+    let s1 = own(&srv, &a.id).await;
+    session(&srv, &a.id, &s1, 10, &up_to_first_call()).await;
     let mut sse = SseClient::connect(srv.addr, &chat_path(&a.id), &[]).await;
     let page = page_of(&mut sse).await;
     let (call_seq, status, _) = calls(&page.items)[0];
     assert_eq!(status, CallStatus::Running);
 
-    session(&srv, &a.id, "s-2", 20, &fixture_lines("clear-after")).await;
+    session(&srv, &a.id, "s-2", 2_000, &fixture_lines("clear-after")).await;
     let mut fresh = Vec::new();
     while !fresh
         .iter()
@@ -172,7 +179,7 @@ async fn joins_sessions_with_a_new_session_marker() {
         .iter()
         .position(|i| is_marker(i, MarkerKind::NewSession))
         .expect("a new-session marker");
-    assert_eq!(fresh[marker].at, 20);
+    assert_eq!(fresh[marker].at, 2_000);
     assert_eq!(fresh[marker].seq, page.items.len() as u64);
     assert!(
         matches!(&fresh[marker + 1].body, ChatBody::Prompt { text, .. } if text.starts_with("Read notes.txt")),
@@ -197,7 +204,8 @@ async fn joins_sessions_with_a_new_session_marker() {
 async fn a_stopped_agent_gets_its_whole_session_then_ended() {
     let srv = start().await;
     let a = spawn_ready(&srv.fx).await;
-    session(&srv, &a.id, "s-1", 10, &up_to_first_call()).await;
+    let s1 = own(&srv, &a.id).await;
+    session(&srv, &a.id, &s1, 10, &up_to_first_call()).await;
     srv.fx.svc.stop(&a.id).await.unwrap();
     let since = srv.fx.svc.agent(&a.id).await.unwrap().status_since;
     // The stream ends by itself, so the plain request returns with the whole body.
@@ -224,7 +232,8 @@ async fn history_pages_backwards() {
     let srv = start().await;
     let a = spawn_ready(&srv.fx).await;
     let lines: Vec<String> = (0..250).map(|n| prompt_line(&format!("p{n}"))).collect();
-    session(&srv, &a.id, "s-1", 10, &lines).await;
+    let s1 = own(&srv, &a.id).await;
+    session(&srv, &a.id, &s1, 10, &lines).await;
     let history = format!("/api/agents/{}/chat/history", a.id.0);
     let seqs = |p: &ChatPage| p.items.iter().map(|i| i.seq).collect::<Vec<_>>();
 
@@ -259,7 +268,9 @@ async fn history_pages_backwards() {
 async fn no_transcript_yet_is_an_empty_page() {
     let srv = start().await;
     let a = spawn_ready(&srv.fx).await;
-    session(&srv, &a.id, "s-1", 10, &[]).await;
+    let s1 = own(&srv, &a.id).await;
+    std::fs::remove_file(transcript(&srv, &s1)).unwrap();
+    session(&srv, &a.id, &s1, 10, &[]).await;
     let mut sse = SseClient::connect(srv.addr, &chat_path(&a.id), &[]).await;
     assert_eq!(
         page_of(&mut sse).await,
@@ -268,7 +279,7 @@ async fn no_transcript_yet_is_an_empty_page() {
             earlier: 0
         }
     );
-    append(&transcript(&srv, "s-1"), &[prompt_line(PROMPT_POINTER)]);
+    append(&transcript(&srv, &s1), &[prompt_line(PROMPT_POINTER)]);
     let items = items_of(&mut sse).await;
     let prompt_md = std::fs::read_to_string(PathBuf::from(&a.workdir).join(PROMPT_FILE)).unwrap();
     assert_eq!(
@@ -277,6 +288,25 @@ async fn no_transcript_yet_is_an_empty_page() {
             text: prompt_md,
             from: PromptFrom::Owner
         }
+    );
+}
+
+#[tokio::test]
+async fn a_new_agents_chat_knows_its_session_before_any_hook() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let s1 = own(&srv, &a.id).await;
+    let sessions = srv.fx.store.claude_sessions(&a.id).await.unwrap();
+    assert_eq!(sessions, [(s1.clone(), srv.fx.clock.now_for_test())]);
+    append(&transcript(&srv, &s1), &[prompt_line("hello")]);
+    let mut sse = SseClient::connect(srv.addr, &chat_path(&a.id), &[]).await;
+    let page = page_of(&mut sse).await;
+    assert_eq!(
+        page.items.iter().map(|i| &i.body).collect::<Vec<_>>(),
+        [&ChatBody::Prompt {
+            text: "hello".into(),
+            from: PromptFrom::Owner
+        }]
     );
 }
 

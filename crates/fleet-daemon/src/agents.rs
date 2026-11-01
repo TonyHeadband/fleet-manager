@@ -1832,6 +1832,10 @@ impl AgentService {
                 let id = uuid::Uuid::new_v4().to_string();
                 // Stored before the process starts, so a restart a moment later can still resume it.
                 self.store.set_claude_session(agent, &id).await?;
+                // Also kept in the agent's session list, so its chat finds the transcript before any hook reports it.
+                self.store
+                    .add_claude_session(agent, &id, self.opts.clock.now())
+                    .await?;
                 vec![
                     "--session-id".into(),
                     id,
