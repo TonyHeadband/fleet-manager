@@ -6,8 +6,8 @@ use fleet_api::{
     AgentId, AgentKind, Approval, DecideBreakdown, EventKind, MemberRef, Post, PostKind, PrState,
     Room, RoomKind, Status, StepDraft, TaskEvent, TaskEventKind, TaskPr, TaskState,
 };
-use fleet_daemon::agents::AgentService;
 use fleet_daemon::agents::ServiceError;
+use fleet_daemon::agents::{AgentService, PARKED_TAG};
 use fleet_daemon::fleet::breakdown::BreakdownAnswer;
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::rooms::posts::NO_ANSWER_YET;
@@ -1317,7 +1317,7 @@ async fn a_message_to_an_exited_supervisor_resumes_it() {
 }
 
 /// R9: a product room nudges a supervisor conversation only while it is live. An exited one is not resumed; the
-/// post is a chat row in it instead.
+/// post is parked for its next run instead, and is no chat row.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_product_room_post_does_not_resume_an_exited_supervisor() {
     let fx = fixture().await;
@@ -1347,6 +1347,47 @@ async fn a_product_room_post_does_not_resume_an_exited_supervisor() {
         "resumed by a product-room post"
     );
     assert_eq!(agent(&fx, &sup).await.status, Status::Stopped);
+}
+
+/// A parked post is kept for the supervisor and typed at its next resume, tagged so its chat does not show it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_parked_product_room_post_is_typed_when_the_supervisor_next_resumes() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    rooms::product_room(&fx.store, PRODUCT).await.unwrap();
+    let sup = conversation(&fx).await;
+    let session = ready_conversation(&fx, &sup).await;
+    look_in(&fx, &sup, &product_room()).await;
+    fx.svc.stop(&sup).await.unwrap();
+    assert!(wait_until(|| async { !fx.sessions.alive(&session) }).await);
+    let a = direct_from(&fx, None).await;
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase on main" }),
+        )
+        .await,
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!fx.sessions.alive(&session), "resumed by the parked post");
+
+    // The owner's next message resumes it; the parked line follows once it is at its input box.
+    Supervisor::new(fx.svc.clone())
+        .message(&sup, "any news?")
+        .await
+        .unwrap();
+    reach(&fx, &sup, Status::Review).await;
+    let name = {
+        let t = fx.store.task(&a).await.unwrap().unwrap();
+        t.title.filter(|t| !t.is_empty()).unwrap_or(t.name)
+    };
+    let line = format!(
+        "{NOTICE} {PARKED_TAG} new message from {name} in {}; call room_read.",
+        product_room()
+    );
+    wait_screen_in(&fx.sessions, &session, |s| s.contains(&line)).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

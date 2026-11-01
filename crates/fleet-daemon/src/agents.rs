@@ -73,6 +73,8 @@ pub const RESUME_PROMPT: &str =
 /// Starts every line the daemon types into an agent's session (a repo attached, granted or refused), so the chat
 /// shows it as the daemon's, not the owner's.
 pub const NOTICE_PREFIX: &str = "Fleet Manager: ";
+/// Marks a notice the owner already has in the product room (a parked post), so the chat does not show it as a row.
+pub const PARKED_TAG: &str = "[product room]";
 /// What `resume` types into a session that is still alive.
 pub const CONTINUE_PROMPT: &str = "continue";
 /// A resumed claude that exits within this long could not resume; it is stopped, not retried.
