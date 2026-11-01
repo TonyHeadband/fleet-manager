@@ -120,6 +120,19 @@ describe("Card", () => {
     expect(within(card).queryByText("Ada")).toBeNull();
   });
 
+  it("every_card_shows_its_persona_avatar", () => {
+    const { card } = draw(agent({ persona: "ada" }), { tag: "Ada" });
+    expect(card.querySelector(".avatar")).toHaveAttribute("data-kind", "persona");
+    expect(card.querySelector(".avatar")).toHaveAttribute("data-seed", "ada");
+    expect(card.querySelector(".avatar svg")).not.toBeNull();
+  });
+
+  it("a_card_without_a_persona_keeps_the_empty_frame", () => {
+    const { card } = draw(agent({ persona: "" }), { tag: "no persona" });
+    expect(card.querySelector(".avatar")).toHaveAttribute("title", "no persona");
+    expect(card.querySelector(".avatar svg")).toBeNull();
+  });
+
   it("needs_you_card_has_no_answer_field", () => {
     const { card } = draw(needs);
     expect(within(card).queryByRole("textbox")).toBeNull();
@@ -444,6 +457,20 @@ describe("Task cards", () => {
     expect(within(card).getByRole("img", { name: "Specialist" })).toBeInTheDocument();
     expect(card.querySelector(".avatar")).toHaveAttribute("title", "Ferris (rust)");
     expect(card).toHaveAttribute("data-outline", "stuck");
+  });
+
+  it("a_fleet_card_shows_its_persona_not_its_specialist", () => {
+    render(<Card schema={schema} agent={f("f2", { persona: "ada" })} now={NOW} tag="Ferris (rust)" onRun={vi.fn()} onOpen={vi.fn()} kind={{ type: "fleet", task: "Fix login", stuck: false }} />);
+    const avatar = screen.getByRole("article").querySelector(".avatar");
+    // The persona signs off the PR; the specialist is named on hover and drawn in the panel.
+    expect(avatar).toHaveAttribute("title", "Ferris (rust)");
+    expect(avatar).toHaveAttribute("data-kind", "persona");
+    expect(avatar).toHaveAttribute("data-seed", "ada");
+  });
+
+  it("a_lead_card_shows_its_persona", () => {
+    lead([o({ persona: "ada" }), f("f1", { persona: "ada" })]);
+    expect(screen.getByRole("group", { name: /^Fix login/ }).querySelector(".avatar")).toHaveAttribute("data-seed", "ada");
   });
 
   it("a_full_fleet_card_selects_like_any_card", () => {

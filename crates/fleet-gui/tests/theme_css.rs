@@ -83,6 +83,10 @@ fn palette_vars(p: &Palette, dark: bool) -> String {
         theme::watermark_alpha(dark)
     )
     .unwrap();
+    let (l, c, l2) = theme::avatar_oklch(dark);
+    writeln!(out, "  --avatar-l: {l};").unwrap();
+    writeln!(out, "  --avatar-c: {c};").unwrap();
+    writeln!(out, "  --avatar-l2: {l2};").unwrap();
     let (strong, soft) = theme::selection_alpha(dark);
     writeln!(out, "  --selection-alpha-strong: {strong};").unwrap();
     writeln!(out, "  --selection-alpha-soft: {soft};").unwrap();
@@ -538,6 +542,21 @@ fn theme_css_export() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, css()).unwrap();
     std::fs::write(path.with_file_name("layout.ts"), layout_ts()).unwrap();
+}
+
+#[test]
+fn the_avatar_colour_is_exported_for_both_themes() {
+    let css = css();
+    for want in [
+        "--avatar-l: 0.74;",
+        "--avatar-c: 0.14;",
+        "--avatar-l2: 0.58;",
+        "--avatar-l: 0.56;",
+        "--avatar-c: 0.15;",
+        "--avatar-l2: 0.7;",
+    ] {
+        assert!(css.contains(want), "{want} in {css}");
+    }
 }
 
 #[test]

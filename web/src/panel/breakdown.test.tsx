@@ -54,6 +54,19 @@ describe("Breakdown", () => {
     expect(css).toMatch(/\.steps tbody tr:nth-child\(odd\) \{[^}]*background: var\(--raised\)/);
   });
 
+  it("each_step_shows_its_specialists_avatar", () => {
+    show(viewOf([version(1, "approved", [step(1, "one", "done"), step(2, "two", "pending"), step(3, "three", "pending", null, { specialist: "reviewer" })])]));
+    const cells = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[2]!);
+    const avatars = cells.map((c) => c.querySelector(".avatar")!);
+    expect(avatars.map((a) => a.getAttribute("data-kind"))).toEqual(["specialist", "specialist", "specialist"]);
+    expect(avatars.map((a) => a.getAttribute("data-seed"))).toEqual(["rust", "rust", "reviewer"]);
+    // The picture leads the label.
+    expect(avatars[0]!.parentElement!.firstChild).toBe(avatars[0]);
+    expect(cells[0]).toHaveTextContent(/^rust$/);
+    const css = readFileSync("src/panel/panel.css", "utf8");
+    expect(css).toMatch(/\.steps \.avatar \{[^}]*width: [^;]+;[^}]*height: [^;]+;/);
+  });
+
   it("breakdown_shows_each_steps_mode_and_effort", () => {
     show(viewOf([version(1, "approved", [step(1, "one", "done", null, { mode: "manual", effort: "max" }), step(2, "two", "pending", null, { depends_on: [] })])]));
     expect(screen.getByText("manual (stricter)")).toBeInTheDocument();
