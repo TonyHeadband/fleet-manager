@@ -16,7 +16,8 @@ mod watch;
 
 use crate::store::{RoomRow, Store, StoreError};
 use fleet_api::{
-    Agent, AgentId, AgentKind, MemberRef, PrState, Room, RoomKind, RoomMember, Task, TaskState,
+    task_outcome, Agent, AgentId, AgentKind, MemberRef, Room, RoomKind, RoomMember, Task,
+    TaskOutcome,
 };
 use std::collections::HashSet;
 
@@ -259,13 +260,10 @@ async fn title_with(store: &Store, r: &RoomRow, agents: &[Agent]) -> Result<Stri
     })
 }
 
-/// Whether the task is over: archived, done, or every one of its PRs merged or closed. A task at Review with an
-/// open PR, or with none yet, is not.
+/// Whether the task is over, as its release counts it: merged, dropped or done by hand. A task at Review with an
+/// open PR, with none yet, with a PR closed unmerged, or with a changed repo still unmerged is not.
 pub(crate) fn ended(t: &Task) -> bool {
-    t.state == TaskState::Archived
-        || t.done_at.is_some()
-        || t.done_by_hand
-        || (!t.prs.is_empty() && t.prs.iter().all(|p| p.state != PrState::Open))
+    task_outcome(t) != TaskOutcome::Open
 }
 
 /// Brings the one task's rooms in line with the record: joined while it runs, left once it has ended.

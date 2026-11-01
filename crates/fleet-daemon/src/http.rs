@@ -1710,16 +1710,24 @@ async fn post_to_room(
     })
 }
 
+/// The owner's reply to an ask.
+enum Reply {
+    /// Approves a breakdown's version.
+    Approve,
+    /// Answers the ask; on a breakdown's ask, requests changes, whatever the text says.
+    Text(String),
+}
+
 /// What the owner's reply answers `q` with. A breakdown's ask takes `approve` alone, which approves the version, or
 /// text alone, which requests changes: approving keeps no comment, so both together are refused rather than the
 /// text dropped. Any other ask is answered with its text; `approve` there means nothing.
-fn reply_text(q: &Post, req: AskReply) -> Result<String, &'static str> {
+fn reply_of(q: &Post, req: AskReply) -> Result<Reply, &'static str> {
     let text = req.text.filter(|t| !t.trim().is_empty());
     let approve = req.approve == Some(true);
     match (q.breakdown_version.is_some(), approve, text) {
-        (true, true, None) => Ok("approve".into()),
+        (true, true, None) => Ok(Reply::Approve),
         (true, true, Some(_)) => Err("approve or request changes with a comment, not both"),
-        (_, _, Some(t)) => Ok(t),
+        (_, _, Some(t)) => Ok(Reply::Text(t)),
         (false, true, None) => Err("an ask is answered with text"),
         (_, false, None) => Err("the answer is empty"),
     }
@@ -1744,10 +1752,15 @@ async fn answer_room_ask(
             format!("post {post} is not an ask"),
         ));
     }
-    let text =
-        reply_text(&q, req).map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why.into()))?;
-    let answered =
-        detached(async move { st.svc.room_answer(&MemberRef::Owner, post, &text).await }).await??;
+    let reply =
+        reply_of(&q, req).map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why.into()))?;
+    let answered = detached(async move {
+        match reply {
+            Reply::Approve => st.svc.room_approve(post).await,
+            Reply::Text(text) => st.svc.room_answer(&MemberRef::Owner, post, &text).await,
+        }
+    })
+    .await??;
     if !answered {
         return Err(ApiError::new(
             StatusCode::CONFLICT,

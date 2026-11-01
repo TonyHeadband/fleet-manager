@@ -70,9 +70,27 @@ fn pr(state: PrState) -> Vec<TaskPr> {
     }]
 }
 
+/// A repo the task's branch changed, as the merge watcher marks it.
+fn changed(repo: &str) -> fleet_api::Workspace {
+    fleet_api::Workspace {
+        repo: repo.into(),
+        branch: "fleet/x".into(),
+        worktree: String::new(),
+        base: String::new(),
+        from_branch: None,
+        has_changes: true,
+        owned: false,
+        changed: true,
+    }
+}
+
+/// The task changed `core` and has one PR there in `state`.
 async fn set_prs(fx: &Fx, id: &AgentId, state: PrState) {
     fx.store
-        .update_task(id, |t| t.prs = pr(state))
+        .update_task(id, |t| {
+            t.repos = vec![changed("core")];
+            t.prs = pr(state);
+        })
         .await
         .unwrap();
 }
@@ -184,15 +202,45 @@ async fn the_operation_room_archives_when_every_task_has_ended() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_closed_pr_ends_the_task_too() {
+async fn a_pr_closed_unmerged_does_not_end_the_task() {
     let fx = fixture().await;
     let sup = conversation(&fx).await;
     let task = orchestrator(&fx, Some(&sup)).await;
     set_prs(&fx, &task, PrState::Closed).await;
     rooms::sync(&fx.store, 20).await.unwrap();
+    let op = &room_of(&fx, RoomKind::Operation).await[0];
+    assert_eq!(op.archived_at, None);
+    assert!(members(&fx, &op.id).await.contains(&MemberRef::Agent(task)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_with_one_repo_merged_and_another_without_a_pr_stays_in_its_rooms() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let task = orchestrator(&fx, Some(&sup)).await;
+    fx.store
+        .update_task(&task, |t| {
+            t.repos = vec![changed("core"), changed("web")];
+            t.prs = pr(PrState::Merged);
+        })
+        .await
+        .unwrap();
+    rooms::sync(&fx.store, 20).await.unwrap();
+    let op = &room_of(&fx, RoomKind::Operation).await[0];
+    assert_eq!(op.archived_at, None);
+    assert!(members(&fx, &op.id)
+        .await
+        .contains(&MemberRef::Agent(task.clone())));
+
+    // Done by hand ends it.
+    fx.store
+        .update_task(&task, |t| t.done_by_hand = true)
+        .await
+        .unwrap();
+    rooms::sync(&fx.store, 30).await.unwrap();
     assert_eq!(
         room_of(&fx, RoomKind::Operation).await[0].archived_at,
-        Some(20)
+        Some(30)
     );
 }
 
@@ -759,6 +807,36 @@ async fn an_answer_while_the_asker_is_working_types_nothing() {
     // It is not lost: the answer waits in the room.
     let read = tool(&svc, &a, "room_read", json!({})).await.0;
     assert!(read.contains("[answer] port 7070"), "{read}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_to_an_ended_task_tells_nobody() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let svc = with_hold(&fx, Duration::from_millis(300));
+    let reply = tool(
+        &svc,
+        &a,
+        "room_ask",
+        json!({ "to": "owner", "text": "which port?" }),
+    )
+    .await;
+    assert_eq!(reply.0, NO_ANSWER_YET);
+    let ask = wait_ask(&fx, &op_room(&sup)).await;
+    fx.store
+        .update_task(&a, |t| t.done_by_hand = true)
+        .await
+        .unwrap();
+    set_status(&fx, &a, Status::Review).await;
+
+    assert!(svc
+        .room_answer(&MemberRef::Owner, ask, "port 7070")
+        .await
+        .unwrap());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!screen(&fx.sessions, &a).contains(NOTICE));
+    assert!(fx.store.task(&a).await.unwrap().unwrap().inbox.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1798,11 +1876,7 @@ async fn approving_in_the_panel_answers_the_ask() {
     assert_eq!(answer.text, "approved in the panel");
 
     // Decided once: the room and the panel both find it decided.
-    assert!(!fx
-        .svc
-        .room_answer(&MemberRef::Owner, ask.id, "approve")
-        .await
-        .unwrap());
+    assert!(!fx.svc.room_approve(ask.id).await.unwrap());
     let err = fx
         .svc
         .decide_breakdown(&a, decision(true, None))
@@ -1845,16 +1919,24 @@ async fn approving_the_ask_approves_the_breakdown() {
         Some("split the api step")
     );
 
+    // Text never approves, not even `approve`.
     let (held, ask) = propose(&fx, &a, &room).await;
-    assert_eq!(ask.breakdown_version, Some(2));
     assert!(fx
         .svc
         .room_answer(&MemberRef::Owner, ask.id, "approve")
         .await
         .unwrap());
+    assert_eq!(
+        held_answer(held).await,
+        BreakdownAnswer::ChangesRequested("approve".into())
+    );
+
+    let (held, ask) = propose(&fx, &a, &room).await;
+    assert_eq!(ask.breakdown_version, Some(3));
+    assert!(fx.svc.room_approve(ask.id).await.unwrap());
     assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
     let p = fx.store.task(&a).await.unwrap().unwrap();
-    assert_eq!(p.breakdowns[1].approval, Approval::Approved);
+    assert_eq!(p.breakdowns[2].approval, Approval::Approved);
     assert!(fx
         .store
         .post(ask.id)
@@ -1863,7 +1945,10 @@ async fn approving_the_ask_approves_the_breakdown() {
         .unwrap()
         .answered_at
         .is_some());
-    assert_eq!(answer_to(&fx, ask.id, &room).await.text, "approve");
+    assert_eq!(
+        answer_to(&fx, ask.id, &room).await.text,
+        "approved in the room"
+    );
     // Neither path leaves the other pending.
     let err = fx
         .svc
@@ -1871,9 +1956,10 @@ async fn approving_the_ask_approves_the_breakdown() {
         .await
         .unwrap_err();
     assert!(matches!(err, ServiceError::NoPendingBreakdown), "{err:?}");
+    assert!(!fx.svc.room_approve(ask.id).await.unwrap());
     assert!(!fx
         .svc
-        .room_answer(&MemberRef::Owner, ask.id, "approve")
+        .room_answer(&MemberRef::Owner, ask.id, "more")
         .await
         .unwrap());
 }
@@ -1938,11 +2024,7 @@ async fn a_stale_breakdown_version_ask_is_refused() {
     assert_eq!(answer_to(&fx, v1.id, &room).await.text, "fewer steps");
 
     let (held, v2) = propose(&fx, &a, &room).await;
-    let err = fx
-        .svc
-        .room_answer(&MemberRef::Owner, v1.id, "approve")
-        .await
-        .unwrap_err();
+    let err = fx.svc.room_approve(v1.id).await.unwrap_err();
     assert_eq!(err.to_string(), "breakdown v1 is stale: v2 is the latest");
     let p = fx.store.task(&a).await.unwrap().unwrap();
     assert_eq!(p.breakdowns[1].approval, Approval::Proposed);
@@ -1973,11 +2055,7 @@ async fn a_new_version_supersedes_an_ask_left_open() {
     let answer = answer_to(&fx, v1.id, &room).await;
     assert_eq!(answer.text, "superseded by v2");
     assert_eq!(answer.sender, MemberRef::Daemon);
-    let err = fx
-        .svc
-        .room_answer(&MemberRef::Owner, v1.id, "approve")
-        .await
-        .unwrap_err();
+    let err = fx.svc.room_approve(v1.id).await.unwrap_err();
     assert_eq!(err.to_string(), "breakdown v1 is stale: v2 is the latest");
     held.abort();
 }
@@ -2461,13 +2539,25 @@ async fn the_owner_approves_a_breakdown_from_the_room() {
         BreakdownAnswer::ChangesRequested("split the api step".into())
     );
 
+    // Only `approve: true` approves: the text `approve` requests changes.
+    let (held, v2) = propose(&fx, &a, &room).await;
+    let (status, v) = answer_as_owner(&srv, v2.id, json!({ "text": "approve" })).await;
+    assert_eq!(status, 204, "{v}");
+    assert_eq!(
+        held_answer(held).await,
+        BreakdownAnswer::ChangesRequested("approve".into())
+    );
+
     let (held, v2) = propose(&fx, &a, &room).await;
     let (status, v) = answer_as_owner(&srv, v2.id, json!({ "approve": true })).await;
     assert_eq!(status, 204, "{v}");
     assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
     let p = fx.store.task(&a).await.unwrap().unwrap();
-    assert_eq!(p.breakdowns[1].approval, Approval::Approved);
-    assert_eq!(answer_to(&fx, v2.id, &room).await.text, "approve");
+    assert_eq!(p.breakdowns[2].approval, Approval::Approved);
+    assert_eq!(
+        answer_to(&fx, v2.id, &room).await.text,
+        "approved in the room"
+    );
     // The panel finds it decided.
     let err = fx
         .svc
@@ -2484,6 +2574,6 @@ async fn the_owner_approves_a_breakdown_from_the_room() {
     let (status, v) = answer_as_owner(&srv, v1.id, json!({ "approve": true })).await;
     assert_eq!(
         (status, v["error"].as_str()),
-        (409, Some("breakdown v1 is stale: v2 is the latest"))
+        (409, Some("breakdown v1 is stale: v3 is the latest"))
     );
 }

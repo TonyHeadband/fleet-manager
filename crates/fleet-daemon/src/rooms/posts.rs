@@ -26,6 +26,8 @@ pub const NO_ANSWER_YET: &str = "no answer yet; call room_read later";
 pub const SUPERVISOR_ASKS: &str = "the supervisor sends messages, not asks";
 pub const SUPERVISOR_DECIDES: &str = "breakdown approval waits for the owner until autopilot";
 pub const OWNER_DECIDES: &str = "breakdown approval waits for the owner";
+/// The answer an approved breakdown's ask gets.
+const APPROVED_IN_ROOM: &str = "approved in the room";
 
 /// `breakdown vN: <n> steps — <first step title>, …`
 fn breakdown_line(v: &BreakdownVersion) -> String {
@@ -447,19 +449,14 @@ impl AgentService {
         ask: i64,
         text: &str,
     ) -> Result<bool, ServiceError> {
-        let q = self
-            .store
-            .post(ask)
-            .await?
-            .filter(|p| p.kind == PostKind::Ask)
-            .ok_or_else(|| refuse(format!("no ask {ask}")))?;
+        let q = self.ask(ask).await?;
         let room = self
             .store
             .room(&q.room)
             .await?
             .ok_or_else(|| refuse(format!("no room {}", q.room)))?;
         if let Some(v) = q.breakdown_version {
-            return self.decide_breakdown_ask(by, &q, v, text).await;
+            return self.decide_breakdown_ask(by, &q, v, Some(text)).await;
         }
         if by != &MemberRef::Owner {
             if by == &q.sender {
@@ -493,15 +490,36 @@ impl AgentService {
         Ok(true)
     }
 
-    /// An answer to a breakdown's ask is the owner's decision on that version: `approve` approves it, any other
-    /// text asks for changes with the text as the comment. `decide_breakdown` marks the ask answered. False when the
-    /// version was decided already.
+    /// The owner's approval of the breakdown version the ask puts to them: the one answer that approves, since text
+    /// always asks for changes. False when the version was decided already.
+    pub async fn room_approve(&self, ask: i64) -> Result<bool, ServiceError> {
+        let q = self.ask(ask).await?;
+        let Some(v) = q.breakdown_version else {
+            return Err(refuse(format!(
+                "ask {ask} is not a breakdown's: answer it with text"
+            )));
+        };
+        self.decide_breakdown_ask(&MemberRef::Owner, &q, v, None)
+            .await
+    }
+
+    async fn ask(&self, ask: i64) -> Result<Post, ServiceError> {
+        self.store
+            .post(ask)
+            .await?
+            .filter(|p| p.kind == PostKind::Ask)
+            .ok_or_else(|| refuse(format!("no ask {ask}")))
+    }
+
+    /// An answer to a breakdown's ask is the owner's decision on that version: `comment` asks for changes with it,
+    /// whatever it says, and None approves. `decide_breakdown` marks the ask answered. False when the version was
+    /// decided already.
     async fn decide_breakdown_ask(
         &self,
         by: &MemberRef,
         q: &Post,
         version: u32,
-        text: &str,
+        comment: Option<&str>,
     ) -> Result<bool, ServiceError> {
         match by {
             MemberRef::Owner => {}
@@ -518,7 +536,7 @@ impl AgentService {
         let MemberRef::Agent(task) = &q.sender else {
             return Err(refuse(format!("no ask {}", q.id)));
         };
-        if text.trim().is_empty() {
+        if comment.is_some_and(|c| c.trim().is_empty()) {
             return Err(ServiceError::EmptyText);
         }
         let latest = self
@@ -531,13 +549,13 @@ impl AgentService {
                 "breakdown v{version} is stale: v{latest} is the latest"
             )));
         }
-        let approve = text.trim().eq_ignore_ascii_case("approve");
         let d = DecideBreakdown {
-            approve,
-            comment: (!approve).then(|| text.to_string()),
+            approve: comment.is_none(),
+            comment: comment.map(String::from),
             version: Some(version),
         };
-        match self.decide_breakdown_as(task, d, Some(text)).await {
+        let answer = comment.unwrap_or(APPROVED_IN_ROOM);
+        match self.decide_breakdown_as(task, d, Some(answer)).await {
             Ok(()) => Ok(true),
             Err(ServiceError::NoPendingBreakdown) => Ok(false),
             Err(e) => Err(e),
@@ -619,6 +637,12 @@ impl AgentService {
         let MemberRef::Agent(asker) = &q.sender else {
             return;
         };
+        // As for reposts: the task left its rooms when it ended, and nobody waits on the answer any more.
+        if let Ok(Some(t)) = self.store.task(asker).await {
+            if super::ended(&t) {
+                return;
+            }
+        }
         let text = format!(
             "{} answered your ask {}: {}",
             answer.sender_name,
