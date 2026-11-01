@@ -6,7 +6,7 @@
 .chart-swatch { flex: none; width: var(--size-meta); height: var(--size-meta); }
 .chart-baseline, .chart-tick { stroke: var(--fill); stroke-width: 1px; fill: none; }
 .chart-tick-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); }
-.chart-tooltip { position: absolute; z-index: 3; pointer-events: none; }
+.chart-tooltip { position: absolute; width: max-content; max-width: 100%; z-index: 3; pointer-events: none; }
 
 @media (prefers-reduced-motion: no-preference) {
   /* A mark enters once, staggered by its index; the hook only sets data-enter when motion is on. */

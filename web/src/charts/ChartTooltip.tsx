@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { layout } from "../generated/layout";
 import "./charts.css";
 
-const GAP = 12;
+const GAP = layout.cardPadding;
 
 /** Opens below (x, y) in the block's coordinates, kept inside the block's width. */
 export function ChartTooltip({ x, y, lines }: { x: number; y: number; lines: string[] }) {

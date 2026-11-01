@@ -122,6 +122,21 @@ describe("chart shared pieces", () => {
     expect(motion).toMatch(/\.fui-tooltip \{ animation: fui-tip /);
   });
 
+  it("the_tooltip_clamps_inside_the_block_at_both_edges", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(200);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(80);
+    const left = (x: number) => {
+      const { unmount } = render(<ChartTooltip x={x} y={0} lines={["a"]} />);
+      const v = (screen.getByRole("tooltip") as HTMLElement).style.left;
+      unmount();
+      return v;
+    };
+    expect(left(5)).toBe("0px");
+    expect(left(100)).toBe("60px");
+    expect(left(195)).toBe("120px");
+    vi.restoreAllMocks();
+  });
+
   it("the_hidden_table_is_visually_hidden_but_read", () => {
     render(<HiddenTable caption="Tasks by day" rows={[["Mon", "12"], ["Tue", "3"]]} />);
     const table = screen.getByRole("table", { name: "Tasks by day" });
