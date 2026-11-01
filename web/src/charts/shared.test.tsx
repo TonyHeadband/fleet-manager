@@ -1,6 +1,7 @@
 import { act, render, renderHook, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { motion } from "../generated/layout";
 import { paintVar } from "./paint";
 import { linear, niceTicks, plainFormat } from "./scale";
 import { useSize } from "./useSize";
@@ -75,16 +76,25 @@ describe("chart shared pieces", () => {
   });
 
   it("the_entry_plays_once_across_updates", () => {
-    vi.stubGlobal("matchMedia", () => ({ matches: false }));
-    const { result, rerender } = renderHook(({ d }) => useChartEntry(d), { initialProps: { d: false } });
-    expect(result.current).toBe(false);
-    rerender({ d: true });
-    expect(result.current).toBe(true);
-    rerender({ d: true });
-    expect(result.current).toBe(false);
-    rerender({ d: false });
-    rerender({ d: true });
-    expect(result.current).toBe(false);
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("matchMedia", () => ({ matches: false }));
+      const { result, rerender } = renderHook(({ d }) => useChartEntry(d), { initialProps: { d: false } });
+      expect(result.current).toBe(false);
+      rerender({ d: true });
+      expect(result.current).toBe(true);
+      rerender({ d: true });
+      expect(result.current).toBe(true);
+      act(() => void vi.advanceTimersByTime(motion.wipe + motion.stagger * motion.staggerCap + 1));
+      expect(result.current).toBe(false);
+      rerender({ d: true });
+      expect(result.current).toBe(false);
+      rerender({ d: false });
+      rerender({ d: true });
+      expect(result.current).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the_entry_is_off_with_motion_off", () => {
