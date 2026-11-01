@@ -29,8 +29,10 @@ export function linear(d0: number, d1: number, r0: number, r1: number): (v: numb
   return (v) => r0 + ((v - d0) / span) * (r1 - r0);
 }
 
-/** Nice ticks that stop at `max` itself, for scales whose end is the limit (a capacity), not a rounded-up axis. */
+/** Nice ticks that stop at `max` itself; a nice tick within half a step of `max` is dropped so labels never collide. */
 export function limitTicks(max: number, count = 4): number[] {
   if (!Number.isFinite(max) || max <= 0) return [0];
-  return [...niceTicks(max, count).filter((t) => t < max), max];
+  const nice = niceTicks(max, count);
+  const step = nice.length > 1 ? nice[1]! - nice[0]! : max;
+  return [...nice.filter((t) => t === 0 || (t < max && max - t >= step / 2)), max];
 }

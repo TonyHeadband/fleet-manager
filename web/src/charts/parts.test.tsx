@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { layout, motion } from "../generated/layout";
 import { Donut } from "./Donut";
 import { Meter } from "./Meter";
+import { limitTicks } from "./scale";
+import { ScaleTicks } from "./ScaleTicks";
 import { SegmentedBar } from "./SegmentedBar";
 
 let observed: ((entries: { contentRect: { width: number; height: number } }[]) => void) | null = null;
@@ -253,12 +255,40 @@ describe("survive all zero", () => {
   it("segmented_bar_meter_and_donut_survive_all_zero", () => {
     motionOff();
     const zero = segs.map((s) => ({ ...s, value: 0 }));
-    const a = render(<SegmentedBar label="S" segments={zero} max={0} />);
-    const b = render(<Meter label="M" value={0} max={0} marks={[{ at: 0, label: "z", tone: "danger" }]} />);
-    const c = render(<Donut label="D" slices={zero} />);
-    const d = render(<SegmentedBar label="S2" segments={[{ ...segs[0]!, value: Number.NaN }, segs[1]!]} max={Number.NaN} />);
-    const e = render(<Meter label="M2" value={Number.POSITIVE_INFINITY} max={Number.NaN} />);
-    act(() => observed?.([{ contentRect: { width: 300, height: 100 } }]));
-    for (const r of [a, b, c, d, e]) noNaN(r.container);
+    const each = (ui: React.ReactElement) => {
+      const r = render(ui);
+      size(300);
+      noNaN(r.container);
+      return r.container;
+    };
+    const a = each(<SegmentedBar label="S" segments={zero} max={0} />);
+    expect(a.querySelector(".chart-nodata")?.textContent).toBe("No data");
+    expect(a.querySelectorAll(".chart-outline")).toHaveLength(1);
+    const b = each(<Meter label="M" value={0} max={0} marks={[{ at: 0, label: "z", tone: "danger" }]} />);
+    expect(b.querySelector(".chart-meter-fill")).not.toBeNull();
+    const c = each(<Donut label="D" slices={zero} />);
+    expect(c.querySelector(".chart-nodata")?.textContent).toBe("No data");
+    expect(c.querySelectorAll(".chart-outline")).toHaveLength(1);
+    const d = each(<SegmentedBar label="S2" segments={[{ ...segs[0]!, value: Number.NaN }, segs[1]!]} max={Number.NaN} />);
+    expect(d.querySelectorAll(".chart-seg")).toHaveLength(2);
+    const e = each(<Meter label="M2" value={Number.POSITIVE_INFINITY} max={Number.NaN} />);
+    expect(e.querySelector(".chart-meter-fill")).not.toBeNull();
+  });
+});
+
+describe("limitTicks", () => {
+  it("drops_a_nice_tick_near_max", () => {
+    expect(limitTicks(101)).toEqual([0, 50, 101]);
+    expect(limitTicks(41)).toEqual([0, 20, 41]);
+    expect(limitTicks(205)).toEqual([0, 100, 205]);
+    expect(limitTicks(100)).toEqual([0, 25, 50, 75, 100]);
+    expect(limitTicks(0)).toEqual([0]);
+  });
+});
+
+describe("ScaleTicks anchors", () => {
+  it("end_labels_anchor_inward_and_the_rest_centre", () => {
+    const { container } = render(<svg><ScaleTicks width={300} ticks={[0, 25, 50]} max={50} format={String} labels /></svg>);
+    expect(Array.from(container.querySelectorAll("text")).map((t) => t.getAttribute("text-anchor"))).toEqual(["start", "middle", "end"]);
   });
 });

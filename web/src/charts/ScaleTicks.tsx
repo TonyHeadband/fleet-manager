@@ -10,11 +10,11 @@ export function ScaleTicks({ width, ticks, max, format, labels }: { width: numbe
   return (
     <g className="chart-scale">
       <line className="chart-baseline" x1={0} x2={width} y1={0} y2={0} />
-      {ticks.map((t) => (
+      {ticks.map((t, i) => (
         <g key={t}>
           <line className="chart-tick" x1={x(t)} x2={x(t)} y1={0} y2={column.tickLen} />
           {labels && (
-            <text className="chart-tick-label" x={x(t)} y={LABEL_Y} textAnchor="middle" dominantBaseline="hanging">
+            <text className="chart-tick-label" x={x(t)} y={LABEL_Y} textAnchor={i === 0 ? "start" : i === ticks.length - 1 && ticks.length > 1 ? "end" : "middle"} dominantBaseline="hanging">
               {format(t)}
             </text>
           )}
