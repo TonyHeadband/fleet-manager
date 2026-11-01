@@ -28,3 +28,9 @@ export function linear(d0: number, d1: number, r0: number, r1: number): (v: numb
   if (!span || !Number.isFinite(span)) return () => r0;
   return (v) => r0 + ((v - d0) / span) * (r1 - r0);
 }
+
+/** Nice ticks that stop at `max` itself, for scales whose end is the limit (a capacity), not a rounded-up axis. */
+export function limitTicks(max: number, count = 4): number[] {
+  if (!Number.isFinite(max) || max <= 0) return [0];
+  return [...niceTicks(max, count).filter((t) => t < max), max];
+}

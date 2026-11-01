@@ -50,3 +50,22 @@
   from { clip-path: inset(100% 0 0 0); }
   to { clip-path: inset(0); }
 }
+
+.chart-parts { position: relative; display: flex; flex-direction: column; gap: var(--space-header-gap); }
+.chart-parts svg { display: block; overflow: visible; }
+.chart-outline { fill: none; stroke: var(--border); stroke-width: 1px; }
+.chart-seg-hit { fill: transparent; pointer-events: all; }
+.chart-mark-label { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-meta); }
+.chart-donut { flex-direction: row; align-items: center; gap: var(--space-item); }
+.chart-donut-arc { fill: none; }
+.chart-donut-center { fill: var(--text); font-family: var(--font-mono); font-size: var(--size-small); }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The donut's arcs sweep round from 12 o'clock; each path is normalised to a pathLength of 100. */
+  :root:not([data-animations="off"]) [data-enter="sweep"] { animation-name: chart-sweep; }
+}
+@keyframes chart-sweep {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+.chart-meter-mark { stroke-width: 1px; fill: none; }
