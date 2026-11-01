@@ -74,6 +74,7 @@ import { TasksView } from "./tasks/TasksView";
 import { NO_RELEASES_STATE, ReleasesView, type ReleasesState } from "./releases/ReleasesView";
 import { FleetView } from "./management/FleetView";
 import { RulesPage } from "./management/RulesPage";
+import { ChartCatalog } from "./charts";
 import { NotYet } from "./ui/NotYet";
 import { Overview } from "./management/Overview";
 import { Workflow } from "./management/Workflow";
@@ -794,6 +795,14 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             }
           }}
         />
+      </Shell>
+    );
+  }
+
+  if (route === "gallery") {
+    return (
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Gallery</h1>} footer={footer} dialog={appDialogs(dialog)}>
+        <ChartCatalog />
       </Shell>
     );
   }

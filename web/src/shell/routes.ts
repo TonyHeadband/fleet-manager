@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-export type Route = "kanban" | "tasks" | "releases" | "fleet" | "settings";
+export type Route = "kanban" | "tasks" | "releases" | "fleet" | "settings" | "gallery";
 
 /** The drawer's views, as Lite lists them: the work, then a separator, then the app's own pages. */
 export const VIEWS: { route: Route; label: string }[][] = [
@@ -23,6 +23,8 @@ export function routeFromHash(hash: string): Route {
   const name = hash.replace(/^#/, "").split("?")[0];
   // Fleet was Management: an address saved before still opens it.
   if (name === "management") return "fleet";
+  // The chart catalog is a development aid until the grid editor shows it: a shipped build routes it to the board.
+  if (name === "gallery" && import.meta.env.DEV) return "gallery";
   return ON_WEB.find((r) => r === name) ?? "kanban";
 }
 
