@@ -3,6 +3,8 @@ mod common;
 use common::*;
 use fleet_api::{AgentId, EventKind, Status, TaskEvent, TaskEventKind};
 use fleet_daemon::supervisor::{route, start_event_watcher, Supervisor};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Executor};
 use std::time::Duration;
 
 async fn conversation(fx: &Fx) -> AgentId {
@@ -87,6 +89,53 @@ async fn a_task_without_origin_goes_to_the_latest_conversation() {
     origin(&fx, &a.id, &AgentId("gone".into())).await;
     route_again(&fx, &a.id).await;
     assert_eq!(events(&fx, &latest).await.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_start_leaves_no_conversation_to_catch_events() {
+    let (fx, db) = fixture_on_file().await;
+    let live = conversation(&fx).await;
+    let a = spawn_ready(&fx).await;
+    // The next launch fails after the conversation's agent and row are stored.
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&db)
+        .connect()
+        .await
+        .unwrap();
+    conn.execute(
+        "CREATE TRIGGER no_launch BEFORE INSERT ON claude_sessions BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    )
+    .await
+    .unwrap();
+    let failed = Supervisor::new(fx.svc.clone())
+        .new_conversation(PERSONA, "and now?")
+        .await;
+    assert!(failed.is_err(), "{failed:?}");
+    let rows = fx.store.conversations(PERSONA).await.unwrap();
+    assert_eq!(
+        rows.iter().map(|c| &c.id).collect::<Vec<_>>(),
+        vec![&live],
+        "the failed start's row stays"
+    );
+
+    route_again(&fx, &a.id).await;
+    assert_eq!(events(&fx, &live).await.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fallback_skips_a_conversation_whose_agent_is_gone() {
+    let fx = fixture().await;
+    let live = conversation(&fx).await;
+    let gone = conversation(&fx).await;
+    fx.store
+        .touch_conversation(&gone, i64::MAX / 2)
+        .await
+        .unwrap();
+    fx.store.remove_agent(&gone).await.unwrap();
+    let a = spawn_ready(&fx).await;
+    route_again(&fx, &a.id).await;
+    assert_eq!(events(&fx, &live).await.len(), 1);
+    assert!(events(&fx, &gone).await.is_empty());
 }
 
 async fn route_again(fx: &Fx, task: &AgentId) {

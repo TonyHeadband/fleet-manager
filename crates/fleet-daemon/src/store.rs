@@ -1496,6 +1496,15 @@ impl Store {
         Ok(())
     }
 
+    pub async fn remove_conversation(&self, id: &AgentId) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("DELETE FROM supervisor_conversations WHERE id = ?")
+            .bind(&id.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// The persona's conversations, most recently used first.
     pub async fn conversations(&self, persona: &str) -> Result<Vec<ConversationRow>> {
         let rows = sqlx::query(

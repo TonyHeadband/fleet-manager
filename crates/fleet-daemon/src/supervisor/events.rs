@@ -10,7 +10,7 @@ use tracing::warn;
 
 /// Stores the event and broadcasts it. `task` may be a specialist: the event goes to its task. It goes to the
 /// conversation that started the task; if that is gone or the task has no origin, to the persona's most recently
-/// used one; with none, nowhere, but it is still stored and broadcast so it toasts.
+/// used one that still has its agent; with none, nowhere, but it is still stored and broadcast so it toasts.
 pub async fn route(
     svc: &AgentService,
     task: &AgentId,
@@ -35,7 +35,17 @@ pub(crate) async fn route_with(
     let origin = t
         .origin
         .filter(|o| conversations.iter().any(|c| &c.id == o));
-    let conversation = origin.or_else(|| conversations.first().map(|c| c.id.clone()));
+    let conversation = match origin {
+        Some(o) => Some(o),
+        // A row whose agent is gone (a start that failed before its row could go) cannot read the event.
+        None => {
+            let agents = store.snapshot().await?.agents;
+            conversations
+                .into_iter()
+                .find(|c| agents.iter().any(|a| a.id == c.id))
+                .map(|c| c.id)
+        }
+    };
     store
         .add_task_event(&TaskEvent {
             id: 0,

@@ -234,7 +234,6 @@ impl Supervisor {
             )
             .await;
         if let Err(e) = launched {
-            // The conversation row stays, without an agent: `list` leaves it out.
             self.forget(&id, &[&settings_dir, &cwd]).await;
             return Err(e.into());
         }
@@ -334,10 +333,13 @@ impl Supervisor {
         }
     }
 
-    /// Undoes a start whose agent was stored: its card and its folders go.
+    /// Undoes a start whose agent was stored: its card, its conversation row and its folders go.
     async fn forget(&self, id: &AgentId, dirs: &[&Path]) {
         if let Err(e) = self.svc.store.remove_agent(id).await {
             warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot remove a failed supervisor start");
+        }
+        if let Err(e) = self.svc.store.remove_conversation(id).await {
+            warn!(agent_id = %id.0, error = %one_line(&e.to_string()), "cannot remove a failed supervisor start's conversation");
         }
         remove_dirs(dirs);
     }
