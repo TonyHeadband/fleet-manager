@@ -148,6 +148,11 @@ fn ancestor_excludes(task_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// How long Claude waits on the PermissionRequest hook, in seconds (the hook entry's `timeout`). The daemon holds it
+/// open until the owner answers from the chat; past this Claude stops waiting and its TUI prompt stays up. Written
+/// out rather than left to Claude's default, which is 600 s too but was only read from its bundle.
+pub const PERMISSION_HOLD_SECS: u64 = 600;
+
 /// These two events only support command handlers, so they pipe the payload to the same URL with curl.
 const COMMAND_EVENTS: [&str; 2] = ["SessionStart", "SessionEnd"];
 
@@ -248,15 +253,16 @@ fn hooks(base_url: &str, agent: &AgentId) -> Value {
     let url = format!("{base_url}/internal/hooks/{}", agent.0);
     let mut hooks = serde_json::Map::new();
     for ev in HTTP_EVENTS {
-        hooks.insert(
-            ev.into(),
-            json!([{ "matcher": "", "hooks": [{
-                "type": "http",
-                "url": url,
-                "headers": { "X-Fleet-Token": "$FLEET_TOKEN" },
-                "allowedEnvVars": ["FLEET_TOKEN"],
-            }]}]),
-        );
+        let mut hook = json!({
+            "type": "http",
+            "url": url,
+            "headers": { "X-Fleet-Token": "$FLEET_TOKEN" },
+            "allowedEnvVars": ["FLEET_TOKEN"],
+        });
+        if ev == "PermissionRequest" {
+            hook["timeout"] = json!(PERMISSION_HOLD_SECS);
+        }
+        hooks.insert(ev.into(), json!([{ "matcher": "", "hooks": [hook] }]));
     }
     // `|| true`: a daemon that is down must never make Claude Code report a hook error.
     let command = format!(

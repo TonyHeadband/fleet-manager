@@ -122,6 +122,9 @@ fn settings_file_has_a_hook_for_each_mapped_event() {
             assert_eq!(h["url"], url);
             assert_eq!(h["headers"]["X-Fleet-Token"], "$FLEET_TOKEN");
             assert_eq!(h["allowedEnvVars"], json!(["FLEET_TOKEN"]));
+            // Only a permission prompt is held open for the owner; the other hooks answer at once.
+            let timeout = (name == "PermissionRequest").then_some(json!(600));
+            assert_eq!(h.get("timeout"), timeout.as_ref(), "{name}");
         }
     }
 }

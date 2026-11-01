@@ -77,3 +77,58 @@ pub struct ChatPage {
     #[ts(type = "number")]
     pub earlier: u64,
 }
+
+/// A prompt the agent waits on, as the chat shows it. Sent as the chat stream's `ask` event (`null` when none).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct ChatAsk {
+    pub id: String,
+    pub kind: AskKind,
+    /// The label of the choice that answered it; the ask is sent once answered before it clears.
+    pub answered: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum AskKind {
+    /// Claude wants to run a tool. Options: `allow`, `allow_session` (only where Claude suggests rules), `deny`.
+    Permission {
+        tool: String,
+        #[schema(value_type = Object)]
+        #[ts(type = "unknown")]
+        input: serde_json::Value,
+        options: Vec<AskOption>,
+    },
+    /// AskUserQuestion. Option ids are `<question>.<option>`, both from 0.
+    Question { questions: Vec<AskQuestion> },
+    /// A prompt with no hook held for it: the agent's current screen, answered through the reply box.
+    Screen { text: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct AskOption {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct AskQuestion {
+    pub header: String,
+    pub question: String,
+    pub options: Vec<AskOption>,
+    pub multi_select: bool,
+}
+
+/// The body of `POST /api/agents/{id}/asks/{ask}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct AskAnswer {
+    /// A permission's option id. For a question, the chosen option ids joined with `,` (several only for a
+    /// multi-select or a form of several questions); may be empty when `text` answers.
+    pub choice: String,
+    /// A question's free-text answer, for the one question no option of `choice` answers.
+    pub text: Option<String>,
+}

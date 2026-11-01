@@ -1,4 +1,5 @@
 //! Claude Code transcript lines → chat items.
+pub mod asks;
 mod build;
 mod read;
 pub mod stream;

@@ -17,7 +17,10 @@ mod task;
 mod tool;
 mod ui;
 
-pub use chat::{CallStatus, ChatBody, ChatItem, ChatPage, MarkerKind, PromptFrom};
+pub use chat::{
+    AskAnswer, AskKind, AskOption, AskQuestion, CallStatus, ChatAsk, ChatBody, ChatItem, ChatPage,
+    MarkerKind, PromptFrom,
+};
 pub use event::{Event, EventKind, Snapshot};
 pub use fleet::{
     rollup, task_id, AgentKind, Approval, BreakdownVersion, DecideBreakdown, DefFile, DefInfo,
@@ -78,6 +81,7 @@ use utoipa::OpenApi;
         routes::terminal_stream,
         routes::chat_stream,
         routes::chat_history,
+        routes::answer_ask,
         routes::event_stream,
         routes::ui_schema,
         routes::list_products,
@@ -244,7 +248,12 @@ use utoipa::OpenApi;
         PromptFrom,
         CallStatus,
         MarkerKind,
-        ChatPage
+        ChatPage,
+        ChatAsk,
+        AskKind,
+        AskOption,
+        AskQuestion,
+        AskAnswer
     ))
 )]
 struct ApiDoc;

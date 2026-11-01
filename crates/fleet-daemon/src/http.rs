@@ -1,11 +1,13 @@
 //! The daemon's HTTP surface: JSON commands, SSE event, terminal and chat streams, and the hook ingress.
 use crate::agent_config;
 use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
+use crate::chat::asks::{AnswerError, Asks, SCREEN_ID};
 use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{Defs, FleetError};
 use crate::fleet::env;
 use crate::fleet::workflow::{self, WorkflowError};
 use crate::git::GitError;
+use crate::hooks_cfg::PERMISSION_HOLD_SECS;
 use crate::ingest::{authenticate, ingest, IngestError, IngestOutcome};
 use crate::internal::InternalError;
 use crate::overrides;
@@ -25,15 +27,15 @@ use axum::{Json, Router};
 use fleet_api::{
     breakdown_decision, check, check_submit, default_ui_schema, openapi, release_create,
     release_edit, repo_request, AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AgentId,
-    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, ChatPage,
-    CheckoutInfo, CheckoutList, ControlRequest, DecideBreakdown, DefFile, DefInfo, DefKind,
-    EffectiveSettings, EventKind, FieldError, FleetView, FormDef, GrantRepoRequest,
-    HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles, InternalHistory,
-    InternalRemote, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
-    PersonaList, PersonaUpdate, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
-    ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, SetTaskRelease, Snapshot, SpawnRequest,
-    SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList, VersionInfo,
-    Workspace,
+    AnswerRequest, ArchiveOrphanRequest, ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer,
+    AskKind, BlockedReason, ChatAsk, ChatPage, CheckoutInfo, CheckoutList, ControlRequest,
+    DecideBreakdown, DefFile, DefInfo, DefKind, EffectiveSettings, EventKind, FieldError,
+    FleetView, FormDef, GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile,
+    InternalFiles, InternalHistory, InternalRemote, NewPersona, NewProduct, NewRelease,
+    OrphanRequest, OverridesPut, Persona, PersonaList, PersonaUpdate, Product, ProductList,
+    ProductUpdate, RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert,
+    SetTaskRelease, Snapshot, SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task,
+    TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -47,6 +49,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{warn, Instrument};
 
 const PREVIEW_EVERY: Duration = Duration::from_millis(100);
+/// How long a PermissionRequest hook is held: answered `{}` a little before Claude gives up on it, so the reply is
+/// never one Claude has already stopped reading.
+const ASK_HOLD: Duration = Duration::from_secs(PERMISSION_HOLD_SECS - 10);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -64,6 +69,9 @@ pub struct AppState {
     api_token: Arc<str>,
     /// Poked on each of an agent's hooks, so its chat streams read the transcript without waiting for their poll.
     chat_wake: ChatWake,
+    /// The prompts agents wait on, each a held PermissionRequest hook.
+    asks: Asks,
+    ask_hold: Duration,
 }
 
 impl AppState {
@@ -88,6 +96,8 @@ impl AppState {
             tools,
             api_token: new_token().into(),
             chat_wake: ChatWake::default(),
+            asks: Asks::default(),
+            ask_hold: ASK_HOLD,
         }
     }
 
@@ -107,6 +117,13 @@ impl AppState {
     /// The tools `/api/tools` reports; the service's own unless set.
     pub fn with_tools(mut self, tools: Tools) -> AppState {
         self.tools = tools;
+        self
+    }
+
+    /// How long a PermissionRequest hook is held; tests shorten it.
+    #[doc(hidden)]
+    pub fn with_ask_hold(mut self, hold: Duration) -> AppState {
+        self.ask_hold = hold;
         self
     }
 
@@ -147,6 +164,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}/terminal", get(terminal))
         .route("/api/agents/{id}/chat", get(chat_stream))
         .route("/api/agents/{id}/chat/history", get(chat_history))
+        .route("/api/agents/{id}/asks/{ask}", post(answer_ask))
         .route("/api/agents/{id}/attach", get(attach_agent))
         .route("/api/agents/{id}/diff", get(diff))
         .route("/api/agents/{id}/repos", post(add_repo))
@@ -1416,7 +1434,24 @@ async fn hook(
     let token = headers.get("x-fleet-token").and_then(|v| v.to_str().ok());
     let now = st.svc.options().clock.now();
     let id = AgentId(id);
+    let event = body
+        .get("hook_event_name")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    // Held before the status turns NeedsYou, so the chat never shows this prompt as the screen fallback first.
+    let held = if event.as_deref() == Some("PermissionRequest") {
+        authenticate(&st.store, &id, token).await?;
+        st.asks.hold(&id, &body)
+    } else {
+        None
+    };
     let outcome = ingest(&st.store, &id, token, body, now).await?;
+    match event.as_deref() {
+        Some("PermissionRequest") => {}
+        // Fires while a prompt is still open (about 6 s in), so it says nothing about the prompt being answered.
+        Some("Notification") => {}
+        _ => st.asks.clear(&id),
+    }
     st.chat_wake.poke(&id);
     if let IngestOutcome::Applied(events) = outcome {
         // An agent that exited on its own is weighed like a stopped one, for the Tasks view.
@@ -1433,7 +1468,55 @@ async fn hook(
             st.svc.request_measure(&id);
         }
     }
+    // Held until the owner answers from the chat; dropped with the connection when Claude stops waiting.
+    if let Some(held) = held {
+        return Ok(Json(held.wait(st.ask_hold).await));
+    }
     Ok(Json(json!({})))
+}
+
+/// 404 unknown agent or ask; 409 answered already; 400 a choice the ask does not offer, or the `screen` ask.
+async fn answer_ask(
+    State(st): State<AppState>,
+    Path((id, ask)): Path<(String, String)>,
+    Json(answer): Json<AskAnswer>,
+) -> Result<StatusCode, ApiError> {
+    let id = AgentId(id);
+    st.svc.agent(&id).await?;
+    st.asks.answer(&id, &ask, &answer).map_err(|e| match e {
+        AnswerError::Unknown => ApiError::new(StatusCode::NOT_FOUND, "no such prompt".into()),
+        AnswerError::Answered => ApiError::new(
+            StatusCode::CONFLICT,
+            "this prompt was already answered".into(),
+        ),
+        AnswerError::Screen => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "this prompt is answered through the reply box".into(),
+        ),
+        AnswerError::Bad(m) => ApiError::new(StatusCode::BAD_REQUEST, m),
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// What the chat shows the agent waiting on: its held prompt, or, when it waits on a prompt no hook holds (the hook
+/// timed out or dropped, or never came), its current screen.
+/// Also the registry version it was read at (see `Asks::get`).
+fn current_ask(st: &AppState, agent: &Agent) -> (u64, Option<ChatAsk>) {
+    let (version, held) = st.asks.get(&agent.id);
+    let ask = held.or_else(|| {
+        let prompt = matches!(
+            agent.blocked_reason,
+            Some(BlockedReason::Permission | BlockedReason::Question)
+        );
+        (agent.status == Status::NeedsYou && prompt).then(|| ChatAsk {
+            id: SCREEN_ID.into(),
+            kind: AskKind::Screen {
+                text: st.sessions.screen_text(&agent.session).unwrap_or_default(),
+            },
+            answered: None,
+        })
+    });
+    (version, ask)
 }
 
 impl From<IngestError> for ApiError {
@@ -1701,6 +1784,7 @@ async fn chat_stream(
     let agent = st.svc.agent(&AgentId(id)).await?;
     // Subscribed before the first read, so a hook landing during it is not missed.
     let mut wake = st.chat_wake.subscribe();
+    let mut asks = st.asks.subscribe();
     let (sessions, ended) = chat_sources(&st, &agent).await?;
     let chat = Chat::open(&st.svc, &agent).await;
     let (tx, rx) = mpsc::channel(16);
@@ -1715,6 +1799,11 @@ async fn chat_stream(
             return;
         }
         let mut ended = ended;
+        // A Stopped agent waits on nothing, so its stream sends no `ask`.
+        let mut sent_ask = SentAsk::default();
+        if ended.is_none() && !sent_ask.send(&tx, current_ask(&st, &agent)).await {
+            return;
+        }
         loop {
             if let Some(at) = ended {
                 if let Some(e) = chat_event("ended", &at) {
@@ -1726,10 +1815,36 @@ async fn chat_stream(
                 _ = tx.closed() => return,
                 _ = chat::woken(&mut wake, &agent.id) => {}
                 _ = tokio::time::sleep(chat::POLL) => {}
+                change = asks.recv() => {
+                    // Each change is sent as it was, so an answered ask shows even when it clears straight after.
+                    let ask = match change {
+                        // Already in what was read and sent since.
+                        Ok((v, _, _)) if v <= sent_ask.version => continue,
+                        Ok((v, id, _)) if id != agent.id => {
+                            sent_ask.version = v;
+                            continue;
+                        }
+                        Ok((v, _, Some(ask))) => (v, Some(ask)),
+                        Err(broadcast::error::RecvError::Closed) => return,
+                        // Cleared, or changes were missed: whatever the agent waits on now.
+                        _ => match st.svc.agent(&agent.id).await {
+                            Ok(now) => current_ask(&st, &now),
+                            Err(_) => return,
+                        },
+                    };
+                    if !sent_ask.send(&tx, ask).await {
+                        return;
+                    }
+                    continue;
+                }
             }
             let Ok(now) = st.svc.agent(&agent.id).await else {
                 return;
             };
+            // The screen fallback follows the terminal, and the status may have moved on without a change of ask.
+            if now.status != Status::Stopped && !sent_ask.send(&tx, current_ask(&st, &now)).await {
+                return;
+            }
             let Ok((sessions, end)) = chat_sources(&st, &now).await else {
                 continue;
             };
@@ -1750,6 +1865,33 @@ async fn chat_stream(
         }
     });
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
+}
+
+/// What a chat stream last sent as its `ask`, and the newest registry version that went into it.
+#[derive(Default)]
+struct SentAsk {
+    version: u64,
+    /// None until the first `ask` event.
+    last: Option<Option<ChatAsk>>,
+}
+
+impl SentAsk {
+    /// Sends `ask`, read at registry `version`, unless it is what was sent last; false when the client is gone.
+    async fn send(
+        &mut self,
+        tx: &mpsc::Sender<Result<SseEvent, Infallible>>,
+        (version, ask): (u64, Option<ChatAsk>),
+    ) -> bool {
+        self.version = self.version.max(version);
+        if self.last.as_ref() == Some(&ask) {
+            return true;
+        }
+        let Some(e) = chat_event("ask", &ask) else {
+            return true;
+        };
+        self.last = Some(ask);
+        tx.send(Ok(e)).await.is_ok()
+    }
 }
 
 #[derive(serde::Deserialize)]

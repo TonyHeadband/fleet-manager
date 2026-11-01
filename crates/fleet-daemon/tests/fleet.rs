@@ -3094,7 +3094,9 @@ async fn short_hold_server(fx: &Fx) -> (Arc<AgentService>, std::net::SocketAddr)
     ));
     let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState::new(svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
+    // A PermissionRequest hook is held for the owner's answer from the chat; here it gives up at once.
+    let state = AppState::new(svc.clone(), fx.store.clone(), fx.sessions.clone(), addr)
+        .with_ask_hold(Duration::from_millis(300));
     tokio::spawn(async move { axum::serve(listener, router(state)).await });
     (svc, addr)
 }

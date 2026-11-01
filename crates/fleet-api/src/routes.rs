@@ -1,7 +1,7 @@
 //! Contract-only route descriptions. The daemon implements these; clients and docs read them.
 use crate::{
     AddRepoRequest, Agent, AgentConfig, AgentConfigUpdate, AnswerRequest, ArchiveOrphanRequest,
-    ArchivePlan, ArchiveReport, ArchiveRequest, ChatPage, CheckoutList, ControlRequest,
+    ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer, ChatPage, CheckoutList, ControlRequest,
     DecideBreakdown, DefFile, DefInfo, DefKind, DiffReport, EffectiveSettings, Event, FleetView,
     GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles,
     InternalHistory, NewPersona, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona,
@@ -32,10 +32,16 @@ pub fn resume_agent() {}
 pub fn terminal_stream() {}
 
 /// The agent's Claude sessions as chat. Events: `page` (a `ChatPage`, the latest 200 items, first), `items` (new or
-/// updated `ChatItem`s, merged by `seq`), and for a Stopped agent `ended` (its `status_since`), after which the stream
-/// closes.
+/// updated `ChatItem`s, merged by `seq`), `ask` (the `ChatAsk` the agent waits on or `null`, after `page` and whenever
+/// it changes), and for a Stopped agent `ended` (its `status_since`), after which the stream closes.
 #[utoipa::path(get, path = "/api/agents/{id}/chat", params(("id" = String, Path)), responses((status = 200, content_type = "text/event-stream", body = ChatPage), (status = 404)))]
 pub fn chat_stream() {}
+
+/// Answers the prompt the agent waits on through its held PermissionRequest hook. 404 for an unknown agent or ask,
+/// 409 when it was already answered, 400 for a choice it does not offer or a `screen` ask (the reply box answers
+/// those).
+#[utoipa::path(post, path = "/api/agents/{id}/asks/{ask}", params(("id" = String, Path), ("ask" = String, Path)), request_body = AskAnswer, responses((status = 204), (status = 400), (status = 404), (status = 409)))]
+pub fn answer_ask() {}
 
 /// Up to `limit` chat items before `before`, oldest first.
 #[utoipa::path(get, path = "/api/agents/{id}/chat/history", params(("id" = String, Path), ("before" = Option<u64>, Query, description = "A seq; default: after the last item"), ("limit" = Option<usize>, Query, description = "Default 200, at most 1000")), responses((status = 200, body = ChatPage), (status = 404)))]
