@@ -40,28 +40,38 @@ const info = (over: Partial<DefInfo> = {}): DefInfo => ({
 
 const SKILLS = ["test-driven-development", "systematic-debugging", "verification-before-completion"];
 
-function Host(p: { client: ReturnType<typeof fakeClient>; kind?: DefKind; info: DefInfo; skills?: string[] }) {
-  const defs = useDefinitions(p.client, "a", vi.fn());
+function Host(p: {
+  client: ReturnType<typeof fakeClient>;
+  kind?: DefKind;
+  info: DefInfo;
+  skills?: string[];
+  persona?: string;
+  name?: string;
+  onNick?: () => void;
+}) {
+  const persona = p.persona ?? "a";
+  const name = p.name ?? "rust";
+  const defs = useDefinitions(p.client, persona, vi.fn(), p.onNick);
   const kind = (p.kind ?? "specialist") as "specialist" | "orchestrator";
   useEffect(() => {
     defs.loadList();
-    defs.open(kind, "rust");
+    defs.open(kind, name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const listed = defs.st.list?.find((d) => d.name === "rust") ?? p.info;
-  if (!defs.st.files[defs.key(kind, "rust")]) return <p>Loading…</p>;
-  return <SpecialistForm persona="a" kind={kind} name="rust" info={listed} defs={defs} skills={p.skills ?? SKILLS} roleFixed />;
+  }, [persona, name]);
+  const listed = defs.st.list?.find((d) => d.name === name) ?? { ...p.info, name };
+  return <SpecialistForm persona={persona} kind={kind} name={name} info={listed} defs={defs} skills={p.skills ?? SKILLS} roleFixed />;
 }
 
-async function form(file: Partial<DefFile> = {}, over: Partial<DefInfo> = {}, clientOver: Record<string, unknown> = {}) {
+async function form(file: Partial<DefFile> = {}, over: Partial<DefInfo> = {}, clientOver: Record<string, unknown> = {}, host: Partial<Parameters<typeof Host>[0]> = {}) {
   const client = fakeClient({
-    personaDefinition: vi.fn().mockResolvedValue({ kind: "specialist", name: "rust", text: TEXT, builtin: true, ...file }),
+    personaDefinition: vi.fn(async (_p: string, kind: DefKind, name: string) => ({ kind, name, text: TEXT, builtin: true, ...file })),
     personaDefinitions: vi.fn().mockResolvedValue([info(over)]),
     ...clientOver,
   });
-  render(<Host client={client} info={info(over)} />);
+  const ui = (h: Partial<Parameters<typeof Host>[0]> = {}) => <Host client={client} info={info(over)} {...host} {...h} />;
+  const view = render(ui());
   await screen.findByText("Summary");
-  return client;
+  return Object.assign(client, { view, ui });
 }
 
 const field = (name: string) => screen.getByRole("textbox", { name });
@@ -178,6 +188,92 @@ describe("SpecialistForm", () => {
     expect(field("Summary")).toHaveValue("Rust code");
     expect(field("Instructions")).toHaveValue("# You are a Rust specialist\n\nWrite tests first.\n");
     expect(button("Save")).toBeDisabled();
+  });
+
+  it("a_saved_nickname_tells_the_apps_persona_list", async () => {
+    const onNick = vi.fn();
+    await form({}, {}, {}, { onNick });
+    await userEvent.type(field("Nickname"), "Ferris");
+    await userEvent.click(button("Save"));
+    await waitFor(() => expect(onNick).toHaveBeenCalledTimes(1));
+  });
+
+  it("a_failed_nickname_save_shows_under_nickname_and_keeps_the_draft", async () => {
+    const onNick = vi.fn();
+    await form({}, {}, { setNickname: vi.fn().mockRejectedValue(new FleetError("too long")) }, { onNick });
+    await userEvent.type(field("Nickname"), "Ferris");
+    await userEvent.click(button("Save"));
+    const shown = await screen.findByText(/too long/);
+    expect(shown).toHaveClass("error-line");
+    expect(screen.getByText("Nickname").closest("div")).toContainElement(shown);
+    expect(field("Nickname")).toHaveValue("Ferris");
+    expect(onNick).not.toHaveBeenCalled();
+    await userEvent.type(field("Nickname"), "!");
+    expect(screen.queryByText(/too long/)).toBeNull();
+  });
+
+  it("switching_persona_drops_the_nickname_draft", async () => {
+    const c = await form();
+    await userEvent.type(field("Nickname"), "Ferris");
+    c.view.rerender(c.ui({ persona: "b" }));
+    await waitFor(() => expect(c.personaDefinition).toHaveBeenCalledWith("b", "specialist", "rust"));
+    expect(field("Nickname")).toHaveValue("");
+  });
+
+  it("switching_specialist_drops_the_nickname_draft", async () => {
+    const c = await form();
+    await userEvent.type(field("Nickname"), "Ferris");
+    c.view.rerender(c.ui({ name: "go" }));
+    await waitFor(() => expect(c.personaDefinition).toHaveBeenCalledWith("a", "specialist", "go"));
+    expect(field("Nickname")).toHaveValue("");
+  });
+
+  it("reset_to_built_in_asks_then_resets", async () => {
+    const resetPersonaDefinition = vi.fn().mockResolvedValue(undefined);
+    await form(ownCopy, { builtin: true, overridden: true }, { resetPersonaDefinition });
+    await userEvent.click(button("Reset to built-in"));
+    expect(resetPersonaDefinition).not.toHaveBeenCalled();
+    await userEvent.click(button("Reset"));
+    expect(resetPersonaDefinition).toHaveBeenCalledWith("a", "specialist", "rust");
+  });
+
+  it("one_save_writes_the_definition_and_the_nickname", async () => {
+    const client = await form(ownCopy, { builtin: false, overridden: true });
+    await userEvent.type(field("Summary"), "!");
+    await userEvent.type(field("Nickname"), "Ferris");
+    await userEvent.click(button("Save"));
+    expect(client.savePersonaDefinition).toHaveBeenCalledWith("a", "specialist", "rust", TEXT.replace("Rust code", "Rust code!"));
+    expect(client.setNickname).toHaveBeenCalledWith("a", "rust", "Ferris");
+  });
+
+  it("a_refused_definition_does_not_stop_the_nickname", async () => {
+    const message = "specialists/rust.md: permission denied";
+    const savePersonaDefinition = vi.fn().mockRejectedValue(new FleetError(message));
+    const client = await form(ownCopy, { builtin: false, overridden: true }, { savePersonaDefinition });
+    await userEvent.type(field("Summary"), "!");
+    await userEvent.type(field("Nickname"), "Ferris");
+    await userEvent.click(button("Save"));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(client.setNickname).toHaveBeenCalledWith("a", "rust", "Ferris");
+    expect(field("Summary")).toHaveValue("Rust code!");
+  });
+
+  it("a_cleared_field_keeps_its_place_when_retyped", async () => {
+    const client = await form(ownCopy, { builtin: false, overridden: true });
+    await userEvent.click(field("Summary"));
+    await userEvent.keyboard("{End}{Backspace>9/}");
+    expect(field("Summary")).toHaveValue("");
+    await userEvent.type(field("Summary"), "Go code");
+    await userEvent.click(button("Save"));
+    expect(client.savePersonaDefinition).toHaveBeenCalledWith("a", "specialist", "rust", TEXT.replace("Rust code", "Go code"));
+  });
+
+  it("a_field_left_empty_is_dropped_from_the_saved_file", async () => {
+    const client = await form(ownCopy, { builtin: false, overridden: true });
+    await userEvent.click(field("Model"));
+    await userEvent.keyboard("{End}{Backspace>6/}");
+    await userEvent.click(button("Save"));
+    expect(client.savePersonaDefinition).toHaveBeenCalledWith("a", "specialist", "rust", TEXT.replace("model: sonnet\n", ""));
   });
 
   it("form_css_uses_tokens_only", () => {

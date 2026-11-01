@@ -289,7 +289,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     writeChoice("fleet.persona", persona, sayFailure);
   }, [personas.state, persona, savedPersona, sayFailure]);
 
-  const definitions = useDefinitions(client, persona, say);
+  const definitions = useDefinitions(client, persona, say, reloadPersonas);
   const { loadList: loadDefinitions, loadStyles } = definitions;
   // Asked again on each way into a definitions tab, into Products for its
   // specialists and override keys and into Pull requests for its styles, so files changed on disk show (egui asks at

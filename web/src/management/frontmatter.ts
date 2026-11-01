@@ -117,7 +117,8 @@ function scalar(b: Block): string {
   const cont = all.filter((l) => l !== "" && !l.startsWith("#"));
   if (/^[|>]/.test(head)) return (head.startsWith("|") ? all : cont).join(head.startsWith("|") ? "\n" : " ");
   if (head === "" || head.startsWith("#")) return "";
-  return [unquote(head), ...cont].join(" ").trim();
+  // A quoted value keeps its edge spaces: a form types one character at a time and must not lose a trailing space.
+  return cont.length ? [unquote(head), ...cont].join(" ").trim() : unquote(head);
 }
 
 function list(b: Block): string[] {
@@ -180,7 +181,8 @@ function render(key: (typeof ORDER)[number], value: string | string[], eol: stri
 
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
 
-export function writeDef(original: string, draft: DefDraft): string {
+/** `keepEmpty`: a cleared key stays in the file with an empty value (for a form mid-edit), where it keeps its place. */
+export function writeDef(original: string, draft: DefDraft, keepEmpty = false): string {
   const s = split(original);
   const eol = original.includes("\r\n") ? "\r\n" : "\n";
   if (!s) {
@@ -208,7 +210,8 @@ export function writeDef(original: string, draft: DefDraft): string {
     if (b) {
       const asBlock = Array.isArray(next) && !b.rest.trim().startsWith("[") && b.block.length > 0;
       const lineEol = /\r?\n$/.exec(lines[b.start] ?? "")?.[0] ?? eol;
-      edits.push({ start: b.start, end: b.end, with: empty ? [] : render(k, next, lineEol, asBlock) });
+      const blank = Array.isArray(next) ? `${k}: []${lineEol}` : `${k}: ""${lineEol}`;
+      edits.push({ start: b.start, end: b.end, with: empty ? (keepEmpty ? [blank] : []) : render(k, next, lineEol, asBlock) });
     } else if (!empty) {
       additions.push(...render(k, next, eol, false));
     }
@@ -222,6 +225,17 @@ export function writeDef(original: string, draft: DefDraft): string {
 
   const rest = draft.body === trimBody(s.rest) ? s.rest : draft.body;
   return s.open + lines.join("") + s.close + rest;
+}
+
+/** The file without the keys it shows that hold nothing: what a form saves after `writeDef(…, true)` left them in. */
+export function pruneDef(text: string): string {
+  const s = split(text);
+  if (!s) return text;
+  const lines = lineSplit(s.yaml);
+  const have = fieldsOf(lines);
+  const gone = blocks(lines).filter((b) => (ORDER as readonly string[]).includes(b.key) && b.key !== "name" && !have[b.key as keyof DefFields]?.toString().length);
+  for (const b of gone.sort((a, c) => c.start - a.start)) lines.splice(b.start, b.end - b.start);
+  return s.open + lines.join("") + s.close + s.rest;
 }
 
 export function fieldOfError(message: string): DefField | null {

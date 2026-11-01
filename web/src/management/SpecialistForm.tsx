@@ -12,7 +12,7 @@ import { SaveBar } from "../ui/SaveBar";
 import { Section } from "../ui/Section";
 import { Select } from "../ui/Select";
 import { defDirty, type DefinitionsApi } from "./definitions";
-import { fieldOfError, parseDef, writeDef, type DefDraft, type DefField } from "./frontmatter";
+import { fieldOfError, parseDef, pruneDef, writeDef, type DefDraft, type DefField } from "./frontmatter";
 
 // A specialist's or orchestrator's file as a form. The hook's text draft is the one source of truth: the fields are read
 // from it and every change writes the whole file back, replacing only the keys that changed.
@@ -79,7 +79,7 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
   const editable = draft !== undefined;
   const parsed = parseDef(text);
   const change = (fields: Partial<DefDraft["fields"]>, body = parsed.body) =>
-    defs.edit(key, writeDef(text, { fields: { ...parsed.fields, ...fields }, body }));
+    defs.edit(key, writeDef(text, { fields: { ...parsed.fields, ...fields }, body }, true));
 
   const field: DefField | null = error === undefined ? null : fieldOfError(error);
   const under = (f: DefField) => (field === f && error !== undefined ? error : null);
@@ -88,7 +88,11 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
 
   const save = async () => {
     setNickError(null);
-    if (fileDirty) defs.save(kind, name);
+    if (fileDirty) {
+      // Keys a field emptied while editing leave the file now; the save reads the draft as it stands.
+      defs.edit(key, pruneDef(text));
+      defs.save(kind, name);
+    }
     if (!nickDirty) return;
     try {
       await defs.setNickname(name, nickText.trim());
@@ -113,7 +117,7 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
             <Field label="Name" error={null}>
               {(id) => <input id={id} readOnly value={name} />}
             </Field>
-            <Field label="Nickname" error={null}>
+            <Field label="Nickname" error={nickError}>
               {(id) => (
                 <input
                   id={id}
@@ -121,7 +125,10 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
                   maxLength={32}
                   spellCheck={false}
                   placeholder="none"
-                  onChange={(e) => setNick({ identity, text: e.target.value })}
+                  onChange={(e) => {
+                    setNick({ identity, text: e.target.value });
+                    setNickError(null);
+                  }}
                 />
               )}
             </Field>
@@ -198,8 +205,9 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
         </div>
       </Section>
 
-      <Section title="Instructions">
-        <div className="form-body">
+      <Section
+        title="Instructions"
+        aside={
           <div className="form-chips">
             <Chip selected={!preview} onClick={() => setPreview(false)}>
               Edit
@@ -208,6 +216,9 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
               Preview
             </Chip>
           </div>
+        }
+      >
+        <div className="form-body">
           {preview ? (
             <div className="form-preview">
               <Markdown text={parsed.body} />
@@ -227,7 +238,6 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
       </Section>
 
       {field === null && error !== undefined && <ErrorLine text={error} />}
-      {nickError !== null && <ErrorLine text={nickError} />}
       <div className="form-bar">
         {!editable && (
           <Button variant="primary" onClick={() => defs.override(key)}>

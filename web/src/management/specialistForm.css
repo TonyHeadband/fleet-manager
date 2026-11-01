@@ -13,7 +13,8 @@
   margin-top: 0;
   border: 1px solid var(--border);
 }
-.specialist-form .section > h3 {
+.specialist-form .section > h3,
+.specialist-form .section-head {
   display: flex;
   align-items: center;
   gap: var(--space-button-gap);
@@ -22,7 +23,18 @@
   border-bottom: 1px solid var(--border);
   color: var(--text-high);
 }
-.specialist-form .section > h3::before {
+.specialist-form .section-head {
+  justify-content: space-between;
+}
+.specialist-form .section-head > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+  margin: 0;
+  color: var(--text-high);
+}
+.specialist-form .section > h3::before,
+.specialist-form .section-head > h3::before {
   content: "";
   width: var(--layout-marker-w);
   height: var(--layout-marker-h);

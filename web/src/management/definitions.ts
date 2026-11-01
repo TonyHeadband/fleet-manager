@@ -90,7 +90,7 @@ export const defDirty = (draft: string, file: DefFile) => draft !== file.text ||
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The definitions and their calls, kept above Management so drafts outlive the tabs, the view and a persona switch. */
-export function useDefinitions(client: FleetClient, persona: string | null, say: Say) {
+export function useDefinitions(client: FleetClient, persona: string | null, say: Say, onNicknameChanged?: () => void) {
   const [held, setHeld] = useState<Held>({ ...initialDefs, lists: {}, picks: {} });
   // Read synchronously, so a second save asked for before a render is refused, as egui's is.
   const now = useRef(held);
@@ -180,11 +180,13 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
         (e: unknown) => update((s) => ({ ...s, saving: null, errors: { ...s.errors, [key]: message(e) } })),
       );
     },
-    /** An empty nickname clears it. The list is read again so the row shows it; a refusal is for the caller to show. */
+    /** An empty nickname clears it. The list is read again so the row shows it, and `onNicknameChanged` lets the app's
+     * persona list (which labels the board and drawer) follow; a refusal is for the caller to show. */
     setNickname: async (name: string, nickname: string) => {
-      if (persona === null) return;
+      if (persona === null) throw new Error("No persona is active");
       await client.setNickname(persona, name, nickname);
       loadList();
+      onNicknameChanged?.();
     },
     revert: (key: DefKey) =>
       update((s) => {
