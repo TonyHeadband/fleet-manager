@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { Diff } from "../components/PreviewPane";
 import { Button } from "../ui/Button";
 import { ListRow } from "../ui/ListRow";
-import { parseDiff, splitRows, type DiffFile, type DiffLine, type Hunk } from "./parse";
+import { parseDiff, splitRows, type DiffFile, type DiffLine, type Row } from "./parse";
 import "./diff.css";
 
 interface Repo {
@@ -13,6 +13,14 @@ interface Repo {
 const keyOf = (repo: string, f: DiffFile) => `${repo}\n${f.path}`;
 const dirOf = (path: string) => path.slice(0, path.lastIndexOf("/") + 1);
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+/** Folder by folder, root files first: git's own order splits a folder (untracked files come after the rest). */
+const byFolder = (a: DiffFile, b: DiffFile) => {
+  const [da, db] = [dirOf(a.path), dirOf(b.path)];
+  if (da !== db) return da < db ? -1 : 1;
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+};
+/** Rows drawn before "Show the other N lines": a regenerated lockfile would otherwise stall the pane. */
+export const MAX_ROWS = 2000;
 
 function Counts({ added, removed }: { added: number; removed: number }) {
   return (
@@ -29,11 +37,13 @@ function Counts({ added, removed }: { added: number; removed: number }) {
  */
 export function DiffView({ diff }: { diff: Diff }) {
   const repos = useMemo<Repo[]>(
-    () => (diff.state === "loaded" ? diff.report.workspaces.map((w) => ({ repo: w.repo, files: parseDiff(w.diff, w.truncated) })) : []),
+    () => (diff.state === "loaded" ? diff.report.workspaces.map((w) => ({ repo: w.repo, files: parseDiff(w.diff, w.truncated).sort(byFolder) })) : []),
     [diff],
   );
   const [picked, setPicked] = useState<string | null>(null);
   const [mode, setMode] = useState<"split" | "unified">("split");
+  // The file whose rows are all drawn; picking another draws it in part again.
+  const [whole, setWhole] = useState<string | null>(null);
 
   if (diff.state === "none" || diff.state === "loading") return <p className="note">Loading…</p>;
   if (diff.state === "failed") return <p role="alert" className="diff-failed">{diff.message}</p>;
@@ -89,9 +99,7 @@ export function DiffView({ diff }: { diff: Diff }) {
             </div>
             <div className="diff-body" data-mode={mode}>
               {current.file.binary && <p className="note">Binary file</p>}
-              {current.file.hunks.map((h, i) => (
-                <HunkView key={i} hunk={h} mode={mode} />
-              ))}
+              <Hunks file={current.file} mode={mode} all={whole === current.key} onAll={() => setWhole(current.key)} />
               {current.file.cut && <p className="note">The diff was cut at the size limit.</p>}
             </div>
           </>
@@ -111,24 +119,45 @@ function Cell({ line, side }: { line: DiffLine | null; side: "old" | "new" }) {
   );
 }
 
-function HunkView({ hunk, mode }: { hunk: Hunk; mode: "split" | "unified" }) {
+function Hunks({ file, mode, all, onAll }: { file: DiffFile; mode: "split" | "unified"; all: boolean; onAll: () => void }) {
+  let budget = all ? Infinity : MAX_ROWS;
+  let total = 0;
+  const hunks = file.hunks.map((h) => {
+    const rows: (Row | DiffLine)[] = mode === "split" ? splitRows(h) : h.lines;
+    total += rows.length;
+    const shown = rows.slice(0, Math.max(0, budget));
+    budget -= shown.length;
+    return { header: h.header, rows: shown };
+  });
+  const hidden = total - hunks.reduce((n, h) => n + h.rows.length, 0);
   return (
-    <div className="diff-hunk">
-      <div className="diff-hunk-head">{hunk.header}</div>
-      {mode === "split"
-        ? splitRows(hunk).map((r, i) => (
-            <div key={i} className="diff-row" data-row>
-              <Cell line={r.left} side="old" />
-              <Cell line={r.right} side="new" />
-            </div>
-          ))
-        : hunk.lines.map((l, i) => (
-            <div key={i} className="diff-row" data-row data-kind={l.kind}>
-              <span className="diff-no">{l.oldNo}</span>
-              <span className="diff-no">{l.newNo}</span>
-              <span className="diff-text">{`${l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}${l.text}`}</span>
-            </div>
-          ))}
-    </div>
+    <>
+      {hunks
+        .filter((h) => h.rows.length > 0)
+        .map((h, i) => (
+          <div key={i} className="diff-hunk">
+            <div className="diff-hunk-head">{h.header}</div>
+            {h.rows.map((r, j) =>
+              "kind" in r ? (
+                <div key={j} className="diff-row" data-row data-kind={r.kind}>
+                  <span className="diff-no">{r.oldNo}</span>
+                  <span className="diff-no">{r.newNo}</span>
+                  <span className="diff-text">{`${r.kind === "add" ? "+" : r.kind === "del" ? "-" : " "}${r.text}`}</span>
+                </div>
+              ) : (
+                <div key={j} className="diff-row" data-row>
+                  <Cell line={r.left} side="old" />
+                  <Cell line={r.right} side="new" />
+                </div>
+              ),
+            )}
+          </div>
+        ))}
+      {hidden > 0 && (
+        <Button className="diff-more" onClick={onAll}>
+          {`Show the other ${hidden} lines`}
+        </Button>
+      )}
+    </>
   );
 }

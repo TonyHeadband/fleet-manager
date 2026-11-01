@@ -94,6 +94,27 @@ describe("DiffView", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("no such agent");
   });
 
+  it("groups_files_by_folder_whatever_order_git_sends_them", () => {
+    // git's order puts a root file after a folder's; the daemon appends untracked files after the rest.
+    const diff = [file("lib/x.ts", ["@@ -1 +1 @@", "-a", "+b"]), file("package.json", ["@@ -1 +1 @@", "-a", "+b"]), file("src/a.ts", ["@@ -1 +1 @@", "-a", "+b"]), file("tests/t.ts", ["@@ -1 +1 @@", "-a", "+b"]), file("src/new.ts", ["@@ -1 +1 @@", "-a", "+b"])].join("\n");
+    render(<DiffView diff={loaded([{ repo: "r", diff, truncated: false }])} />);
+    const order = [...tree().querySelectorAll(".diff-dir, .list-row")].map((e) => (e.classList.contains("diff-dir") ? e.textContent : e.getAttribute("aria-label")));
+    expect(order).toEqual(["package.json", "lib/", "lib/x.ts", "src/", "src/a.ts", "src/new.ts", "tests/", "tests/t.ts"]);
+  });
+
+  it("draws_a_huge_file_in_part_until_asked", async () => {
+    const lines = Array.from({ length: 3000 }, (_, i) => `+line ${i}`);
+    render(<DiffView diff={loaded([{ repo: "r", diff: file("yarn.lock", [`@@ -0,0 +1,3000 @@`, ...lines]), truncated: false }])} />);
+    expect(viewer().querySelectorAll("[data-row]")).toHaveLength(2000);
+    await userEvent.click(screen.getByRole("button", { name: "Show the other 1000 lines" }));
+    expect(viewer().querySelectorAll("[data-row]")).toHaveLength(3000);
+  });
+
+  it("the_passport_box_gives_the_view_its_height", () => {
+    // In the passport's fixed-height box the tree and the file scroll on their own, as in the panel.
+    expect(readFileSync("src/tasks/tasks.css", "utf8")).toMatch(/\.passport-box > \.diff-view \{[^}]*height: 100%;/);
+  });
+
   it("diff_css_uses_tokens_only", () => {
     const css = readFileSync("src/diff/diff.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();

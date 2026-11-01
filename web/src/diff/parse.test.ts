@@ -51,9 +51,34 @@ describe("parseDiff", () => {
     expect(renamed).toMatchObject({ path: "y.rs", oldPath: "x.rs", status: "R", hunks: [] });
   });
 
-  it("unquotes_paths_with_spaces", () => {
-    const text = ['diff --git "a/dir/a b.txt" "b/dir/a b.txt"', '--- "a/dir/a b.txt"', '+++ "b/dir/a b.txt"', "@@ -1 +1 @@", "-x", "+y"].join("\n");
+  it("reads_paths_with_spaces_as_git_writes_them", () => {
+    // git does not quote a space; it ends the `---`/`+++` path with a tab.
+    const text = ["diff --git a/dir/a b.txt b/dir/a b.txt", "--- a/dir/a b.txt\t", "+++ b/dir/a b.txt\t", "@@ -1 +1 @@", "-x", "+y"].join("\n");
     expect(parseDiff(text, false)[0]!.path).toBe("dir/a b.txt");
+  });
+
+  it("unquotes_octal_escaped_paths", () => {
+    // core.quotePath's default: non-ASCII bytes as octal escapes inside quotes.
+    const text = ['diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"', '--- "a/caf\\303\\251.txt"', '+++ "b/caf\\303\\251.txt"', "@@ -1 +1 @@", "-x", "+y"].join("\n");
+    expect(parseDiff(text, false)[0]!.path).toBe("café.txt");
+  });
+
+  it("unquotes_renamed_paths", () => {
+    const text = ['diff --git "a/caf\\303\\251.txt" b/cafe.txt', "similarity index 100%", 'rename from "caf\\303\\251.txt"', "rename to cafe.txt"].join("\n");
+    expect(parseDiff(text, false)[0]).toMatchObject({ status: "R", oldPath: "café.txt", path: "cafe.txt" });
+  });
+
+  it("keeps_a_badly_quoted_path_rather_than_failing", () => {
+    const text = ['diff --git a/x b/x', '--- "a/bad\\q.txt"', '+++ "b/bad\\q.txt"', "@@ -1 +1 @@", "-x", "+y"].join("\n");
+    expect(() => parseDiff(text, false)).not.toThrow();
+  });
+
+  it("marks_empty_added_and_deleted_files", () => {
+    // An empty file has no ---/+++ lines; only the mode line says what happened.
+    const text = ["diff --git a/pkg/__init__.py b/pkg/__init__.py", "new file mode 100644", "index 0000000..e69de29", "diff --git a/.gitkeep b/.gitkeep", "deleted file mode 100644", "index e69de29..0000000"].join("\n");
+    const [added, deleted] = parseDiff(text, false);
+    expect(added).toMatchObject({ path: "pkg/__init__.py", status: "A" });
+    expect(deleted).toMatchObject({ path: ".gitkeep", status: "D" });
   });
 
   it("marks_binary_files", () => {

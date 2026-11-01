@@ -161,6 +161,10 @@
   padding: var(--tasks-box-y) var(--tasks-box-x);
   background: var(--bg);
 }
+/* The Diff view's tree and file scroll on their own inside the box, as in the panel. */
+.passport-box > .diff-view {
+  height: 100%;
+}
 .passport-box .pane {
   margin: 0;
 }

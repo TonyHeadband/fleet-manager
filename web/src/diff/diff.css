@@ -41,3 +41,4 @@
 :is(.diff-cell, .diff-row)[data-kind="del"] { background: var(--tint-danger); color: var(--text-high); }
 /* A side with no line: a hard-edged hatch, never a fade. */
 .diff-cell[data-empty] { background: repeating-linear-gradient(135deg, transparent 0 var(--layout-dash), var(--border) var(--layout-dash) calc(var(--layout-dash) + 1px)); }
+.diff-more { margin: var(--layout-list-row-y) var(--layout-list-row-x); }
