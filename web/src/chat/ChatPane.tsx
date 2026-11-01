@@ -5,6 +5,7 @@ import { browserEventSource, subscribeChat, type EventSourceFactory } from "../a
 import type { ChatAsk } from "../api/generated/ChatAsk";
 import type { ChatBody } from "../api/generated/ChatBody";
 import type { ChatItem } from "../api/generated/ChatItem";
+import { useSize } from "../charts/useSize";
 import { clock } from "../shell/Footer";
 import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
@@ -202,18 +203,19 @@ function Message({ className, from, speaker, at, head, children }: { className: 
 }
 
 /**
- * A message's text, folded past `panel.foldMax` of measured height: cut clean at the limit, with a Read more / Show
+ * A message's text, folded past `panel.foldMax` (eight whole lines) of measured height: cut clean at the limit, with a Read more / Show
  * less button under it. A short message shows no button.
  */
 function Folding({ children }: { children: ReactNode }) {
-  const text = useRef<HTMLDivElement>(null);
+  const [text, size] = useSize<HTMLDivElement>();
   const box = useRef<HTMLDivElement>(null);
   const [tall, setTall] = useState(false);
   const [open, setOpen] = useState(false);
-  // Measured at the full height (a folded box is clipped, its scrollHeight is not), again when the text changes.
+  // Measured at the full height (a folded box is clipped, its scrollHeight is not), again when the text changes and
+  // when the panel is resized (the Diff and Fullscreen widen it, so the text wraps onto fewer lines).
   useLayoutEffect(() => {
     if (text.current) setTall(text.current.scrollHeight > panel.foldMax);
-  }, [children]);
+  }, [children, size.width, text]);
   const toggle = () => {
     setOpen(!open);
     // Folding back shortens the feed: keep the message in view rather than let the scroll land elsewhere.
@@ -250,9 +252,11 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
           </Folding>
         </Message>
       ) : (
-        <p className="chat-line" data-from="system">
-          {body.text}
-        </p>
+        <Folding>
+          <p className="chat-line" data-from="system">
+            {body.text}
+          </p>
+        </Folding>
       );
     case "reply":
       // Without a speaker the text still shows, unheaded: a message must never vanish for want of a name.
