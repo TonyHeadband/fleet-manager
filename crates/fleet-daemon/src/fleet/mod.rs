@@ -1,6 +1,7 @@
 //! Orchestrated tasks: the orchestrator types, specialists and skills agents are launched with.
 pub mod breakdown;
 pub mod defs;
+pub mod defs_migrate;
 pub mod env;
 pub mod gate;
 pub mod ops;

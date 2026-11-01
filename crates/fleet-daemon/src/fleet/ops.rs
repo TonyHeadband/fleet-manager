@@ -2,7 +2,7 @@
 use super::breakdown::{
     check_step_mode, next_version, render, state_word, BreakdownAnswer, BREAKDOWN_FILE,
 };
-use super::defs::{Defs, FleetError, OrchestratorDef, SpecialistDef};
+use super::defs::{persona_defs_root, Defs, FleetError, OrchestratorDef, SpecialistDef};
 use super::env;
 use super::gate;
 use super::pr_rules;
@@ -518,8 +518,17 @@ pub async fn origin_urls(workspaces: &[Workspace]) -> Vec<String> {
 }
 
 impl AgentService {
-    fn defs(&self) -> Defs {
-        Defs::new(self.cfg.fleet_dir.clone())
+    /// The definitions a persona's task reads: its own files over the built-ins; PR styles are fleet-wide.
+    pub(crate) fn defs_for(&self, persona: &str) -> Defs {
+        Defs::for_persona(
+            persona_defs_root(&self.cfg.personas_dir, persona),
+            self.cfg.fleet_dir.clone(),
+        )
+    }
+
+    /// PR styles, which no persona owns.
+    fn pr_styles(&self) -> Defs {
+        Defs::shared(self.cfg.fleet_dir.clone())
     }
 
     /// The model a definition's agent starts on, read from the product's overrides as they are now, so an override
@@ -553,10 +562,11 @@ impl AgentService {
     /// takes the global default, and is refused where the step names it.
     async fn specialist_modes(
         &self,
+        persona: &str,
         product: &str,
         names: &[String],
     ) -> Result<Vec<(String, PermissionMode)>, StoreError> {
-        let defs = self.defs();
+        let defs = self.defs_for(persona);
         let entries = self.store.product_overrides(product).await?;
         Ok(names
             .iter()
@@ -575,7 +585,7 @@ impl AgentService {
         &self,
         a: &Agent,
     ) -> Result<(PermissionMode, Effort), StoreError> {
-        let defs = self.defs();
+        let defs = self.defs_for(&a.persona);
         let (def_mode, def_effort) = match (a.kind, a.role.as_deref()) {
             (AgentKind::Orchestrator, Some(role)) => defs
                 .orchestrator(role)
@@ -628,7 +638,7 @@ impl AgentService {
             }
             .into());
         }
-        let def = self.defs().orchestrator(role)?;
+        let def = self.defs_for(&req.persona).orchestrator(role)?;
         let mut inputs: Vec<&str> = req.repos.iter().map(|r| r.repo.trim()).collect();
         inputs.sort();
         inputs.dedup();
@@ -643,6 +653,7 @@ impl AgentService {
     pub(crate) async fn orchestrator_plan(
         &self,
         def: OrchestratorDef,
+        persona: &str,
         product: &str,
         rows: &[Resolved],
         hidden: &[String],
@@ -652,7 +663,7 @@ impl AgentService {
         };
         let entries = self.store.product_overrides(product).await?;
         let specialists: Vec<RosterEntry> = self
-            .defs()
+            .defs_for(persona)
             .list()
             .into_iter()
             .filter(|d| d.kind == DefKind::Specialist && d.error.is_none())
@@ -697,7 +708,7 @@ impl AgentService {
             None => (settings.style.clone(), "config.toml"),
         };
         let style = self
-            .defs()
+            .pr_styles()
             .pr_style(&name)
             .map_err(|error| SpawnError::PrStyle { name, from, error })?;
         Ok(PrRules {
@@ -722,9 +733,11 @@ impl AgentService {
 
     /// Puts the orchestrator's skills and `CLAUDE.md` into its folder. The skills folder is made even when empty,
     /// so it is plain which skills the agent has.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn write_orchestrator_files(
         &self,
         plan: &OrchestratorPlan,
+        persona: &str,
         cwd: &Path,
         instructions: &str,
         workspaces: &[Workspace],
@@ -732,7 +745,7 @@ impl AgentService {
         task_name: &str,
     ) -> Result<(), SpawnError> {
         std::fs::create_dir_all(cwd.join(".claude/skills"))?;
-        skills::install(&self.defs(), &plan.def.skills, cwd)?;
+        skills::install(&self.defs_for(persona), &plan.def.skills, cwd)?;
         std::fs::write(
             cwd.join("CLAUDE.md"),
             plan.claude_md(instructions, workspaces, internal, task_name),
@@ -839,7 +852,9 @@ impl AgentService {
             }
             let now = self.opts.clock.now();
             // Checked before any write, so a refused proposal changes nothing.
-            let modes = self.specialist_modes(&p.product, &p.specialists).await?;
+            let modes = self
+                .specialist_modes(&a.persona, &p.product, &p.specialists)
+                .await?;
             let n = next_version(&p.breakdowns, &drafts, &p.specialists, &modes, now)?.version;
             let mut stopped = false;
             self.store
@@ -1121,7 +1136,7 @@ impl AgentService {
             });
         }
         let def = self
-            .defs()
+            .defs_for(&persona.id)
             .specialist(&step.specialist)
             .map_err(|e| refuse(e.to_string()))?;
         // Against the overrides as they are now: they may have tightened since the breakdown was approved.
@@ -1282,7 +1297,7 @@ impl AgentService {
         let (settings, mcp) =
             written.map_err(|e| refuse(format!("cannot write the agent's settings: {e}")))?;
         std::fs::create_dir_all(folder.join(".claude/skills"))?;
-        skills::install(&self.defs(), &plan.def.skills, folder)
+        skills::install(&self.defs_for(&plan.persona.id), &plan.def.skills, folder)
             .map_err(|e| refuse(e.to_string()))?;
         std::fs::write(
             folder.join("CLAUDE.md"),
@@ -2461,7 +2476,7 @@ impl AgentService {
         // Before the lock: the logins are asked through the CLIs, and a task's persona never changes.
         let persona = self.persona_of(&lead).await?;
         let fleet = fleet_config(&self.cfg.agent_config_dir).map_err(ServiceError::AgentConfig)?;
-        let defs = self.defs();
+        let defs = self.defs_for(&persona.id);
         let def = defs
             .orchestrator(p.role.as_deref().unwrap_or_default())
             .map_err(|e| refuse(e.to_string()))?;
@@ -2534,6 +2549,7 @@ impl AgentService {
         let made = self
             .restart_files(
                 &plan,
+                &persona.id,
                 &agent_id,
                 &token,
                 &cwd,
@@ -2658,6 +2674,7 @@ impl AgentService {
     async fn restart_files(
         &self,
         plan: &OrchestratorPlan,
+        persona: &str,
         id: &AgentId,
         token: &str,
         cwd: &Path,
@@ -2688,6 +2705,7 @@ impl AgentService {
         .map_err(|e| refuse(format!("cannot write the agent's settings: {e}")))?;
         self.write_orchestrator_files(
             plan,
+            persona,
             cwd,
             &fleet.instructions,
             workspaces,

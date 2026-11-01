@@ -3541,7 +3541,7 @@ async fn product_override_wins() {
 #[tokio::test]
 async fn no_model_means_no_flag() {
     let fx = fleet_fixture().await;
-    let dir = fx._tmp.path().join("fleet/specialists");
+    let dir = persona_fleet(&fx, PERSONA).join("specialists");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("plain.md"),
@@ -5475,4 +5475,73 @@ async fn a_pr_rules_refusal_becomes_a_failed_checks_event() {
             "checks failed · pr".to_string()
         )]
     );
+}
+
+fn persona_fleet(fx: &Fx, id: &str) -> PathBuf {
+    fleet_daemon::fleet::defs::persona_defs_root(&fx._tmp.path().join("personas"), id)
+}
+
+fn write_persona_specialist(fx: &Fx, id: &str, name: &str, skills: &str, body: &str) {
+    let path = persona_fleet(fx, id).join(format!("specialists/{name}.md"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let text =
+        format!("---\nname: {name}\nsummary: {body} summary\nskills: [{skills}]\n---\n{body}\n");
+    std::fs::write(path, text).unwrap();
+}
+
+/// An approved two-step breakdown on a new task of `persona`; returns its orchestrator and task folder.
+async fn approved_task_of(
+    fx: &Fx,
+    persona: &str,
+    drafts: Vec<StepDraft>,
+) -> (fleet_api::Agent, PathBuf) {
+    let mut req = orchestrator(fx, "direct");
+    req.persona = persona.into();
+    let a = fx.svc.spawn(req).await.unwrap();
+    let handle = propose_in_background(fx, &fx.svc, &a.id, drafts).await;
+    fx.svc.decide_breakdown(&a.id, approve()).await.unwrap();
+    assert_eq!(handle.await.unwrap().unwrap(), BreakdownAnswer::Approved);
+    let task = Path::new(&a.workdir).parent().unwrap().to_path_buf();
+    (a, task)
+}
+
+#[tokio::test]
+async fn each_task_spawns_its_personas_version() {
+    let fx = fleet_fixture().await;
+    let other = ready_persona(&fx.svc, "Other", "github.com").await;
+    write_persona_specialist(&fx, PERSONA, "rust", "brainstorming", "Alpha rules");
+    write_persona_specialist(&fx, &other, "rust", "writing-plans", "Beta rules");
+
+    for (persona, skill, body) in [
+        (PERSONA, "brainstorming", "Alpha rules"),
+        (other.as_str(), "writing-plans", "Beta rules"),
+    ] {
+        let (a, task) = approved_task_of(&fx, persona, two_steps()).await;
+        let lead_md = std::fs::read_to_string(Path::new(&a.workdir).join("CLAUDE.md")).unwrap();
+        assert!(lead_md.contains(&format!("{body} summary")), "{lead_md}");
+        let s = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+        assert_eq!(s.persona, persona);
+        let folder = task.join("fleet").join("1-api");
+        assert_eq!(skills_in(&folder), [skill]);
+        let md = std::fs::read_to_string(folder.join("CLAUDE.md")).unwrap();
+        assert!(md.contains(body), "{md}");
+    }
+}
+
+#[tokio::test]
+async fn a_persona_without_the_specialist_fails_at_spawn() {
+    let fx = fleet_fixture().await;
+    let other = ready_persona(&fx.svc, "Other", "github.com").await;
+    write_persona_specialist(&fx, PERSONA, "scribe", "brainstorming", "Scribe rules");
+    write_persona_specialist(&fx, &other, "scribe", "brainstorming", "Scribe rules");
+    let drafts = vec![step("api", "scribe", &[])];
+    let (a, task) = approved_task_of(&fx, PERSONA, drafts).await;
+    let name = task.file_name().unwrap().to_string_lossy().into_owned();
+    std::fs::remove_file(persona_fleet(&fx, PERSONA).join("specialists/scribe.md")).unwrap();
+    let err = fx.svc.spawn_specialist(&a.id, 1).await.unwrap_err();
+    assert!(
+        fleet_refusal(&err).contains("no specialist named `scribe`"),
+        "{err:?}"
+    );
+    assert_no_specialist(&fx, &task, &name).await;
 }

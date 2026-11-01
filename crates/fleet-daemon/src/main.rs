@@ -1,6 +1,8 @@
-use fleet_api::Os;
+use fleet_api::{DefKind, Os};
 use fleet_daemon::agents::{AgentService, ServiceOptions};
 use fleet_daemon::config::{self, Config};
+use fleet_daemon::fleet::defs::{persona_defs_root, Defs};
+use fleet_daemon::fleet::defs_migrate::migrate_fleet_defs;
 use fleet_daemon::forge::{is_loopback_api, ForgeConfig};
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::repos::Repos;
@@ -88,12 +90,6 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
             "config.toml still lists [[repos]], which are no longer read; add the repos to a product in the app and remove them from the file"
         );
     }
-    // Each one is checked again when it is used; this only says early which user file needs fixing.
-    for d in fleet_daemon::fleet::defs::Defs::new(cfg.fleet_dir.clone()).list() {
-        if let Some(error) = d.error {
-            warn!(definition = %d.name, %error, "fleet definition does not load");
-        }
-    }
     if cfg.telemetry.otlp_endpoint.is_some() {
         debug!("telemetry is not built yet; otlp_endpoint ignored");
     }
@@ -116,6 +112,43 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
                 "left over from before products; delete it if you no longer need it: {}",
                 path.display()
             );
+        }
+    }
+    let persona_ids: Vec<String> = store
+        .personas()
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    // Before the check, so what moves is checked where it lands.
+    match migrate_fleet_defs(&cfg.fleet_dir, &cfg.personas_dir, &persona_ids) {
+        Ok(0) => {}
+        Ok(n) => info!(
+            moved = n,
+            "moved fleet-wide definitions into the personas' own folders"
+        ),
+        Err(error) => warn!(%error, "cannot move the fleet-wide definitions into the personas"),
+    }
+    // Each one is checked again when it is used; this only says early which user file needs fixing.
+    for d in Defs::shared(cfg.fleet_dir.clone()).list() {
+        if let Some(error) = d.error {
+            warn!(definition = %d.name, %error, "fleet definition does not load");
+        }
+    }
+    for id in &persona_ids {
+        let own = Defs::for_persona(
+            persona_defs_root(&cfg.personas_dir, id),
+            cfg.fleet_dir.clone(),
+        );
+        for d in own
+            .list()
+            .into_iter()
+            .filter(|d| d.kind != DefKind::PrStyle)
+        {
+            if let Some(error) = d.error {
+                warn!(definition = %d.name, %error, "persona {id}: definition does not load");
+            }
         }
     }
     let mut opts = ServiceOptions::new(&format!("http://{addr}"));

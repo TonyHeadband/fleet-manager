@@ -1515,7 +1515,7 @@ impl AgentService {
             Some(def) => {
                 let hidden = self.store.hidden_specialists(&req.product).await?;
                 let mut p = self
-                    .orchestrator_plan(def, &req.product, &rows, &hidden)
+                    .orchestrator_plan(def, &req.persona, &req.product, &rows, &hidden)
                     .await?;
                 p.named = title.is_some();
                 Some(p)
@@ -1709,6 +1709,7 @@ impl AgentService {
         let files = match &plan {
             Some(p) => self.write_orchestrator_files(
                 p,
+                &persona.id,
                 &cwd,
                 &fleet.instructions,
                 &workspaces,

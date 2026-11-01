@@ -1,5 +1,6 @@
 use fleet_api::{DefKind, Effort, PermissionMode, Versioning};
-use fleet_daemon::fleet::defs::{rel_path, Defs, FleetError};
+use fleet_daemon::fleet::defs::{persona_defs_root, rel_path, Defs, FleetError};
+use fleet_daemon::fleet::defs_migrate::{known_names, migrate_fleet_defs};
 use fleet_daemon::fleet::skills;
 use std::path::Path;
 
@@ -973,4 +974,95 @@ fn move_role_refuses_the_same_kind_and_non_roles() {
         text
     );
     assert_eq!(files_under(t.path()).len(), 1);
+}
+
+fn put(root: &Path, rel: &str, text: &str) {
+    let path = root.join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+fn ids(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn migrate_moves_leftovers_into_every_persona_once() {
+    let t = tempfile::tempdir().unwrap();
+    let (fleet, personas) = (t.path().join("fleet"), t.path().join("personas"));
+    put(
+        &fleet,
+        "specialists/mine.md",
+        &specialist_text("mine", "fleet mine"),
+    );
+    put(
+        &fleet,
+        "specialists/rust.md",
+        &specialist_text("rust", "fleet rust"),
+    );
+    put(&fleet, "orchestrators/boss.md", "boss");
+    put(&fleet, "skills/tidy/SKILL.md", "tidy");
+    put(&fleet, "skills/tidy/scripts/run.sh", "run");
+    put(&fleet, "pr-styles/house.md", "house");
+    let own = persona_defs_root(&personas, "a");
+    put(&own, "specialists/rust.md", "a's own rust");
+
+    let ids = ids(&["a", "b"]);
+    let moved = migrate_fleet_defs(&fleet, &personas, &ids).unwrap();
+    assert_eq!(moved, 4);
+    let a = std::fs::read_to_string(own.join("specialists/rust.md")).unwrap();
+    assert_eq!(a, "a's own rust");
+    let b = persona_defs_root(&personas, "b");
+    assert_eq!(
+        std::fs::read_to_string(b.join("specialists/rust.md")).unwrap(),
+        specialist_text("rust", "fleet rust")
+    );
+    for root in [&own, &b] {
+        assert!(root.join("specialists/mine.md").is_file());
+        assert_eq!(
+            std::fs::read_to_string(root.join("orchestrators/boss.md")).unwrap(),
+            "boss"
+        );
+        assert!(root.join("skills/tidy/scripts/run.sh").is_file());
+    }
+    assert_eq!(files_in(&fleet), ["pr-styles/house.md"]);
+    assert_eq!(migrate_fleet_defs(&fleet, &personas, &ids).unwrap(), 0);
+}
+
+#[test]
+fn migrate_waits_for_a_persona() {
+    let t = tempfile::tempdir().unwrap();
+    let (fleet, personas) = (t.path().join("fleet"), t.path().join("personas"));
+    put(&fleet, "specialists/mine.md", "mine");
+    assert_eq!(migrate_fleet_defs(&fleet, &personas, &[]).unwrap(), 0);
+    assert_eq!(files_in(&fleet), ["specialists/mine.md"]);
+    assert!(!personas.exists());
+}
+
+fn files_in(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = files_under(dir)
+        .iter()
+        .map(|p| p.strip_prefix(dir).unwrap().to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+#[test]
+fn a_product_accepts_a_name_from_any_persona() {
+    let t = tempfile::tempdir().unwrap();
+    let (fleet, personas) = (t.path().join("fleet"), t.path().join("personas"));
+    put(
+        &persona_defs_root(&personas, "b"),
+        "specialists/scribe.md",
+        &specialist_text("scribe", "B only"),
+    );
+    let known = known_names(&personas, &ids(&["a", "b"]), &fleet, DefKind::Specialist);
+    assert!(known.contains("scribe"));
+    assert!(known.contains("rust"));
+    assert!(!known.contains("boss"));
+    let only_a = known_names(&personas, &ids(&["a"]), &fleet, DefKind::Specialist);
+    assert!(!only_a.contains("scribe"));
+    let orchestrators = known_names(&personas, &ids(&["a", "b"]), &fleet, DefKind::Orchestrator);
+    assert!(orchestrators.contains("direct") && !orchestrators.contains("scribe"));
 }

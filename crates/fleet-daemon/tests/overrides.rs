@@ -3,15 +3,15 @@ mod common;
 use common::net::*;
 use common::*;
 use fleet_api::{
-    EffectiveSettings, EffectiveValue, Effort, PermissionMode, Product, ProductList,
+    DefKind, EffectiveSettings, EffectiveValue, Effort, PermissionMode, Product, ProductList,
     ProductOverride, SettingSource,
 };
 use fleet_daemon::config::{GateBuild, LimitValues, PrSettings};
-use fleet_daemon::fleet::defs::Defs;
+use fleet_daemon::fleet::defs_migrate::known_defs;
 use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::overrides::{
     annotate, effective, resolve_effort, resolve_limits, resolve_mode, resolve_model, resolve_pr,
-    validate,
+    targets, validate,
 };
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -161,7 +161,7 @@ async fn orphan_override_is_listed_invalid() {
     let e = effective_of(addr, &format!("?product={PRODUCT}")).await;
     assert!(!e.values.iter().any(|v| v.key == "gone"), "{e:?}");
 
-    let defs = Defs::new(fx.state_dir.join("no-user-defs"));
+    let defs = known_defs(&fx.state_dir, &[], &fx.state_dir, DefKind::Specialist);
     let stored = fx.store.product_overrides(PRODUCT).await.unwrap();
     assert!(!effective(
         &LimitValues::default(),
@@ -292,7 +292,11 @@ fn pr_override_wins_over_global() {
 
 #[test]
 fn unknown_pr_key_is_refused() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-pr"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-pr"),
+    );
     for (bad, named) in [
         (entry("pr", "colour", "x"), "pr.colour"),
         (entry("pr", "draft", "maybe"), "pr.draft"),
@@ -316,7 +320,11 @@ fn unknown_pr_key_is_refused() {
 
 #[test]
 fn pr_style_override_naming_a_missing_style() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-pr"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-pr"),
+    );
     let listed = annotate(vec![entry("pr", "style", "gone")], &defs);
     assert_eq!(
         listed[0].error.as_deref(),
@@ -328,7 +336,11 @@ fn pr_style_override_naming_a_missing_style() {
 
 #[test]
 fn max_pr_attempts_is_read_overridden_and_refused_at_zero() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-pr"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-pr"),
+    );
     let mut global = LimitValues::default();
     let (limits, sources) = resolve_limits(&global, &[]);
     assert_eq!(limits.max_pr_attempts, 3);
@@ -398,7 +410,11 @@ fn an_override_wins_over_the_definition_and_global() {
 
 #[test]
 fn a_bad_mode_override_is_an_entry_error() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-modes"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-modes"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-modes"),
+    );
     let err = validate(&[entry("modes", "rust", "plan")], &defs).unwrap_err();
     assert_eq!(
         err,
@@ -421,7 +437,11 @@ fn a_bad_mode_override_is_an_entry_error() {
 
 #[test]
 fn unknown_definition_key_is_an_error() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-keys"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-keys"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-keys"),
+    );
     for bad in [
         entry("modes", "nobody", "auto"),
         entry("efforts", "nobody", "low"),
@@ -471,7 +491,11 @@ async fn effective_lists_mode_and_effort_rows_with_sources() {
 
 #[test]
 fn pr_gate_build_override_is_validated_and_wins_over_global() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-pr"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-pr"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-pr"),
+    );
     validate(&[entry("pr", "gate_build", "clean")], &defs).unwrap();
     let err = validate(&[entry("pr", "gate_build", "x")], &defs).unwrap_err();
     assert!(
@@ -526,7 +550,11 @@ async fn effective_lists_concurrent_tasks_without_a_cap() {
 
 #[test]
 fn product_cannot_override_active_products() {
-    let defs = Defs::new(std::env::temp_dir().join("no-user-defs-active"));
+    let defs = targets(
+        &std::env::temp_dir().join("no-user-defs-active"),
+        &[],
+        &std::env::temp_dir().join("no-user-defs-active"),
+    );
     let err = validate(&[entry("limits", "max_active_products", "1")], &defs).unwrap_err();
     assert!(err.contains("unknown limit"), "{err}");
 }

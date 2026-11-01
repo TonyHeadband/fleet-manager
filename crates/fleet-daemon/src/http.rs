@@ -4,6 +4,7 @@ use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
 use crate::chat::asks::{tool_input, AnswerError, Asks, SCREEN_ID};
 use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{Defs, FleetError};
+use crate::fleet::defs_migrate::known_defs;
 use crate::fleet::env;
 use crate::fleet::workflow::{self, WorkflowError};
 use crate::forge::ForgeError;
@@ -41,6 +42,7 @@ use fleet_api::{
     TaskList, ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -642,7 +644,8 @@ async fn product_view(st: &AppState, p: ProductRow) -> Result<Product, ApiError>
     let overrides = if stored.is_empty() {
         stored
     } else {
-        with_defs(st, move |d| Ok(overrides::annotate(stored, &d))).await?
+        let known = product_targets(st).await?;
+        overrides::annotate(stored, &known)
     };
     let hidden_specialists = st.store.hidden_specialists(&p.id).await.map_err(internal)?;
     Ok(Product {
@@ -748,12 +751,8 @@ async fn put_product_overrides(
         .map_err(internal)?
         .ok_or_else(|| ProductError::NotFound(id.clone()))?;
     let entries = req.overrides;
-    let entries = with_defs(&st, move |d| {
-        Ok((overrides::validate(&entries, &d), entries))
-    })
-    .await?;
-    let (checked, entries) = entries;
-    checked.map_err(|m| ApiError::new(StatusCode::BAD_REQUEST, m))?;
+    let known = product_targets(&st).await?;
+    overrides::validate(&entries, &known).map_err(|m| ApiError::new(StatusCode::BAD_REQUEST, m))?;
     st.store
         .set_product_overrides(&id, &entries)
         .await
@@ -889,12 +888,11 @@ async fn effective_settings(
     };
     let global = st.svc.cfg.limits;
     let (mode, effort) = (st.svc.cfg.default_mode, st.svc.cfg.default_effort);
-    Ok(Json(
-        with_defs(&st, move |d| {
-            Ok(overrides::effective(&global, mode, effort, &d, &entries))
-        })
-        .await?,
-    ))
+    let mut defs = known_defs_of(&st, DefKind::Orchestrator).await?;
+    defs.extend(known_defs_of(&st, DefKind::Specialist).await?);
+    Ok(Json(overrides::effective(
+        &global, mode, effort, &defs, &entries,
+    )))
 }
 
 async fn upsert_repo(
@@ -1031,13 +1029,14 @@ async fn put_hidden_specialists(
         .ok_or_else(|| ProductError::NotFound(id.clone()))?;
     let names = req.hidden.clone();
     // A missing specialist is the request's fault here, not a missing route: 400, as for a spawn.
-    let defs = Defs::new(st.svc.cfg.fleet_dir.clone());
-    tokio::task::spawn_blocking(move || {
-        names.iter().try_for_each(|n| defs.specialist(n).map(drop))
-    })
-    .await
-    .map_err(internal)?
-    .map_err(|e| ApiError::new(fleet_status(&e), e.to_string()))?;
+    let known = known_names_of(&st, DefKind::Specialist).await?;
+    if let Some(name) = names.iter().find(|n| !known.contains(*n)) {
+        let e = FleetError::NotFound {
+            kind: DefKind::Specialist,
+            name: name.clone(),
+        };
+        return Err(ApiError::new(fleet_status(&e), e.to_string()));
+    }
     st.store
         .set_hidden_specialists(&id, &req.hidden)
         .await
@@ -1103,6 +1102,50 @@ async fn with_defs<T: Send + 'static>(
     Ok(tokio::task::spawn_blocking(move || f(defs))
         .await
         .map_err(internal)??)
+}
+
+/// Every persona's id, for what a product accepts from any of them.
+async fn persona_ids(st: &AppState) -> Result<Vec<String>, ApiError> {
+    Ok(st
+        .store
+        .personas()
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|p| p.id)
+        .collect())
+}
+
+/// Definitions across all personas are files too: listed on a blocking thread.
+async fn known_defs_of(st: &AppState, kind: DefKind) -> Result<Vec<DefInfo>, ApiError> {
+    let (personas_dir, fleet_dir) = (
+        st.svc.cfg.personas_dir.clone(),
+        st.svc.cfg.fleet_dir.clone(),
+    );
+    let ids = persona_ids(st).await?;
+    tokio::task::spawn_blocking(move || known_defs(&personas_dir, &ids, &fleet_dir, kind))
+        .await
+        .map_err(internal)
+}
+
+async fn known_names_of(st: &AppState, kind: DefKind) -> Result<BTreeSet<String>, ApiError> {
+    Ok(known_defs_of(st, kind)
+        .await?
+        .into_iter()
+        .map(|d| d.name)
+        .collect())
+}
+
+/// What a product's overrides may name, across all personas.
+async fn product_targets(st: &AppState) -> Result<overrides::Targets, ApiError> {
+    let (personas_dir, fleet_dir) = (
+        st.svc.cfg.personas_dir.clone(),
+        st.svc.cfg.fleet_dir.clone(),
+    );
+    let ids = persona_ids(st).await?;
+    tokio::task::spawn_blocking(move || overrides::targets(&personas_dir, &ids, &fleet_dir))
+        .await
+        .map_err(internal)
 }
 
 async fn list_definitions(State(st): State<AppState>) -> Result<Json<Vec<DefInfo>>, ApiError> {

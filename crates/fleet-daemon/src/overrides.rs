@@ -1,11 +1,14 @@
 //! A product's sparse overrides of the global settings, and how a value is resolved through them. Rows are stored
 //! as section/key/value text; this module is the one place that knows what each section accepts.
 use crate::config::{GateBuild, LimitValues, PrSettings};
-use crate::fleet::defs::{valid_model, Defs};
+use crate::fleet::defs::valid_model;
+use crate::fleet::defs_migrate::known_names;
 use fleet_api::{
-    DefKind, EffectiveSettings, EffectiveValue, Effort, PermissionMode, ProductOverride,
+    DefInfo, DefKind, EffectiveSettings, EffectiveValue, Effort, PermissionMode, ProductOverride,
     SettingSource,
 };
+use std::collections::BTreeSet;
+use std::path::Path;
 
 pub const SECTIONS: [&str; 5] = ["models", "modes", "efforts", "limits", "pr"];
 pub const PR_KEYS: [&str; 5] = ["style", "attribution", "draft", "labels", "gate_build"];
@@ -19,24 +22,21 @@ pub const LIMIT_KEYS: [&str; 5] = [
 ];
 
 /// The definition names an entry may refer to.
-struct Targets {
-    /// What a `models`, `modes` or `efforts` key may name.
-    models: Vec<String>,
+pub struct Targets {
+    /// What a `models`, `modes` or `efforts` key may name: a built-in, or one any persona has.
+    models: BTreeSet<String>,
     /// What `pr.style` may name.
-    pr_styles: Vec<String>,
+    pr_styles: BTreeSet<String>,
 }
 
-fn targets(defs: &Defs) -> Targets {
-    let named = |kinds: &[DefKind]| {
-        defs.list()
-            .into_iter()
-            .filter(|d| kinds.contains(&d.kind))
-            .map(|d| d.name)
-            .collect()
-    };
+pub fn targets(personas_dir: &Path, persona_ids: &[String], fleet_root: &Path) -> Targets {
+    let named = |kind| known_names(personas_dir, persona_ids, fleet_root, kind);
+    let mut models = named(DefKind::Orchestrator);
+    models.extend(named(DefKind::Specialist));
     Targets {
-        models: named(&[DefKind::Orchestrator, DefKind::Specialist]),
-        pr_styles: named(&[DefKind::PrStyle]),
+        models,
+        // PR styles are fleet-wide: no persona to ask.
+        pr_styles: known_names(personas_dir, &[], fleet_root, DefKind::PrStyle),
     }
 }
 
@@ -116,10 +116,9 @@ fn entry_error(e: &ProductOverride, known: &Targets) -> Option<String> {
 }
 
 /// The first entry that cannot apply, named in the message; a section/key given twice counts too.
-pub fn validate(entries: &[ProductOverride], defs: &Defs) -> Result<(), String> {
-    let known = targets(defs);
+pub fn validate(entries: &[ProductOverride], known: &Targets) -> Result<(), String> {
     for (i, e) in entries.iter().enumerate() {
-        if let Some(msg) = entry_error(e, &known) {
+        if let Some(msg) = entry_error(e, known) {
             return Err(msg);
         }
         if entries[..i]
@@ -134,12 +133,11 @@ pub fn validate(entries: &[ProductOverride], defs: &Defs) -> Result<(), String> 
 
 /// `entries` with `error` set on each one `validate` would refuse, for a read. A stored entry goes stale when the
 /// definition it names is deleted, so it is listed, not hidden.
-pub fn annotate(entries: Vec<ProductOverride>, defs: &Defs) -> Vec<ProductOverride> {
-    let known = targets(defs);
+pub fn annotate(entries: Vec<ProductOverride>, known: &Targets) -> Vec<ProductOverride> {
     entries
         .into_iter()
         .map(|mut e| {
-            e.error = entry_error(&e, &known);
+            e.error = entry_error(&e, known);
             e
         })
         .collect()
@@ -280,13 +278,14 @@ pub fn resolve_effort(
     }
 }
 
-/// Every limit, then `models`, `modes` and `efforts` rows per orchestrator and specialist definition. An override
+/// Every limit, then `models`, `modes` and `efforts` rows per orchestrator and specialist in `defs` (see
+/// `defs_migrate::known_defs`). An override
 /// naming a definition that is gone has no row: there is nothing for it to apply to.
 pub fn effective(
     global: &LimitValues,
     global_mode: PermissionMode,
     global_effort: Effort,
-    defs: &Defs,
+    defs: &[DefInfo],
     entries: &[ProductOverride],
 ) -> EffectiveSettings {
     let (limits, sources) = resolve_limits(global, entries);
@@ -308,11 +307,7 @@ pub fn effective(
             source,
         })
         .collect();
-    for d in defs
-        .list()
-        .into_iter()
-        .filter(|d| matches!(d.kind, DefKind::Orchestrator | DefKind::Specialist))
-    {
+    for d in defs.iter().cloned() {
         let value = resolve_model(&d.name, d.model.as_deref(), entries);
         let source = if entry(entries, "models", &d.name).is_some_and(valid_model) {
             SettingSource::Product
