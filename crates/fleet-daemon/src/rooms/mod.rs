@@ -25,9 +25,17 @@ pub use watch::start_room_watcher;
 
 const UNTITLED: &str = "Untitled";
 
+pub fn product_room_id(product: &str) -> String {
+    format!("product:{product}")
+}
+
+pub fn operation_room_id(conversation: &AgentId) -> String {
+    format!("operation:{}", conversation.0)
+}
+
 /// The product's room, made on first use.
 pub async fn product_room(store: &Store, product: &str) -> Result<String, StoreError> {
-    let id = format!("product:{product}");
+    let id = product_room_id(product);
     store
         .insert_room(&RoomRow {
             id: id.clone(),
@@ -48,7 +56,7 @@ pub async fn operation_room(
     conversation: &AgentId,
     persona: &str,
 ) -> Result<String, StoreError> {
-    let id = format!("operation:{}", conversation.0);
+    let id = operation_room_id(conversation);
     store
         .insert_room(&RoomRow {
             id: id.clone(),

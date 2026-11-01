@@ -461,7 +461,7 @@ async fn announcements_wake_nobody_and_show_in_room_read() {
     assert!(!screen(&fx.sessions, &sup).contains("migration 017"));
     assert!(!screen(&fx.sessions, &a).contains(NOTICE));
 
-    let (read, failed) = tool(&fx.svc, &sup, "room_read", json!({})).await;
+    let (read, failed) = tool(&fx.svc, &sup, "room_read", json!({ "room": op_room(&sup) })).await;
     assert!(!failed, "{read}");
     assert_eq!(
         read,
@@ -480,15 +480,21 @@ async fn room_read_returns_only_what_is_new_for_that_member() {
     };
 
     let one = post(&a, json!({ "kind": "announcement", "text": "one" })).await;
-    let read = tool(&fx.svc, &sup, "room_read", json!({})).await.0;
+    let read = tool(&fx.svc, &sup, "room_read", json!({ "room": op_room(&sup) }))
+        .await
+        .0;
     assert!(read.starts_with(&format!("{one} ")), "{read}");
     assert_eq!(
-        tool(&fx.svc, &sup, "room_read", json!({})).await.0,
+        tool(&fx.svc, &sup, "room_read", json!({ "room": op_room(&sup) }))
+            .await
+            .0,
         "nothing new"
     );
 
     let two = post(&a, json!({ "kind": "announcement", "text": "two" })).await;
-    let read = tool(&fx.svc, &sup, "room_read", json!({})).await.0;
+    let read = tool(&fx.svc, &sup, "room_read", json!({ "room": op_room(&sup) }))
+        .await
+        .0;
     assert_eq!(read, format!("{two} {} → all: [announcement] two", a.0));
 
     // Its own posts are not new to the sender, and the supervisor's reads move only its own place.
@@ -498,13 +504,17 @@ async fn room_read_returns_only_what_is_new_for_that_member() {
         json!({ "kind": "message", "text": "rebase when free", "to": a.0, "room": room }),
     )
     .await;
-    let read = tool(&fx.svc, &a, "room_read", json!({})).await.0;
+    let read = tool(&fx.svc, &a, "room_read", json!({ "room": op_room(&sup) }))
+        .await
+        .0;
     assert_eq!(
         read,
         format!("{three} supervisor → {}: [message] rebase when free", a.0)
     );
     assert_eq!(
-        tool(&fx.svc, &a, "room_read", json!({})).await.0,
+        tool(&fx.svc, &a, "room_read", json!({ "room": op_room(&sup) }))
+            .await
+            .0,
         "nothing new"
     );
 }
@@ -519,7 +529,9 @@ async fn an_ask_holds_until_answered_and_returns_the_answer() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!held.is_finished(), "the ask holds its caller");
 
-    let read = tool(&fx.svc, &sup, "room_read", json!({})).await.0;
+    let read = tool(&fx.svc, &sup, "room_read", json!({ "room": op_room(&sup) }))
+        .await
+        .0;
     assert_eq!(
         read,
         format!("{ask} {} → supervisor: [ask] can I change the schema?", a.0)
@@ -842,6 +854,101 @@ async fn rooms_of_another_persona_or_task_are_refused() {
     // An orchestrator stays in its own rooms.
     let (text, failed) = tool(&fx.svc, &a, "room_read", json!({ "room": foreign })).await;
     assert!(failed && text.contains("not in room"), "{text}");
+}
+
+fn product_room() -> String {
+    format!("product:{PRODUCT}")
+}
+
+/// The posts in `room`, oldest first.
+async fn all_posts(fx: &Fx, room: &str) -> Vec<Post> {
+    fx.store.posts_after(room, "nobody", 0).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operation_tasks_orchestrator_reads_the_daemons_migration_announcement() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    rooms::announce::migrations_taken(&fx.store, PRODUCT, "Other task", &["017_x.sql".into()])
+        .await
+        .unwrap();
+    let taken = all_posts(&fx, &product_room()).await[0].id;
+    let hello = posted_id(
+        &tool(
+            &fx.svc,
+            &sup,
+            "room_post",
+            json!({ "kind": "announcement", "text": "hello", "room": op_room(&sup) }),
+        )
+        .await,
+    );
+
+    // With no room named, every room it is in, each headed with its id and kind.
+    let read = tool(&fx.svc, &a, "room_read", json!({})).await;
+    assert_eq!(
+        read,
+        (
+            format!(
+                "# {} (operation)\n{hello} supervisor → all: [announcement] hello\n\
+                 # {} (product)\n{taken} daemon → all: [announcement] migration 017_x.sql taken by Other task",
+                op_room(&sup),
+                product_room()
+            ),
+            false
+        )
+    );
+    assert_eq!(
+        tool(&fx.svc, &a, "room_read", json!({})).await.0,
+        format!(
+            "# {} (operation)\nnothing new\n# {} (product)\nnothing new",
+            op_room(&sup),
+            product_room()
+        ),
+        "each room's reads are tracked"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn posting_with_no_room_uses_the_operation_room_else_the_product_room() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let hand_made = direct_from(&fx, None).await;
+    let one = posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "announcement", "text": "one" }),
+        )
+        .await,
+    );
+    let two = posted_id(
+        &tool(
+            &fx.svc,
+            &hand_made,
+            "room_post",
+            json!({ "kind": "announcement", "text": "two" }),
+        )
+        .await,
+    );
+    assert_eq!(
+        fx.store.post(one).await.unwrap().unwrap().room,
+        op_room(&sup)
+    );
+    assert_eq!(
+        fx.store.post(two).await.unwrap().unwrap().room,
+        product_room()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_supervisor_in_no_room_is_told_so() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let (text, failed) = tool(&fx.svc, &sup, "room_read", json!({})).await;
+    assert!(failed && text.contains("you are in no room"), "{text}");
 }
 
 // Waking the recipient, and surfacing posts to the owner.

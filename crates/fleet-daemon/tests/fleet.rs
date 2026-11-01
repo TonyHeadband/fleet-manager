@@ -540,6 +540,38 @@ async fn a_planned_direct_orchestrator_gets_its_plan_in_claude_md() {
 }
 
 #[tokio::test]
+async fn an_orchestrators_claude_md_names_its_rooms() {
+    let fx = fleet_fixture().await;
+    let read = |a: &fleet_api::Agent| {
+        std::fs::read_to_string(PathBuf::from(&a.workdir).join("CLAUDE.md")).unwrap()
+    };
+    let started = fx
+        .svc
+        .spawn(SpawnRequest {
+            actor: fleet_api::Actor("supervisor:conv-1".into()),
+            ..orchestrator(&fx, "direct")
+        })
+        .await
+        .unwrap();
+    let md = read(&started);
+    assert!(md.contains("## Your rooms"), "{md}");
+    assert!(md.contains("- `operation:conv-1` (operation): "), "{md}");
+    assert!(
+        md.contains(&format!("- `product:{PRODUCT}` (product): ")),
+        "{md}"
+    );
+
+    // A hand-made task has no operation room.
+    let hand_made = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();
+    let md = read(&hand_made);
+    assert!(
+        md.contains(&format!("- `product:{PRODUCT}` (product): ")),
+        "{md}"
+    );
+    assert!(!md.contains("(operation)"), "{md}");
+}
+
+#[tokio::test]
 async fn an_unplanned_direct_orchestrator_is_unchanged() {
     let fx = fleet_fixture().await;
     let a = fx.svc.spawn(orchestrator(&fx, "direct")).await.unwrap();

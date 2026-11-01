@@ -1539,6 +1539,7 @@ impl AgentService {
                     .await?;
                 p.named = title.is_some();
                 p.plan = req.plan.clone();
+                p.origin = crate::supervisor::tools::actor_conversation(&req.actor);
                 Some(p)
             }
             None => None,

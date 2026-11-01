@@ -16,6 +16,18 @@ const FORGE_TIMEOUT: Duration = Duration::from_secs(60);
 
 type Reply = Result<String, String>;
 
+const ACTOR: &str = "supervisor:";
+
+/// The conversation a spawn's actor names, when a conversation's `start_task` made it. Read before the task's
+/// origin is stored, which happens only once the spawn returns.
+pub(crate) fn actor_conversation(actor: &Actor) -> Option<AgentId> {
+    actor
+        .0
+        .strip_prefix(ACTOR)
+        .filter(|c| !c.is_empty())
+        .map(|c| AgentId(c.to_string()))
+}
+
 /// Runs `name` for the conversation `id` (offered to supervisors only; the caller checks), logs it and marks the
 /// conversation used.
 pub async fn call(svc: &AgentService, id: &AgentId, name: &str, args: &Value) -> (String, bool) {
@@ -253,7 +265,7 @@ async fn start_task(
     }
     // Every new task is a direct orchestrator; an old call's `kind` and `role` are ignored.
     let req = SpawnRequest {
-        actor: Actor(format!("supervisor:{}", conversation.0)),
+        actor: Actor(format!("{ACTOR}{}", conversation.0)),
         product: product.to_string(),
         release: None,
         repos,

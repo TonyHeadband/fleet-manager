@@ -36,6 +36,32 @@ fn breakdown_line(v: &BreakdownVersion) -> String {
     format!("breakdown v{}: {n} {steps} — {first}{more}", v.version)
 }
 
+/// The room an orchestrator means when it names none: its operation room, else its product room.
+fn default_room(mine: &[String]) -> Option<&String> {
+    let kind = |prefix: &str| mine.iter().find(|r| r.starts_with(prefix));
+    kind("operation:").or_else(|| kind("product:"))
+}
+
+/// What `room_read` returns: each room's new posts as `line`s, or `nothing new`. `headed` (no room was named) puts
+/// `# <room id> (<kind>)` above each room's.
+pub fn read_text(groups: &[(RoomRow, Vec<Post>)], headed: bool) -> String {
+    let mut out = Vec::new();
+    for (room, posts) in groups {
+        if headed {
+            let kind = match room.kind {
+                RoomKind::Operation => "operation",
+                RoomKind::Product => "product",
+            };
+            out.push(format!("# {} ({kind})", room.id));
+        }
+        if posts.is_empty() {
+            out.push("nothing new".to_string());
+        }
+        out.extend(posts.iter().map(|p| line(room, p)));
+    }
+    out.join("\n")
+}
+
 /// One post as `room_read` shows it: `<id> <sender> → <to>: [<kind>] <text>`. Senders and recipients read as the
 /// values `to` takes, so a reply can be addressed from the line.
 pub fn line(room: &RoomRow, p: &Post) -> String {
@@ -111,15 +137,12 @@ impl AgentService {
             }
             Some(r) => return Err(refuse(format!("you are not in room {r}"))),
             None if supervisor => {
-                let own = format!("operation:{}", who.id.0);
+                let own = super::operation_room_id(&who.id);
                 mine.contains(&own)
                     .then_some(own)
                     .ok_or_else(|| refuse("you have no operation room yet; name a room"))?
             }
-            None => mine
-                .iter()
-                .find(|r| r.starts_with("operation:"))
-                .or(mine.first())
+            None => default_room(&mine)
                 .cloned()
                 .ok_or_else(|| refuse("you are in no room"))?,
         };
@@ -299,14 +322,38 @@ impl AgentService {
         Ok(posts)
     }
 
-    /// `room_read`: the posts the caller has not seen in the room, which are then marked read.
+    /// `room_read`: the posts the caller has not seen in `room`, or with none named in every room it is in
+    /// (operation rooms first), which are then marked read.
     pub async fn room_read(
         &self,
         caller: &AgentId,
         room: Option<&str>,
-    ) -> Result<(RoomRow, Vec<Post>), ServiceError> {
+    ) -> Result<Vec<(RoomRow, Vec<Post>)>, ServiceError> {
         let (who, me) = self.member_of(caller).await?;
-        let room = self.room_of(&who, &me, room).await?;
+        let rooms = match room {
+            Some(r) => vec![self.room_of(&who, &me, Some(r)).await?],
+            None => {
+                let mut rows = Vec::new();
+                for id in self.store.rooms_of(me.key()).await? {
+                    rows.extend(self.store.room(&id).await?);
+                }
+                if rows.is_empty() {
+                    return Err(refuse("you are in no room"));
+                }
+                rows.sort_by_key(|r| r.kind != RoomKind::Operation);
+                rows
+            }
+        };
+        let mut out = Vec::with_capacity(rooms.len());
+        for room in rooms {
+            let posts = self.read_new(&room, &me).await?;
+            out.push((room, posts));
+        }
+        Ok(out)
+    }
+
+    /// The posts in the room `me` has not seen, which are then marked read.
+    async fn read_new(&self, room: &RoomRow, me: &MemberRef) -> Result<Vec<Post>, ServiceError> {
         let upto = self
             .store
             .room_members(&room.id)
@@ -316,14 +363,14 @@ impl AgentService {
             .map_or(0, |m| m.read_upto);
         let mut posts = self.store.posts_after(&room.id, me.key(), upto).await?;
         for p in &mut posts {
-            p.sender_name = self.name_of(&room, &p.sender).await?;
+            p.sender_name = self.name_of(room, &p.sender).await?;
         }
         if let Some(last) = posts.last() {
             self.store
                 .set_read_upto(&room.id, me.key(), last.id)
                 .await?;
         }
-        Ok((room, posts))
+        Ok(posts)
     }
 
     /// `room_ask`: an orchestrator's ask to the supervisor or the owner, held until it is answered or the hold runs
@@ -497,11 +544,7 @@ impl AgentService {
                 .await?;
         }
         let mine = self.store.rooms_of(me.key()).await?;
-        let Some(id) = mine
-            .iter()
-            .find(|r| r.starts_with("operation:"))
-            .or(mine.first())
-        else {
+        let Some(id) = default_room(&mine) else {
             return Ok(());
         };
         let Some(room) = self.store.room(id).await? else {

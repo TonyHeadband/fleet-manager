@@ -264,6 +264,10 @@ pub(crate) struct OrchestratorPlan {
     pub named: bool,
     /// The plan in the internal repo the task carries out (`Task.plan`).
     pub plan: Option<String>,
+    /// The task's product, whose room it is in.
+    pub product: String,
+    /// The supervisor conversation that started the task (`Task.origin`), whose operation room it is in.
+    pub origin: Option<AgentId>,
 }
 
 impl OrchestratorPlan {
@@ -292,6 +296,7 @@ impl OrchestratorPlan {
                  agreed goal: do not re-agree it. Turn it into your breakdown, one step per plan task."
             ));
         }
+        text.push_str(&rooms_section(&self.product, self.origin.as_ref()));
         text.push_str("\n\n## Your specialists\n\n");
         for RosterEntry {
             name,
@@ -316,6 +321,30 @@ impl OrchestratorPlan {
         ));
         text
     }
+}
+
+/// The rooms the orchestrator is in, by id and kind, for the room tools' `room`.
+fn rooms_section(product: &str, origin: Option<&AgentId>) -> String {
+    let mut text = String::from("\n\n## Your rooms\n\n");
+    if let Some(c) = origin {
+        text.push_str(&format!(
+            "- `{}` (operation): the room of the supervisor conversation that started your task. `room_post` and \
+             `room_ask` use it when you name no room.\n",
+            crate::rooms::operation_room_id(c)
+        ));
+    }
+    let default = if origin.is_some() {
+        ""
+    } else {
+        " `room_post` and `room_ask` use it when you name no room."
+    };
+    text.push_str(&format!(
+        "- `{}` (product): your product's room, shared with every orchestrator on it. Claims on migration numbers, \
+         landing order and interface changes go here, and the fleet posts landings and taken migrations here.{default}\n\n\
+         `room_read` with no `room` reads what is new in every one of them.",
+        crate::rooms::product_room_id(product)
+    ));
+    text
 }
 
 /// Demotes each Markdown heading one level (to at most `######`), so a style's own headings nest under the
@@ -699,6 +728,8 @@ impl AgentService {
             repo_env: BTreeMap::new(),
             named: false,
             plan: None,
+            product: product.to_string(),
+            origin: None,
         })
     }
 
@@ -2577,6 +2608,8 @@ impl AgentService {
             repo_env: p.repo_env.clone(),
             named: p.title.is_some(),
             plan: p.plan.clone(),
+            product: p.product.clone(),
+            origin: p.origin.clone(),
         };
 
         // Held through the start, so two restarts never both find the orchestrator stopped, and the prompt is the
