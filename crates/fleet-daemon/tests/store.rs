@@ -1321,3 +1321,19 @@ async fn the_migration_keeps_existing_sessions() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].0, "u-old");
 }
+
+#[tokio::test]
+async fn an_agents_sessions_go_with_it() {
+    let s = Store::open(":memory:".as_ref()).await.unwrap();
+    let id = AgentId("a1".into());
+    s.insert_agent(&agent("a1"), "tok").await.unwrap();
+    s.add_claude_session(&id, "u-1", 1).await.unwrap();
+    s.remove_agent(&id).await.unwrap();
+    assert!(s.claude_sessions(&id).await.unwrap().is_empty());
+
+    s.insert_agent(&agent("a2"), "tok").await.unwrap();
+    let id2 = AgentId("a2".into());
+    s.add_claude_session(&id2, "u-2", 1).await.unwrap();
+    s.archive_task(&id2, |_| {}).await.unwrap();
+    assert!(s.claude_sessions(&id2).await.unwrap().is_empty());
+}

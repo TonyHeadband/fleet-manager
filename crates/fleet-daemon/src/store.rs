@@ -1164,6 +1164,10 @@ impl Store {
                 if gone.rows_affected() == 0 {
                     return Err(StoreError::NotFound(id.clone()));
                 }
+                sqlx::query("DELETE FROM claude_sessions WHERE agent_id = ?")
+                    .bind(&id.0)
+                    .execute(&mut *tx)
+                    .await?;
                 let ev = self
                     .append(tx, EventKind::AgentRemoved { id: id.clone() })
                     .await?;
@@ -1196,6 +1200,10 @@ impl Store {
                 let mut events = Vec::with_capacity(cards.len());
                 for card in cards {
                     sqlx::query("DELETE FROM agents WHERE id = ?")
+                        .bind(&card)
+                        .execute(&mut *tx)
+                        .await?;
+                    sqlx::query("DELETE FROM claude_sessions WHERE agent_id = ?")
                         .bind(&card)
                         .execute(&mut *tx)
                         .await?;
