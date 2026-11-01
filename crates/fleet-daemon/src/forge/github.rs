@@ -174,12 +174,12 @@ impl Forge for GitHub {
     ) -> Result<(), ForgeError> {
         let path = format!("/repos/{}/{}/pulls/{number}", repo.owner, repo.name);
         self.send("PATCH", &path, Some(json!({"title": title, "body": body})))
-            .map(drop)
+            .map(|_| ())
     }
 
     fn add_labels(&self, repo: &RepoRef, number: u64, labels: &[String]) -> Result<(), ForgeError> {
         let path = format!("/repos/{}/{}/issues/{number}/labels", repo.owner, repo.name);
         self.send("POST", &path, Some(json!({"labels": labels})))
-            .map(drop)
+            .map(|_| ())
     }
 }
