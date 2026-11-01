@@ -294,14 +294,13 @@ pub async fn sync(store: &Store, at: i64) -> Result<(), StoreError> {
     }
     // A task whose record is gone (a start that was undone) must not hold a room open. Supervisor conversations
     // stay: a supervisor joins the rooms of its persona it looks in.
-    let mut conversations: HashSet<_> = store
-        .rooms()
-        .await?
-        .into_iter()
-        .filter_map(|r| r.conversation)
+    let rooms = store.rooms().await?;
+    let mut conversations: HashSet<_> = rooms
+        .iter()
+        .filter_map(|r| r.conversation.clone())
         .collect();
     conversations.extend(supervisors(store).await?);
-    for r in store.rooms().await? {
+    for r in &rooms {
         for m in store.room_members(&r.id).await? {
             if m.left_at.is_none() {
                 if let MemberRef::Agent(a) = MemberRef::from_key(&m.member) {
@@ -319,14 +318,24 @@ async fn apply(store: &Store, at: i64, t: &Task) -> Result<(), StoreError> {
     if ended(t) {
         return retire(store, at, &t.id).await;
     }
+    // Read first: the watcher applies every task on each pass, and a task already in an open room needs no write.
     let me = MemberRef::Agent(t.id.clone());
-    if !t.product.is_empty() {
+    let mine = store.rooms_of(me.key()).await?;
+    if !t.product.is_empty() && !mine.contains(&product_room_id(&t.product)) {
         let room = product_room(store, &t.product).await?;
         join(store, &room, &me, at).await?;
     }
     if let Some(conversation) = &t.origin {
-        let room = operation_room(store, conversation, &t.persona).await?;
-        join(store, &room, &me, at).await?;
+        let id = operation_room_id(conversation);
+        let open = mine.contains(&id)
+            && store
+                .room(&id)
+                .await?
+                .is_some_and(|r| r.archived_at.is_none());
+        if !open {
+            let room = operation_room(store, conversation, &t.persona).await?;
+            join(store, &room, &me, at).await?;
+        }
     }
     Ok(())
 }
