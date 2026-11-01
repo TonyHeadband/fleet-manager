@@ -53,6 +53,22 @@ pub struct ProductRow {
     pub created_at: i64,
 }
 
+/// One call the daemon made to a code forge. `at` is Unix seconds, `ms` how long the call took.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgeCallRow {
+    pub id: i64,
+    pub at: i64,
+    pub persona: String,
+    pub task: Option<AgentId>,
+    pub agent: Option<AgentId>,
+    pub forge: String,
+    pub repo: String,
+    pub op: String,
+    pub ok: bool,
+    pub detail: Option<String>,
+    pub ms: i64,
+}
+
 /// A version of a product. Dates are `YYYY-MM-DD`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReleaseRow {
@@ -239,7 +255,7 @@ impl Store {
         }
         // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 10] = [
+        let steps: [(i64, &'static str, &'static str); 11] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -289,6 +305,12 @@ impl Store {
                 13,
                 include_str!("../migrations/013_claude_sessions.sql"),
                 "PRAGMA user_version = 13",
+            ),
+            // 014 belongs to another branch; the runner only compares versions, so a gap is harmless.
+            (
+                15,
+                include_str!("../migrations/015_forge_calls.sql"),
+                "PRAGMA user_version = 15",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -574,6 +596,54 @@ impl Store {
     }
 
     /// The specialists the product hides from its orchestrators; empty for an unknown product.
+    /// Stores `row` stamped with the current time; its `id` and `at` are ignored.
+    pub async fn record_forge_call(&self, row: &ForgeCallRow) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO forge_calls (at, persona, task, agent, forge, repo, op, ok, detail, ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(now_secs())
+        .bind(&row.persona)
+        .bind(row.task.as_ref().map(|t| &t.0))
+        .bind(row.agent.as_ref().map(|a| &a.0))
+        .bind(&row.forge)
+        .bind(&row.repo)
+        .bind(&row.op)
+        .bind(row.ok)
+        .bind(&row.detail)
+        .bind(row.ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The most recent forge calls, newest first.
+    pub async fn forge_calls(&self, limit: u32) -> Result<Vec<ForgeCallRow>> {
+        let rows = sqlx::query(
+            "SELECT id, at, persona, task, agent, forge, repo, op, ok, detail, ms
+             FROM forge_calls ORDER BY id DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| ForgeCallRow {
+                id: r.get("id"),
+                at: r.get("at"),
+                persona: r.get("persona"),
+                task: r.get::<Option<String>, _>("task").map(AgentId),
+                agent: r.get::<Option<String>, _>("agent").map(AgentId),
+                forge: r.get("forge"),
+                repo: r.get("repo"),
+                op: r.get("op"),
+                ok: r.get("ok"),
+                detail: r.get("detail"),
+                ms: r.get("ms"),
+            })
+            .collect())
+    }
+
     pub async fn hidden_specialists(&self, product: &str) -> Result<Vec<String>> {
         let raw: Option<String> =
             sqlx::query_scalar("SELECT hidden_specialists FROM products WHERE id = ?")

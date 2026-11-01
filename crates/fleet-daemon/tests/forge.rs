@@ -1,8 +1,10 @@
 mod common;
 
 use common::fake_forge::FakeForge;
-use fleet_api::PrState;
+use fleet_api::{AgentId, PrState};
+use fleet_daemon::forge::log::{recorded, CallCtx};
 use fleet_daemon::forge::{api_base, github, Forge, ForgeConfig, ForgeError, NewPr, RepoRef};
+use fleet_daemon::store::Store;
 use serde_json::json;
 use std::time::Duration;
 
@@ -186,4 +188,61 @@ fn a_hung_forge_times_out() {
     fake.delay_next(Duration::from_secs(2));
     let c = client(&fake, Duration::from_millis(200));
     assert_eq!(c.whoami(), Err(ForgeError::TimedOut));
+}
+
+fn ctx() -> CallCtx {
+    CallCtx {
+        persona: "dev".into(),
+        task: Some(AgentId("t1".into())),
+        agent: Some(AgentId("a1".into())),
+    }
+}
+
+#[tokio::test]
+async fn a_call_is_recorded_with_its_context() {
+    let fake = FakeForge::start();
+    fake.set_prs("acme", "core", vec![pr(1, "open", None)]);
+    let store = Store::open(":memory:".as_ref()).await.unwrap();
+    let c = client(&fake, Duration::from_secs(5));
+    let r = repo();
+    let prs = recorded(&store, &ctx(), "github", &r, "prs_of", {
+        let r = r.clone();
+        move || c.prs_of(&r, "feat")
+    })
+    .await
+    .unwrap();
+    assert_eq!(prs.len(), 1);
+
+    let rows = store.forge_calls(10).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.persona, "dev");
+    assert_eq!(row.task, Some(AgentId("t1".into())));
+    assert_eq!(row.agent, Some(AgentId("a1".into())));
+    assert_eq!(row.forge, "github");
+    assert_eq!(row.repo, "github.com/acme/core");
+    assert_eq!(row.op, "prs_of");
+    assert!(row.ok);
+    assert_eq!(row.detail, None);
+    assert!(row.at > 0);
+}
+
+#[tokio::test]
+async fn a_failed_call_records_the_reason_not_the_token() {
+    let fake = FakeForge::start();
+    fake.fail_next(401, "Bad credentials");
+    let store = Store::open(":memory:".as_ref()).await.unwrap();
+    let c = client(&fake, Duration::from_secs(5));
+    let r = repo();
+    let err = recorded(&store, &ctx(), "github", &r, "whoami", move || c.whoami())
+        .await
+        .unwrap_err();
+    assert_eq!(err, ForgeError::Unauthorized);
+
+    let rows = store.forge_calls(10).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].ok);
+    let detail = rows[0].detail.as_deref().unwrap();
+    assert!(detail.contains("refused"), "{detail}");
+    assert!(!detail.contains("t0k"), "{detail}");
 }

@@ -1,6 +1,7 @@
 //! What the daemon asks a code forge: who the token is, and the PRs of a branch. GitHub is the only forge so far.
 
 mod github;
+pub mod log;
 
 use fleet_api::{parse_date, PrState};
 use std::fmt;
