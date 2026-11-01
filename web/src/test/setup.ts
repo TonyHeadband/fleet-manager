@@ -28,3 +28,12 @@ if (typeof window.AnimationEvent === "undefined") {
 configure({ defaultIgnore: "script, style, [data-closing], [data-closing] *" });
 // …and do not outlive the test that closed them.
 afterEach(() => document.querySelectorAll("body > [data-closing]").forEach((c) => c.remove()));
+
+// jsdom has no ResizeObserver; the chart blocks measure with one. Tests that need a size stub their own.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

@@ -3,11 +3,14 @@ import type { FleetClient } from "../api/client";
 import type { EventSourceFactory } from "../api/events";
 import type { Agent } from "../api/generated/Agent";
 import type { Conversation } from "../api/generated/Conversation";
+import type { Task } from "../api/generated/Task";
 import { ChatPane, type ChatClient } from "../chat/ChatPane";
 import { ReplyBox } from "../components/ReplyBox";
 import { navigate, supervisorHref, useSupervisorConversation } from "../shell/routes";
 import { ErrorLine } from "../ui/ErrorLine";
 import { ConversationSelector } from "./ConversationSelector";
+import { AGENTS_BY_STATUS } from "./widgets/AgentsByStatus";
+import { STORAGE } from "./widgets/Storage";
 import "./supervisor.css";
 
 export type SupervisorClient = ChatClient & Pick<FleetClient, "conversations" | "newConversation" | "sendToConversation">;
@@ -19,6 +22,8 @@ interface Props {
   persona: string | null;
   /** The fleet's agents, for the conversations' live status. */
   agents: Agent[];
+  /** The task list the app already keeps; empty until it loads. */
+  tasks: Task[];
   factory?: EventSourceFactory;
 }
 
@@ -30,7 +35,7 @@ export function SupervisorPage(props: Props) {
   return <Page key={props.persona ?? ""} {...props} />;
 }
 
-function Page({ baseUrl, client, persona, agents, factory }: Props) {
+function Page({ baseUrl, client, persona, agents, tasks, factory }: Props) {
   const [list, setList] = useState<Conversation[] | null>(null);
   // "+ New" was pressed: the chat is empty until the first message makes the conversation.
   const [blank, setBlank] = useState(false);
@@ -109,7 +114,9 @@ function Page({ baseUrl, client, persona, agents, factory }: Props) {
         {error && <ErrorLine text={error} />}
         {persona !== null && <ReplyBox label="Message" text={text} onText={setText} onSend={send} busy={busy} />}
       </section>
-      <section className="supervisor-grid outlined" aria-label="Fleet widgets" />
+      <section className="supervisor-grid outlined" aria-label="Fleet widgets">
+        {persona !== null && [AGENTS_BY_STATUS, STORAGE].map((w) => <div key={w.id} className="supervisor-cell">{w.render({ persona, agents, tasks })}</div>)}
+      </section>
     </div>
   );
 }

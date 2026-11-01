@@ -5,7 +5,7 @@ import { Button } from "../ui/Button";
 import { FilterMenu } from "../ui/FilterMenu";
 
 /** The board's column tones for each status, so a mark reads as its card does. */
-const TONE: Record<Status, Tone> = {
+export const TONE: Record<Status, Tone> = {
   queued: "neutral",
   working: "active",
   talking: "active",

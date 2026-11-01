@@ -39,7 +39,7 @@ function clientWith(lists: Record<string, Conversation[]> = { me: LIST }) {
 
 const chatOf = (id: string) => FakeEventSource.instances.filter((i) => i.url.includes(`/api/agents/${id}/chat`) && !i.closed);
 const page = (client = clientWith(), persona = "me") => (
-  <SupervisorPage baseUrl="" client={client} persona={persona} agents={[]} factory={factory} />
+  <SupervisorPage baseUrl="" client={client} persona={persona} agents={[]} tasks={[]} factory={factory} />
 );
 const picker = () => screen.getByRole("button", { name: "Conversation" });
 
@@ -146,12 +146,12 @@ describe("Supervisor page", () => {
     await waitFor(() => expect(window.location.hash).toBe("#supervisor"));
   });
 
-  it("the_grid_section_is_an_empty_outlined_slot", async () => {
+  it("the_grid_section_holds_the_agents_and_storage_widgets", async () => {
     const { container } = render(page());
     await waitFor(() => expect(chatOf("c2")).toHaveLength(1));
     const grid = container.querySelector(".supervisor-grid");
-    expect(grid).not.toBeNull();
-    expect(grid).toBeEmptyDOMElement();
+    expect(grid).toHaveClass("outlined");
+    expect([...grid!.querySelectorAll(".widget")].map((w) => w.getAttribute("data-widget"))).toEqual(["agents_by_status", "storage"]);
   });
 
   it("supervisor_agents_do_not_appear_on_the_kanban", async () => {
