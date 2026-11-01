@@ -37,14 +37,7 @@ pub(crate) async fn route_with(
         .filter(|o| conversations.iter().any(|c| &c.id == o));
     let conversation = match origin {
         Some(o) => Some(o),
-        // A row whose agent is gone (a start that failed before its row could go) cannot read the event.
-        None => {
-            let agents = store.snapshot().await?.agents;
-            conversations
-                .into_iter()
-                .find(|c| agents.iter().any(|a| a.id == c.id))
-                .map(|c| c.id)
-        }
+        None => latest_conversation(store, &t.persona).await?,
     };
     store
         .add_task_event(&TaskEvent {
@@ -59,6 +52,22 @@ pub(crate) async fn route_with(
         })
         .await?;
     Ok(())
+}
+
+/// The persona's most recently used conversation that still has its agent: where what is for the persona's
+/// supervisor, and for no conversation in particular, goes. A row whose agent is gone (a start that failed before
+/// its row could go) cannot read it.
+pub(crate) async fn latest_conversation(
+    store: &Store,
+    persona: &str,
+) -> Result<Option<AgentId>, StoreError> {
+    let agents = store.snapshot().await?.agents;
+    Ok(store
+        .conversations(persona)
+        .await?
+        .into_iter()
+        .find(|c| agents.iter().any(|a| a.id == c.id))
+        .map(|c| c.id))
 }
 
 /// Turns an agent's move into `NeedsYou` into an event. Once per transition: a repeat of the status, or a new

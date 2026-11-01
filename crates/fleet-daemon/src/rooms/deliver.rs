@@ -117,28 +117,29 @@ pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), Service
         post.sender_name,
         post.room
     );
+    let agents = svc.store.snapshot().await?.agents;
+    let supervisors = super::supervisors_of(&svc.store, &room, &agents).await?;
     let recipients = match &post.to {
         Some(MemberRef::Agent(id)) => vec![id.clone()],
         Some(_) => vec![],
-        None => svc
-            .store
-            .room_members(&room.id)
-            .await?
-            .into_iter()
-            .filter(|m| m.left_at.is_none() && m.member != post.sender.key())
-            .filter_map(|m| match MemberRef::from_key(&m.member) {
-                MemberRef::Agent(a) => Some(a),
-                _ => None,
-            })
-            .collect(),
+        // The room's tasks and its supervisor; a conversation that only looked in is not woken.
+        None => {
+            let mut ids = supervisors.clone();
+            for id in super::present_agents(&svc.store, &room.id).await? {
+                if !super::is_supervisor(&agents, &id) {
+                    ids.push(id);
+                }
+            }
+            ids.retain(|id| !matches!(&post.sender, MemberRef::Agent(s) if s == id));
+            ids
+        }
     };
     for id in &recipients {
         if let Err(e) = notify(svc, id, &text).await {
             warn!(agent_id = %id.0, post = post.id, error = %one_line(&e.to_string()), "cannot wake a post's recipient; it is in the room");
         }
     }
-    let to_supervisor =
-        matches!((&post.to, &room.conversation), (Some(MemberRef::Agent(a)), Some(c)) if a == c);
+    let to_supervisor = matches!(&post.to, Some(MemberRef::Agent(a)) if supervisors.contains(a));
     let kind = match post.kind {
         PostKind::Message if post.to == Some(MemberRef::Owner) => Some(TaskEventKind::RoomMessage),
         PostKind::Ask if post.to == Some(MemberRef::Owner) || to_supervisor => {

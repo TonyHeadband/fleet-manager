@@ -152,18 +152,28 @@ impl AgentService {
             .ok_or_else(|| refuse(format!("no room {id}")))
     }
 
-    /// `to` as a member of the room: `all` (None), `owner`, `supervisor` or a member's id. An orchestrator's agent
-    /// id stands for its task.
-    async fn recipient(&self, room: &RoomRow, to: &str) -> Result<Option<MemberRef>, ServiceError> {
+    /// `to` from `who` as a member of the room: `all` (None), `owner`, `supervisor` or a member's id. An
+    /// orchestrator's agent id stands for its task. `supervisor` is an operation room's conversation, or in a product
+    /// room the most recently used conversation of the sender's persona.
+    async fn recipient(
+        &self,
+        who: &Agent,
+        room: &RoomRow,
+        to: &str,
+    ) -> Result<Option<MemberRef>, ServiceError> {
         let id = match to {
             "all" => return Ok(None),
             "owner" => return Ok(Some(MemberRef::Owner)),
             "supervisor" => {
-                return room
-                    .conversation
-                    .clone()
+                let id = match &room.conversation {
+                    Some(c) => Some(c.clone()),
+                    None => {
+                        crate::supervisor::latest_conversation(&self.store, &who.persona).await?
+                    }
+                };
+                return id
                     .map(|c| Some(MemberRef::Agent(c)))
-                    .ok_or_else(|| refuse("this room has no supervisor"))
+                    .ok_or_else(|| refuse("this room has no supervisor"));
             }
             id => AgentId(id.to_string()),
         };
@@ -171,7 +181,8 @@ impl AgentService {
     }
 
     /// The agent as a member of the room, refused (as `shown`) unless it is in it. An orchestrator's agent id stands
-    /// for its task.
+    /// for its task. Of the supervisor conversations, only the room's supervisor is in it: one that only looked in
+    /// is not someone to address.
     async fn agent_recipient(
         &self,
         room: &RoomRow,
@@ -182,12 +193,16 @@ impl AgentService {
             Ok(a) if a.kind == AgentKind::Orchestrator => task_id(&a).clone(),
             _ => id,
         };
-        let present = self
-            .store
-            .room_members(&room.id)
-            .await?
-            .iter()
-            .any(|m| m.member == id.0 && m.left_at.is_none());
+        let agents = self.store.snapshot().await?.agents;
+        let present = if super::is_supervisor(&agents, &id) {
+            super::supervisors_of(&self.store, room, &agents)
+                .await?
+                .contains(&id)
+        } else {
+            super::present_agents(&self.store, &room.id)
+                .await?
+                .contains(&id)
+        };
         if !present {
             return Err(refuse(format!("{shown} is not in this room")));
         }
@@ -264,7 +279,7 @@ impl AgentService {
         let (who, me) = self.member_of(caller).await?;
         let room = self.room_of(&who, &me, room).await?;
         let mut p = self.new_post(&room, me, kind, text)?;
-        p.to = self.recipient(&room, to.unwrap_or("all")).await?;
+        p.to = self.recipient(&who, &room, to.unwrap_or("all")).await?;
         Ok(self.publish(&room, p).await?.id)
     }
 
@@ -391,7 +406,7 @@ impl AgentService {
         }
         let room = self.room_of(&who, &me, room).await?;
         let mut p = self.new_post(&room, me, PostKind::Ask, text)?;
-        p.to = self.recipient(&room, to).await?;
+        p.to = self.recipient(&who, &room, to).await?;
         // Detached, so a client that hangs up cannot stop it between storing the ask and registering its call.
         let svc = self.clone();
         let (id, mut rx) = detached(async move {

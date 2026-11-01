@@ -1311,11 +1311,8 @@ async fn a_second_notice_waits_for_the_turn_the_first_one_started() {
         async move { posted_id(&tool(&svc, &sup, "room_post", args).await) }
     };
     let first = format!("{NOTICE} new message from supervisor in {op}; call room_read.");
-    // Outside its own operation room the supervisor goes by its id.
-    let second = format!(
-        "{NOTICE} new message from {} in {product}; call room_read.",
-        sup.0
-    );
+    // A supervisor goes by `supervisor` in every room.
+    let second = format!("{NOTICE} new message from supervisor in {product}; call room_read.");
 
     say(&op).await;
     assert!(pane_contains(&fx, &a, &first).await);
@@ -1441,11 +1438,153 @@ async fn a_mark_left_by_missed_events_does_not_hold_notices_back() {
     reach(&fx, &a, Status::Working).await;
     reach(&fx, &a, Status::Review).await;
     say(&product).await;
-    let second = format!(
-        "{NOTICE} new message from {} in {product}; call room_read.",
-        sup.0
-    );
+    let second = format!("{NOTICE} new message from supervisor in {product}; call room_read.");
     assert!(pane_contains(&fx, &a, &second).await);
+}
+
+/// The conversation's session, once its TUI is up.
+async fn ready_conversation(fx: &Fx, sup: &AgentId) -> String {
+    let session = agent(fx, sup).await.session;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains("ready")).await;
+    session
+}
+
+/// The conversation's session, at its input box after its first turn.
+async fn idle_conversation(fx: &Fx, sup: &AgentId) -> String {
+    let session = ready_conversation(fx, sup).await;
+    reach(fx, sup, Status::Review).await;
+    session
+}
+
+/// `sup` reads `room`, which makes it a reader there.
+async fn look_in(fx: &Fx, sup: &AgentId, room: &str) {
+    let (text, failed) = tool(&fx.svc, sup, "room_read", json!({ "room": room })).await;
+    assert!(!failed, "{text}");
+}
+
+/// Two conversations of the persona that both looked in the product room; the second is the most recently used.
+async fn two_readers(fx: &Fx) -> ((AgentId, String), (AgentId, String)) {
+    rooms::product_room(&fx.store, PRODUCT).await.unwrap();
+    let old = conversation(fx).await;
+    let recent = conversation(fx).await;
+    let sessions = (
+        ready_conversation(fx, &old).await,
+        ready_conversation(fx, &recent).await,
+    );
+    look_in(fx, &old, &product_room()).await;
+    look_in(fx, &recent, &product_room()).await;
+    fx.clock.advance(1);
+    fx.store
+        .touch_conversation(&recent, fx.clock.now_for_test())
+        .await
+        .unwrap();
+    // After the touch: a conversation used since its last Review has a turn pending.
+    reach(fx, &old, Status::Review).await;
+    reach(fx, &recent, Status::Review).await;
+    ((old, sessions.0), (recent, sessions.1))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broadcast_in_a_product_room_wakes_only_the_most_recent_conversation() {
+    let fx = fixture().await;
+    let ((_, old), (_, recent)) = two_readers(&fx).await;
+    let a = direct_from(&fx, None).await;
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase on main" }),
+        )
+        .await,
+    );
+    let line = notice(&fx, "message", &a, &product_room()).await;
+    wait_screen_in(&fx.sessions, &recent, |s| s.contains(&line)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!fx.sessions.screen_text(&old).unwrap().contains(NOTICE));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operation_room_broadcast_wakes_only_its_own_conversation() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let other = conversation(&fx).await;
+    let own = idle_conversation(&fx, &sup).await;
+    let theirs = idle_conversation(&fx, &other).await;
+    let a = direct(&fx, &sup).await;
+    look_in(&fx, &other, &op_room(&sup)).await;
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "step 2 is done" }),
+        )
+        .await,
+    );
+    let line = notice(&fx, "message", &a, &op_room(&sup)).await;
+    wait_screen_in(&fx.sessions, &own, |s| s.contains(&line)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!fx.sessions.screen_text(&theirs).unwrap().contains(NOTICE));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn to_supervisor_in_a_product_room_reaches_the_most_recent_conversation() {
+    let fx = fixture().await;
+    let ((_, old), (recent, session)) = two_readers(&fx).await;
+    let a = direct_from(&fx, None).await;
+    let id = posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "who owns 017?", "to": "supervisor" }),
+        )
+        .await,
+    );
+    assert_eq!(
+        fx.store.post(id).await.unwrap().unwrap().to,
+        Some(MemberRef::Agent(recent))
+    );
+    let line = notice(&fx, "message", &a, &product_room()).await;
+    wait_screen_in(&fx.sessions, &session, |s| s.contains(&line)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!fx.sessions.screen_text(&old).unwrap().contains(NOTICE));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rooms_supervisor_is_listed_once_and_readers_never() {
+    let fx = fixture().await;
+    let ((old, _), (recent, _)) = two_readers(&fx).await;
+    let a = direct_from(&fx, None).await;
+    let rooms = rooms::list(&fx.store).await.unwrap();
+    let product = rooms.iter().find(|r| r.id == product_room()).unwrap();
+    let got: Vec<(String, String)> = product
+        .members
+        .iter()
+        .map(|m| (m.id.0.clone(), m.name.clone()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (recent.0.clone(), "supervisor".to_string()),
+            (a.0.clone(), task_name(&fx, &a).await)
+        ]
+    );
+    // A reader is not someone to address.
+    let refused = fx
+        .svc
+        .owner_post(
+            &product_room(),
+            PostKind::Message,
+            Some(&MemberRef::Agent(old.clone())),
+            "hello",
+        )
+        .await;
+    assert!(
+        matches!(&refused, Err(ServiceError::Refused(t)) if t.contains("is not in this room")),
+        "{refused:?}"
+    );
 }
 
 // The breakdown as an ask.

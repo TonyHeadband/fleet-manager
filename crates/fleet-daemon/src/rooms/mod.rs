@@ -142,17 +142,16 @@ pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreEr
 
 async fn view(store: &Store, r: RoomRow, agents: &[Agent]) -> Result<Room, StoreError> {
     let mut members = Vec::new();
-    for m in store.room_members(&r.id).await? {
-        // The owner joins by reading and the daemon only announces: neither is someone to address.
-        if m.left_at.is_some() {
-            continue;
-        }
-        let m = MemberRef::from_key(&m.member);
-        if let MemberRef::Agent(id) = &m {
-            members.push(RoomMember {
-                name: member_name(store, &r, &m).await?,
-                id: id.clone(),
-            });
+    for id in supervisors_of(store, &r, agents).await? {
+        let name = member_name(store, &r, &MemberRef::Agent(id.clone())).await?;
+        members.push(RoomMember { name, id });
+    }
+    // The owner joins by reading and the daemon only announces: neither is someone to address. Nor is a conversation
+    // that only looked in.
+    for id in present_agents(store, &r.id).await? {
+        if !is_supervisor(agents, &id) {
+            let name = member_name(store, &r, &MemberRef::Agent(id.clone())).await?;
+            members.push(RoomMember { name, id });
         }
     }
     Ok(Room {
@@ -168,7 +167,7 @@ async fn view(store: &Store, r: RoomRow, agents: &[Agent]) -> Result<Room, Store
     })
 }
 
-/// A member as people read it: the task's title or name, `supervisor` for the room's conversation, `owner`, or
+/// A member as people read it: the task's title or name, `supervisor` for a supervisor conversation, `owner`, or
 /// `Fleet Manager`.
 pub(crate) async fn member_name(
     store: &Store,
@@ -178,12 +177,65 @@ pub(crate) async fn member_name(
     Ok(match m {
         MemberRef::Owner => "owner".into(),
         MemberRef::Daemon => "Fleet Manager".into(),
-        MemberRef::Agent(a) if room.conversation.as_ref() == Some(a) => "supervisor".into(),
+        MemberRef::Agent(a) if room.conversation.as_ref() == Some(a) => SUPERVISOR.into(),
         MemberRef::Agent(a) => match store.task(a).await? {
             Some(t) => t.title.filter(|t| !t.is_empty()).unwrap_or(t.name),
+            None if is_supervisor(&store.snapshot().await?.agents, a) => SUPERVISOR.into(),
             None => a.0.clone(),
         },
     })
+}
+
+const SUPERVISOR: &str = "supervisor";
+
+/// The supervisor conversations the room wakes and lists: an operation room's own conversation; in a product room,
+/// for each persona one of whose conversations looked in, that persona's most recently used conversation (as
+/// `to: "supervisor"` resolves it). Other conversations that looked in only read: their reads are tracked, but
+/// nothing wakes them.
+pub(crate) async fn supervisors_of(
+    store: &Store,
+    room: &RoomRow,
+    agents: &[Agent],
+) -> Result<Vec<AgentId>, StoreError> {
+    if room.kind == RoomKind::Operation {
+        return Ok(room.conversation.iter().cloned().collect());
+    }
+    let mut personas = Vec::new();
+    for id in present_agents(store, &room.id).await? {
+        if let Some(a) = agents
+            .iter()
+            .find(|a| a.id == id && a.kind == AgentKind::Supervisor)
+        {
+            if !personas.contains(&a.persona) {
+                personas.push(a.persona.clone());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for p in personas {
+        out.extend(crate::supervisor::latest_conversation(store, &p).await?);
+    }
+    Ok(out)
+}
+
+/// The agents in the room now, tasks and supervisor conversations alike.
+pub(crate) async fn present_agents(store: &Store, room: &str) -> Result<Vec<AgentId>, StoreError> {
+    Ok(store
+        .room_members(room)
+        .await?
+        .into_iter()
+        .filter(|m| m.left_at.is_none())
+        .filter_map(|m| match MemberRef::from_key(&m.member) {
+            MemberRef::Agent(a) => Some(a),
+            _ => None,
+        })
+        .collect())
+}
+
+pub(crate) fn is_supervisor(agents: &[Agent], id: &AgentId) -> bool {
+    agents
+        .iter()
+        .any(|a| &a.id == id && a.kind == AgentKind::Supervisor)
 }
 
 /// The room as people read it: its product's name, or its conversation's title.
