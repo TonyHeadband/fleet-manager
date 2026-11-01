@@ -133,8 +133,8 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     deleteRepo: vi.fn().mockResolvedValue(undefined),
     deleteProduct: vi.fn().mockResolvedValue(undefined),
     // Each answers with what was sent stored, as the daemon does.
-    putHiddenSpecialists: vi.fn(async (id: string, hidden: string[]) => product(id, id, { hidden_specialists: hidden, overrides: [] })),
-    putOverrides: vi.fn(async (id: string, overrides: ProductOverride[]) => product(id, id, { overrides, hidden_specialists: [] })),
+    putHiddenSpecialists: vi.fn(async (id: string, hidden: string[]) => product(id, id, { hidden_specialists: hidden, stale_hidden_specialists: [], overrides: [] })),
+    putOverrides: vi.fn(async (id: string, overrides: ProductOverride[]) => product(id, id, { overrides, hidden_specialists: [], stale_hidden_specialists: [] })),
     effectiveSettings: vi.fn().mockResolvedValue({ values: [] }),
     internalBranches: vi.fn().mockResolvedValue({ branches: [], remote: { url: null, unpushed: 0, error: null, parked: [] } }),
     internalFiles: vi.fn().mockResolvedValue([]),

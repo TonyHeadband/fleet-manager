@@ -26,4 +26,8 @@ overrides: Array<ProductOverride>,
 /**
  * Specialists this product's orchestrators are never shown; every other one that loads is theirs to use.
  */
-hidden_specialists: Array<string>, };
+hidden_specialists: Array<string>, 
+/**
+ * The hidden names no persona and no built-in defines any more. Filled on reads.
+ */
+stale_hidden_specialists: Array<string>, };

@@ -31,6 +31,7 @@ const alpha = (over: Partial<Product> = {}): Product =>
     tasks: 0,
     overrides: [],
     hidden_specialists: [],
+    stale_hidden_specialists: [],
     ...over,
   }) as Product;
 

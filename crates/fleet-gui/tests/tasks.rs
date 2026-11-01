@@ -804,6 +804,7 @@ fn product(
         tasks: 0,
         overrides: vec![],
         hidden_specialists: vec![],
+        stale_hidden_specialists: vec![],
     }
 }
 

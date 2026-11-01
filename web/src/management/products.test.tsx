@@ -242,8 +242,8 @@ async function overrides(list: ProductOverride[], over = {}) {
 
 describe("Products: hidden specialists and overrides", () => {
   it("products_tab_saves_hidden_specialists", async () => {
-    const stored = alpha({ repos: [repo("core", "/src/core", null)], hidden_specialists: ["stale"] });
-    const saved = { ...stored, hidden_specialists: ["reviewer"] };
+    const stored = alpha({ repos: [repo("core", "/src/core", null)], hidden_specialists: ["stale"], stale_hidden_specialists: ["stale"] });
+    const saved = { ...stored, hidden_specialists: ["reviewer"], stale_hidden_specialists: [] };
     const client = await products([stored], {
       personaDefinitions: vi
         .fn()
@@ -270,6 +270,21 @@ describe("Products: hidden specialists and overrides", () => {
     await click("Save hidden specialists");
     await waitFor(() => expect(screen.queryByText("no specialist named `x`")).toBeNull());
     expect(button("Save hidden specialists")).toBeDisabled();
+  });
+
+  it("a_name_hidden_from_another_persona_survives_a_save", async () => {
+    // "solo" is defined by another persona only: the drawer's persona lacks it, and the daemon still knows it.
+    const stored = alpha({ hidden_specialists: ["solo"], stale_hidden_specialists: [] });
+    const client = await products([stored], {
+      personaDefinitions: vi.fn().mockResolvedValue([def("specialist", "reviewer"), def("specialist", "rust")]),
+    });
+    await screen.findByRole("button", { name: "reviewer" });
+    expect(screen.getByRole("button", { name: "solo" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTitle("This specialist no longer loads: see Fleet, Specialists")).toBeNull();
+    expect(button("Save hidden specialists")).toBeDisabled();
+    await click("reviewer");
+    await click("Save hidden specialists");
+    expect(client.putHiddenSpecialists).toHaveBeenLastCalledWith("p", ["solo", "reviewer"]);
   });
 
   it("overrides_round_trip_through_the_client", async () => {

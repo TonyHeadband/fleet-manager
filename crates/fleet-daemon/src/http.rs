@@ -666,9 +666,20 @@ async fn product_view(st: &AppState, p: ProductRow) -> Result<Product, ApiError>
         overrides::annotate(stored, &known)
     };
     let hidden_specialists = st.store.hidden_specialists(&p.id).await.map_err(internal)?;
+    let stale_hidden_specialists = if hidden_specialists.is_empty() {
+        Vec::new()
+    } else {
+        let known = known_names_of(st, DefKind::Specialist).await?;
+        hidden_specialists
+            .iter()
+            .filter(|n| !known.contains(*n))
+            .cloned()
+            .collect()
+    };
     Ok(Product {
         overrides,
         hidden_specialists,
+        stale_hidden_specialists,
         tasks,
         id: p.id,
         name: p.name,

@@ -98,6 +98,7 @@ fn products(releases: Vec<Release>) -> AppResult {
             tasks: 0,
             overrides: vec![],
             hidden_specialists: vec![],
+            stale_hidden_specialists: vec![],
         }],
     }))
 }

@@ -1892,6 +1892,52 @@ async fn unknown_persona_is_404() {
 }
 
 #[tokio::test]
+async fn hidden_specialists_accept_a_name_only_another_persona_has() {
+    let srv = start().await;
+    srv.fx
+        .store
+        .insert_persona(&fleet_daemon::store::PersonaRow {
+            id: "second".into(),
+            name: "Second".into(),
+            host: "github.com".into(),
+            commit_name: "t".into(),
+            commit_email: "t@t".into(),
+            github_auth: fleet_api::GithubAuth::Gh,
+            ready: true,
+            created_at: 2,
+        })
+        .await
+        .unwrap();
+    let dir = srv.fx._tmp.path().join("personas/second/fleet/specialists");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("solo.md"),
+        "---\nname: solo\nsummary: Only here\n---\nbody\n",
+    )
+    .unwrap();
+    let path = format!("/api/products/{PRODUCT}/hidden-specialists");
+    let (s, v) = json_of(
+        srv.addr,
+        "PUT",
+        &path,
+        Some(&json!({"hidden": ["solo", "rust"]})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["hidden_specialists"], json!(["solo", "rust"]), "{v}");
+    assert_eq!(v["stale_hidden_specialists"], json!([]), "{v}");
+
+    // A file that goes away leaves its name hidden but stale.
+    std::fs::remove_file(dir.join("solo.md")).unwrap();
+    let (_, v) = json_of(srv.addr, "GET", "/api/products", None).await;
+    assert_eq!(
+        v["products"][0]["stale_hidden_specialists"],
+        json!(["solo"]),
+        "{v}"
+    );
+}
+
+#[tokio::test]
 async fn hidden_specialists_are_saved_and_checked() {
     let srv = start().await;
     let path = format!("/api/products/{PRODUCT}/hidden-specialists");

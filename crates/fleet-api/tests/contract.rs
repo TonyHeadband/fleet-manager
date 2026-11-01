@@ -576,11 +576,12 @@ fn product_list_round_trips() {
             tasks: 2,
             overrides: vec![],
             hidden_specialists: vec!["docs".into()],
+            stale_hidden_specialists: vec![],
         }],
     };
     let v = json!({"products": [{
         "id": "app", "name": "App", "default_persona": "home", "internal_url": null,
-        "repos": [], "tasks": 2, "overrides": [], "hidden_specialists": ["docs"],
+        "repos": [], "tasks": 2, "overrides": [], "hidden_specialists": ["docs"], "stale_hidden_specialists": [],
         "releases": [{"id": 3, "product": "app", "version": "v1.0", "start": "2026-11-01",
                       "target": "2026-12-15", "released_at": null}]
     }]});

@@ -39,6 +39,9 @@ pub struct Product {
     /// Specialists this product's orchestrators are never shown; every other one that loads is theirs to use.
     #[serde(default)]
     pub hidden_specialists: Vec<String>,
+    /// The hidden names no persona and no built-in defines any more. Filled on reads.
+    #[serde(default)]
+    pub stale_hidden_specialists: Vec<String>,
 }
 
 /// One setting a product overrides: `models.<definition>` or `limits.<max_*>`, with the value as text.

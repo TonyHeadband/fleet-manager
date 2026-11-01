@@ -3094,6 +3094,7 @@ fn product(id: &str, name: &str) -> fleet_api::Product {
         tasks: 0,
         overrides: vec![],
         hidden_specialists: vec![],
+        stale_hidden_specialists: vec![],
     }
 }
 

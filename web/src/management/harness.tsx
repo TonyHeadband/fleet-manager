@@ -43,6 +43,7 @@ export function managedProduct(id: string, name: string, releases: Release[] = [
     tasks: 0,
     overrides: [],
     hidden_specialists: [],
+    stale_hidden_specialists: [],
     ...over,
   } as Product;
 }

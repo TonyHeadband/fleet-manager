@@ -125,11 +125,14 @@ function Detail({ product, personas, defs, tab, now }: DetailProps) {
   );
 }
 
-/** egui's `hidden_section`: a chip per specialist that loads, then each hidden one that no longer does, struck through. */
+/**
+ * egui's `hidden_section`: a chip per specialist the drawer's persona loads, then each hidden one it lacks: a chip
+ * when another persona or a built-in has it, struck through when nothing does.
+ */
 function HiddenSpecialists({ defs, tab }: { defs: DefInfo[] | null; tab: ProductsApi }) {
   const { st } = tab;
   const names = defs && usable(defs, "specialist");
-  const send = names && hiddenToSend(st, names);
+  const send = names && hiddenToSend(st);
   return (
     <Section title="Hidden specialists">
       <p className="note">
@@ -144,11 +147,17 @@ function HiddenSpecialists({ defs, tab }: { defs: DefInfo[] | null; tab: Product
           ))}
           {st.hidden
             .filter((n) => !names.includes(n))
-            .map((name) => (
-              <s key={name} className="stale-specialist" title="This specialist no longer loads: see Fleet, Specialists">
-                {name}
-              </s>
-            ))}
+            .map((name) =>
+              st.staleHidden.includes(name) ? (
+                <s key={name} className="stale-specialist" title="This specialist no longer loads: see Fleet, Specialists">
+                  {name}
+                </s>
+              ) : (
+                <Chip key={name} selected onClick={() => tab.toggleHidden(name)}>
+                  <span title="Not in this persona">{name}</span>
+                </Chip>
+              ),
+            )}
         </div>
       ) : (
         <p className="note">The specialists have not loaded.</p>

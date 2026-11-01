@@ -29,6 +29,8 @@ export interface ProductsState {
   /** The hidden specialists as being edited, and as the daemon has them. */
   hidden: string[];
   savedHidden: string[];
+  /** The hidden names no persona and no built-in defines any more, as the daemon reports them. */
+  staleHidden: string[];
   hiddenBusy: boolean;
   hiddenError: string | null;
   /** The overrides as being edited, and as the daemon has them. */
@@ -50,6 +52,7 @@ const initial: ProductsState = {
   deleteError: null,
   hidden: [],
   savedHidden: [],
+  staleHidden: [],
   hiddenBusy: false,
   hiddenError: null,
   overrides: [],
@@ -63,8 +66,11 @@ export const sameNames = (a: string[], b: string[]) => a.length === b.length && 
 
 export const overridesDirty = (st: ProductsState) => !sameRows(st.overrides, st.savedOverrides);
 
-/** What Save hidden specialists sends: the hidden names that still load. */
-export const hiddenToSend = (st: ProductsState, names: string[]) => st.hidden.filter((n) => names.includes(n));
+/**
+ * What Save hidden specialists sends: every hidden name some persona or built-in still defines, not only the ones the
+ * drawer's persona has.
+ */
+export const hiddenToSend = (st: ProductsState) => st.hidden.filter((n) => !st.staleHidden.includes(n));
 
 const isEmpty = (save: ProductSave) => save.update === null && save.upserts.length === 0 && save.removes.length === 0;
 
@@ -88,6 +94,7 @@ export function sync(st: ProductsState, products: Product[]): ProductsState {
       forProduct: p.id,
       hidden: p.hidden_specialists,
       savedHidden: p.hidden_specialists,
+      staleHidden: p.stale_hidden_specialists,
       overrides: drafts(p),
       savedOverrides: drafts(p),
     };
@@ -102,6 +109,7 @@ export function sync(st: ProductsState, products: Product[]): ProductsState {
     savedOverrides: drafts(p),
     hidden: sameNames(st.hidden, st.savedHidden) ? p.hidden_specialists : st.hidden,
     savedHidden: p.hidden_specialists,
+    staleHidden: p.stale_hidden_specialists,
   };
 }
 
@@ -136,7 +144,7 @@ export function hiddenDone(st: ProductsState, id: string, result: Product | stri
   if (st.forProduct !== id) return st;
   if (typeof result === "string") return { ...st, hiddenBusy: false, hiddenError: result };
   const hidden = result.hidden_specialists;
-  return { ...st, hiddenBusy: false, hidden, savedHidden: hidden, hiddenError: null };
+  return { ...st, hiddenBusy: false, hidden, savedHidden: hidden, staleHidden: result.stale_hidden_specialists, hiddenError: null };
 }
 
 export function overridesDone(st: ProductsState, id: string, result: Product | string): ProductsState {
