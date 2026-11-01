@@ -1,0 +1,96 @@
+/* The specialist form: outlined sections under accent-marked headings, then the bar (the approved canvas mockup). */
+.specialist-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--layout-section-gap);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .specialist-form {
+    animation: fui-wipe var(--motion-wipe) var(--ease-push) both;
+  }
+}
+.specialist-form .section {
+  margin-top: 0;
+  border: 1px solid var(--border);
+}
+.specialist-form .section > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-button-gap);
+  margin: 0;
+  padding: var(--layout-list-row-y) var(--layout-list-row-x);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-high);
+}
+.specialist-form .section > h3::before {
+  content: "";
+  width: var(--layout-marker-w);
+  height: var(--layout-marker-h);
+  background: var(--fill);
+}
+.form-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-item);
+  padding: var(--layout-card-padding);
+}
+.form-identity {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-item);
+}
+.form-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-item);
+  align-content: start;
+}
+.form-settings {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-item);
+}
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-summary-gap);
+  min-width: 0;
+}
+.form-field.wide {
+  grid-column: 1 / -1;
+}
+.form-field input,
+.form-field textarea {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-code);
+  color: var(--text-high);
+}
+.form-field input[readonly],
+.form-field textarea[readonly] {
+  color: var(--text-low);
+}
+.form-field textarea {
+  width: 100%;
+  resize: vertical;
+}
+.form-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-chip-gap);
+}
+.skill-chip[data-tone="danger"] .chip {
+  border-color: var(--tone-danger);
+  color: var(--tone-danger);
+  background: var(--tint-danger);
+}
+.form-preview {
+  min-height: var(--management-internal-text-height);
+}
+.form-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-item);
+  flex-wrap: wrap;
+}

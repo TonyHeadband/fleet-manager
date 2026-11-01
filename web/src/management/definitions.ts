@@ -152,6 +152,7 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
 
   return {
     st,
+    persona: active,
     loadList,
     loadStyles,
     open,
@@ -178,6 +179,12 @@ export function useDefinitions(client: FleetClient, persona: string | null, say:
         // The message goes under the editor; the draft stays to be fixed.
         (e: unknown) => update((s) => ({ ...s, saving: null, errors: { ...s.errors, [key]: message(e) } })),
       );
+    },
+    /** An empty nickname clears it. The list is read again so the row shows it; a refusal is for the caller to show. */
+    setNickname: async (name: string, nickname: string) => {
+      if (persona === null) return;
+      await client.setNickname(persona, name, nickname);
+      loadList();
     },
     revert: (key: DefKey) =>
       update((s) => {

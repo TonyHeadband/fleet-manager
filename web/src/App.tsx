@@ -291,13 +291,13 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   const definitions = useDefinitions(client, persona, say);
   const { loadList: loadDefinitions, loadStyles } = definitions;
-  // Asked again on each way into a definitions tab, into Personas for its nickname fields, into Products for its
+  // Asked again on each way into a definitions tab, into Products for its
   // specialists and override keys and into Pull requests for its styles, so files changed on disk show (egui asks at
   // start and after a save or reset). The persona's list is asked again when the drawer's persona changes.
   useEffect(() => {
     if (route !== "fleet") return;
     if (["pr-styles", "pull-requests", "products"].includes(fleetTab)) loadStyles();
-    if (["orchestrators", "specialists", "skills", "personas", "products"].includes(fleetTab)) loadDefinitions();
+    if (["orchestrators", "specialists", "skills", "products"].includes(fleetTab)) loadDefinitions();
   }, [route, fleetTab, loadDefinitions, loadStyles]);
 
   // A product's override keys offer the persona's definitions and the fleet's PR styles.
@@ -814,7 +814,6 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                     personas={personasTab}
                     onNew={() => setManagedSetup({ mode: "new", draft: null })}
                     onResume={(p) => setManagedSetup({ mode: "resume", draft: p })}
-                    defs={definitions.st.list}
                     native={native}
                     setupOpen={managedSetup !== null}
                   />

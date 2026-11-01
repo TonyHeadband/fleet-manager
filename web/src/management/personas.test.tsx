@@ -224,11 +224,6 @@ const specialist = (name: string, error: string | null = null): DefInfo => ({
 });
 
 describe("Persona edits and logins", () => {
-  it("a_nickname_field_is_egui_s_width", () => {
-    const css = readFileSync("src/management/management.css", "utf8");
-    expect(css).toMatch(/\.nicknames input \{[^}]*width: var\(--management-nickname-width\)/);
-  });
-
   it("rename_sends_only_the_name", async () => {
     const client = await personas([persona("a", "Work", true)]);
     await row("Work ✓");
@@ -250,22 +245,13 @@ describe("Persona edits and logins", () => {
     expect(client.updatePersona).toHaveBeenCalledWith("a", { ...none, commit_name: "Ann Example", commit_email: "ann@work.invalid" });
   });
 
-  it("nicknames_are_saved_on_the_persona", async () => {
-    const saved = persona("a", "Work", true, { nicknames: { rust: "Ferris" } });
-    const updatePersona = vi.fn().mockResolvedValue(saved);
-    const personaDefinitions = vi
-      .fn()
-      .mockResolvedValue([specialist("docs"), specialist("rust"), specialist("stale", "specialists/stale.md: bad")]);
-    const client = await personas([persona("a", "Work", true)], { updatePersona, personaDefinitions });
-    // Only specialists that load get a field.
-    expect(await screen.findByRole("textbox", { name: "rust" })).toHaveAttribute("placeholder", "none");
-    expect(screen.queryByRole("textbox", { name: "stale" })).toBeNull();
-    const save = () => screen.getByRole("button", { name: "Save nicknames" });
-    expect(save()).toBeDisabled();
-    await userEvent.type(field("rust"), " Ferris ");
-    await userEvent.click(save());
-    expect(client.updatePersona).toHaveBeenCalledWith("a", { ...none, nicknames: { rust: "Ferris" } });
-    await waitFor(() => expect(save()).toBeDisabled());
+  it("personas_page_has_no_nickname_fields", async () => {
+    const personaDefinitions = vi.fn().mockResolvedValue([specialist("docs"), specialist("rust")]);
+    await personas([persona("a", "Work", true)], { personaDefinitions });
+    await row("Work ✓");
+    expect(screen.queryByText("Specialist nicknames")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "rust" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save nicknames" })).toBeNull();
   });
 
   it("relogin_switch_to_pat_sends_update", async () => {

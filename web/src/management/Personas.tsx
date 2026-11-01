@@ -1,5 +1,4 @@
-import { useEffect, useId, useState } from "react";
-import type { DefInfo } from "../api/generated/DefInfo";
+import { useEffect, useState } from "react";
 import type { GithubAuth } from "../api/generated/GithubAuth";
 import type { Persona } from "../api/generated/Persona";
 import type { Native } from "../native/native";
@@ -12,8 +11,7 @@ import { ErrorLine } from "../ui/ErrorLine";
 import { Mark } from "../ui/icons";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
-import { usable } from "./definitions";
-import { cleaned, sameNicknames, settled, type PersonasApi } from "./personas";
+import { settled, type PersonasApi } from "./personas";
 
 // A port of crates/fleet-gui/src/views/management/personas.rs: the personas on the left, the selected one on the
 // right, and app/setup.rs's selection, checks and Delete dialog.
@@ -48,14 +46,12 @@ interface Props {
   personas: PersonasApi;
   onNew: () => void;
   onResume: (p: Persona) => void;
-  /** The definitions list, for the nickname fields; null until it answers. */
-  defs: DefInfo[] | null;
   native: Native | null;
   /** The persona setup is open over the tab: its own checks stand in for the tab's. */
   setupOpen: boolean;
 }
 
-export function Personas({ personas, onNew, onResume, defs, native, setupOpen }: Props) {
+export function Personas({ personas, onNew, onResume, native, setupOpen }: Props) {
   const { st, listed, select, check, deselect } = personas;
   const [deleting, setDeleting] = useState<Persona | null>(null);
   const persona = listed?.find((p) => p.id === st.selected) ?? null;
@@ -119,7 +115,7 @@ export function Personas({ personas, onNew, onResume, defs, native, setupOpen }:
               <h2>{persona.name}</h2>
               <p className="note">Tasks: {persona.tasks}</p>
               {persona.ready ? (
-                <Ready persona={persona} personas={personas} defs={defs} native={native} onDelete={() => setDeleting(persona)} />
+                <Ready persona={persona} personas={personas} native={native} onDelete={() => setDeleting(persona)} />
               ) : (
                 <Draft persona={persona} personas={personas} onResume={() => onResume(persona)} onDelete={() => setDeleting(persona)} />
               )}
@@ -144,8 +140,8 @@ export function Personas({ personas, onNew, onResume, defs, native, setupOpen }:
 }
 
 /** egui's `detail` for a ready persona: its fields, the errors, and Delete with its blocker. */
-function Ready(props: { persona: Persona; personas: PersonasApi; defs: DefInfo[] | null; native: Native | null; onDelete: () => void }) {
-  const { persona, personas, defs, native, onDelete } = props;
+function Ready(props: { persona: Persona; personas: PersonasApi; native: Native | null; onDelete: () => void }) {
+  const { persona, personas, native, onDelete } = props;
   const { st, update } = personas;
   const identity = changed(st.commitName, persona.commit_name) || changed(st.commitEmail, persona.commit_email);
   const valid = st.commitName.trim() !== "" && st.commitEmail.trim() !== "";
@@ -169,7 +165,6 @@ function Ready(props: { persona: Persona; personas: PersonasApi; defs: DefInfo[]
           </Button>
         </div>
       </div>
-      <Nicknames persona={persona} personas={personas} defs={defs} />
       <div className="login-row">
         <LoginHead
           name="Claude"
@@ -219,53 +214,6 @@ const AUTHS: [GithubAuth, string][] = [
   ["gh", "gh login"],
   ["pat", "Personal access token"],
 ];
-
-/** egui's `nicknames_section`: a field per specialist that loads. One kept for a specialist that no longer loads stays
- * stored, out of sight, until it loads again. */
-function Nicknames({ persona, personas, defs }: { persona: Persona; personas: PersonasApi; defs: DefInfo[] | null }) {
-  const { st, update } = personas;
-  const names = defs ? usable(defs, "specialist") : [];
-  const dirty = !sameNicknames(cleaned(st.nicknames), persona.nicknames);
-  return (
-    <div className="persona-block">
-      <span className="mono-label caption">Specialist nicknames</span>
-      <p className="note">Shown in the app wherever this persona's tasks name a specialist. Agents and logs keep the real names.</p>
-      {defs === null ? (
-        <p className="note">The specialists have not loaded.</p>
-      ) : (
-        <>
-          <div className="nicknames">
-            {names.map((name) => (
-              <Nickname
-                key={name}
-                name={name}
-                value={st.nicknames[name] ?? ""}
-                onChange={(v) => update((s) => ({ ...s, nicknames: { ...s.nicknames, [name]: v } }))}
-              />
-            ))}
-          </div>
-          <div>
-            <Button disabled={!dirty} onClick={() => personas.saveNicknames(persona)}>
-              Save nicknames
-            </Button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function Nickname({ name, value, onChange }: { name: string; value: string; onChange: (v: string) => void }) {
-  const id = useId();
-  return (
-    <>
-      <label className="nickname-name" htmlFor={id}>
-        {name}
-      </label>
-      <input id={id} value={value} placeholder="none" maxLength={32} onChange={(e) => onChange(e.target.value)} spellCheck={false} />
-    </>
-  );
-}
 
 /** egui's `draft`: what an unfinished setup was set up with, and Resume or Delete. */
 /** The pane's last error and the check's, under either pane: a refused delete of a draft says why too. */

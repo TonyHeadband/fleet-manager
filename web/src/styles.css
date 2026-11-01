@@ -8,6 +8,7 @@
 @import "./tasks/tasks.css";
 @import "./releases/releases.css";
 @import "./management/management.css";
+@import "./management/specialistForm.css";
 @import "./settings/settings.css";
 * { box-sizing: border-box; }
 /* Settings → Motion off: egui sets its transitions to 0 and stops every animation. */

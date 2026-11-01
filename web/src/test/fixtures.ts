@@ -160,6 +160,7 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     resetDefinition: vi.fn().mockResolvedValue(undefined),
     personaDefinition: vi.fn(async (_p: string, kind: DefKind, name: string) => ({ kind, name, text: "", builtin: true })),
     savePersonaDefinition: vi.fn(async (_p: string, kind: DefKind, name: string) => ({ kind, name, summary: "", builtin: false, overridden: false })),
+    setNickname: vi.fn().mockResolvedValue(undefined),
     resetPersonaDefinition: vi.fn().mockResolvedValue(undefined),
     checkouts: vi.fn().mockResolvedValue([]),
     fleetView: vi.fn().mockResolvedValue({ task: "", breakdowns: [], gate_runs: [] }),

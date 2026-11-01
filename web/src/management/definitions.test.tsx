@@ -53,7 +53,10 @@ async function defsTab(tab: string, defs: DefInfo[], extra: Record<string, unkno
 
 const row = (name: string) => screen.findByRole("button", { name });
 const footer = () => screen.getByRole("contentinfo");
-const editor = (name: string) => screen.getByRole("textbox", { name });
+// An orchestrator or a specialist is a form: its file's body is the "Instructions" box. The others keep the text box.
+const editor = (name: string) => screen.getByRole("textbox", { name: /^(orchestrators|specialists)\//.test(name) ? "Instructions" : name });
+/** A definition file with only a name in its frontmatter, so the form has a body to show. */
+const doc = (name: string, body: string) => `---\nname: ${name}\n---\n${body}`;
 const land = async <T,>(p: ReturnType<typeof pending<T>>, v: T) => act(async () => p.resolve(v));
 const refuse = async <T,>(p: ReturnType<typeof pending<T>>, message: string) => act(async () => p.reject(new FleetError(message)));
 
@@ -75,13 +78,14 @@ describe("Definitions", () => {
     await userEvent.click(await row("bug-fix built-in"));
     expect(screen.queryByRole("button", { name: /rust/ })).toBeNull();
     expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "orchestrator", "bug-fix");
-    const text = "---\nname: bug-fix\n---\nFix it.";
+    const text = doc("bug-fix", "Fix it.");
     await land(h.reads[0]!, file("orchestrator", "bug-fix", text, true));
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    // Nothing to save until Override, or a nickname.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     // egui's `caption`, drawn low like every other.
     expect(screen.getByText("orchestrators/bug-fix")).toHaveClass("caption");
     await userEvent.type(editor("orchestrators/bug-fix"), "typed");
-    expect(editor("orchestrators/bug-fix")).toHaveValue(text);
+    expect(editor("orchestrators/bug-fix")).toHaveValue("Fix it.");
     await click("Override");
     await userEvent.type(editor("orchestrators/bug-fix"), " Now.");
     await click("Save");
@@ -90,7 +94,7 @@ describe("Definitions", () => {
     // An invalid file: the daemon's message under the editor, and the draft kept.
     await refuse(h.saves[0]!, "orchestrators/bug-fix.md: missing `skills`");
     expect(screen.getByText(/missing `skills`/)).toBeInTheDocument();
-    expect(editor("orchestrators/bug-fix")).toHaveValue(`${text} Now.`);
+    expect(editor("orchestrators/bug-fix")).toHaveValue("Fix it. Now.");
 
     // The list says what each one is; Reset asks first.
     await fleetTab("Specialists");
@@ -98,7 +102,7 @@ describe("Definitions", () => {
     expect(screen.getByRole("button", { name: "broken built-in ⚠" })).toBeInTheDocument();
     expect(screen.getByText(/no skills/)).toBeInTheDocument();
     await click("rust overrides built-in");
-    await land(h.reads[1]!, file("specialist", "rust", "---\nname: rust\n---\nMine.", false));
+    await land(h.reads[1]!, file("specialist", "rust", doc("rust", "Mine."), false));
     expect(screen.getByRole("button", { name: "Revert" })).toBeInTheDocument();
     await click("Reset to built-in");
     expect(screen.getByRole("dialog", { name: "Reset rust to built-in?" })).toBeInTheDocument();
@@ -120,11 +124,10 @@ describe("Definitions", () => {
     // The draft is gone and the built-in is read again.
     expect(h.personaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
     expect(screen.queryByRole("textbox")).toBeNull();
-    const builtin = "---\nname: rust\n---\nBuilt in.";
-    await land(h.reads[2]!, file("specialist", "rust", builtin, true));
+    await land(h.reads[2]!, file("specialist", "rust", doc("rust", "Built in."), true));
     expect(screen.getByRole("button", { name: "Override" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(editor("specialists/rust")).toHaveValue(builtin);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(editor("specialists/rust")).toHaveValue("Built in.");
   });
 
   it("pr_styles_tab_lists_and_edits_styles", async () => {
@@ -145,7 +148,7 @@ describe("Definitions", () => {
     // egui's `mode_effort` line under the name.
     expect(await screen.findByText("auto · high")).toBeInTheDocument();
     await click("bug-fix built-in");
-    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     await click("Override");
     await userEvent.type(editor("orchestrators/bug-fix"), "b");
     await click("Save");
@@ -162,7 +165,7 @@ describe("Definitions", () => {
   it("a_draft_outlives_the_tab_and_the_view", async () => {
     const h = await defsTab("Specialists", [def("specialist", "go", null, { builtin: false })]);
     await click("go custom");
-    await land(h.reads[0]!, file("specialist", "go", "mine", false));
+    await land(h.reads[0]!, file("specialist", "go", doc("go", "mine"), false));
     await userEvent.type(editor("specialists/go"), "!");
     await fleetTab("Orchestrators");
     expect(screen.getByText("No definition selected.")).toBeInTheDocument();
@@ -177,14 +180,14 @@ describe("Definitions", () => {
   it("a_save_landing_after_opening_another_definition_keeps_both", async () => {
     const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix"), def("specialist", "go", null, { builtin: false })]);
     await click("bug-fix built-in");
-    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     await click("Override");
     await userEvent.type(editor("orchestrators/bug-fix"), "b");
     await click("Save");
     // Moved on to another kind and editing there when the save lands.
     await fleetTab("Specialists");
     await click("go custom");
-    await land(h.reads[1]!, file("specialist", "go", "mine", false));
+    await land(h.reads[1]!, file("specialist", "go", doc("go", "mine"), false));
     await userEvent.type(editor("specialists/go"), "!");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
     expect(editor("specialists/go")).toHaveValue("mine!");
@@ -199,14 +202,14 @@ describe("Definitions", () => {
   it("a_read_sent_before_a_save_landing_after_it_is_ignored", async () => {
     const h = await defsTab("Orchestrators", [def("orchestrator", "bug-fix")]);
     await click("bug-fix built-in");
-    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     await click("Override");
     await userEvent.type(editor("orchestrators/bug-fix"), "b");
     // Opened again, so read again, then saved before that read answers.
     await click("bug-fix built-in");
     await click("Save");
     await land(h.saves[0]!, def("orchestrator", "bug-fix", null, { builtin: false, overridden: true }));
-    await land(h.reads[1]!, file("orchestrator", "bug-fix", "a", true));
+    await land(h.reads[1]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     expect(editor("orchestrators/bug-fix")).toHaveValue("ab");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Override" })).toBeNull();
@@ -223,7 +226,7 @@ describe("Definitions", () => {
     const builtin = [def("orchestrator", "bug-fix")];
     await land(lists[0]!, builtin);
     await click("bug-fix built-in");
-    await land(h.reads[0]!, file("orchestrator", "bug-fix", "a", true));
+    await land(h.reads[0]!, file("orchestrator", "bug-fix", doc("bug-fix", "a"), true));
     await click("Override");
     await click("Save");
     // Out of the tab and back while the save is out: lists asked before it, answered after the one it asks.
@@ -268,12 +271,12 @@ describe("Definitions", () => {
   it("the_browser_offers_every_management_action", async () => {
     const h = await defsTab("Specialists", [def("specialist", "rust", null, { overridden: true }), def("specialist", "go")]);
     await click("go built-in");
-    await land(h.reads[0]!, file("specialist", "go", "built", true));
+    await land(h.reads[0]!, file("specialist", "go", doc("go", "built"), true));
     expect(screen.getByRole("button", { name: "Override" })).toBeEnabled();
     await click("Override");
     for (const name of ["Save", "Revert"]) expect(screen.getByRole("button", { name })).toBeEnabled();
     await click("rust overrides built-in");
-    await land(h.reads[1]!, file("specialist", "rust", "mine", false));
+    await land(h.reads[1]!, file("specialist", "rust", doc("rust", "mine"), false));
     expect(screen.getByRole("button", { name: "Reset to built-in" })).toBeEnabled();
     await fleetTab("Agents");
     for (const name of ["Add allow rule", "Add deny rule", "Add variable"])
@@ -301,17 +304,17 @@ describe("Definitions per persona", () => {
 
   it("a_draft_stays_with_its_persona", async () => {
     const personaDefinitions = vi.fn().mockResolvedValue([def("specialist", "rust", null, { builtin: false })]);
-    const personaDefinition = vi.fn(async (p: string) => file("specialist", "rust", `mine ${p}`, false));
+    const personaDefinition = vi.fn(async (p: string) => file("specialist", "rust", doc("rust", `mine ${p}`), false));
     await management("Specialists", { personas: two, over: { personaDefinitions, personaDefinition } });
     await userEvent.click(await row("rust custom"));
-    await userEvent.type(await screen.findByRole("textbox", { name: "specialists/rust" }), " edited");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Instructions" }), " edited");
     expect(personaDefinition).toHaveBeenLastCalledWith("a", "specialist", "rust");
     await switchTo("Home");
     await userEvent.click(await row("rust custom"));
-    expect(await screen.findByRole("textbox", { name: "specialists/rust" })).toHaveValue("mine b");
+    expect(await screen.findByRole("textbox", { name: "Instructions" })).toHaveValue("mine b");
     await switchTo("Work");
     await userEvent.click(await row("rust custom"));
-    expect(await screen.findByRole("textbox", { name: "specialists/rust" })).toHaveValue("mine a edited");
+    expect(await screen.findByRole("textbox", { name: "Instructions" })).toHaveValue("mine a edited");
   });
 
   it("pr_styles_still_load_from_the_fleet_routes", async () => {
@@ -336,12 +339,12 @@ describe("Definitions per persona", () => {
     const save = pending<DefInfo>();
     const over = {
       personaDefinitions,
-      personaDefinition: vi.fn().mockResolvedValue(file("specialist", "rust", "mine", false)),
+      personaDefinition: vi.fn().mockResolvedValue(file("specialist", "rust", doc("rust", "mine"), false)),
       savePersonaDefinition: vi.fn(() => save.promise),
     };
     await management("Specialists", { personas: two, over });
     await userEvent.click(await row("rust custom"));
-    await userEvent.type(await screen.findByRole("textbox", { name: "specialists/rust" }), "!");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Instructions" }), "!");
     await click("Save");
     await switchTo("Home");
     await land(save, def("specialist", "rust", null, { builtin: false }));

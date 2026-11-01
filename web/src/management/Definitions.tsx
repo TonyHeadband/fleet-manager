@@ -9,7 +9,8 @@ import { Mark } from "../ui/icons";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { SaveBar } from "../ui/SaveBar";
-import { defDirty, type DefinitionsApi } from "./definitions";
+import { SpecialistForm } from "./SpecialistForm";
+import { defDirty, usable, type DefinitionsApi } from "./definitions";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs: one kind's definitions, built-in or the user's, with
 // the selected one's file. A built-in is read-only until Override copies it into a draft that saves as the user's file.
@@ -83,7 +84,7 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
         selected === null ? (
           <p className="note">No definition selected.</p>
         ) : (
-          <Editor kind={kind} name={selected} info={listed.find((d) => d.name === selected)} defs={defs} />
+          <Editor kind={kind} name={selected} info={listed.find((d) => d.name === selected)} defs={defs} skills={usable(st.list ?? [], "skill")} />
         )
       }
     />
@@ -92,7 +93,8 @@ export function Definitions({ kind, defs }: { kind: DefKind; defs: DefinitionsAp
 
 /** egui's `editor`: read-only with Override for a built-in, else the draft with Save / Revert and, over a built-in,
  * Reset to built-in. The last error stays under it, and the draft with it. */
-function Editor({ kind, name, info, defs }: { kind: DefKind; name: string; info: DefInfo | undefined; defs: DefinitionsApi }) {
+function Editor(p: { kind: DefKind; name: string; info: DefInfo | undefined; defs: DefinitionsApi; skills: string[] }) {
+  const { kind, name, info, defs, skills } = p;
   const captionId = useId();
   const [confirm, setConfirm] = useState(false);
   const key = defs.key(kind, name);
@@ -102,6 +104,9 @@ function Editor({ kind, name, info, defs }: { kind: DefKind; name: string; info:
 
   const body = () => {
     if (!file) return error !== undefined ? <ErrorLine text={error} /> : <p className="note">Loading…</p>;
+    // Orchestrators and specialists are a form; it draws its own bar, Override and Reset.
+    if (kind === "orchestrator" || kind === "specialist")
+      return <SpecialistForm persona={defs.persona} kind={kind} name={name} info={info} defs={defs} skills={skills} roleFixed />;
     if (draft === undefined)
       return (
         <>
