@@ -850,6 +850,8 @@ fn ts_bindings_export() {
     fleet_api::Conversation::export_all(&cfg).unwrap();
     fleet_api::NewConversation::export_all(&cfg).unwrap();
     fleet_api::ConversationMessage::export_all(&cfg).unwrap();
+    fleet_api::TaskEvent::export_all(&cfg).unwrap();
+    fleet_api::TaskEventKind::export_all(&cfg).unwrap();
     Versioning::export_all(&cfg).unwrap();
     // The web tests read this file, so the UI is always tested against the daemon's real default schema.
     let json = serde_json::to_string_pretty(&default_ui_schema()).unwrap();
@@ -873,6 +875,8 @@ fn ts_bindings_export() {
         "TaskMark.ts",
         "NewConversation.ts",
         "ConversationMessage.ts",
+        "TaskEvent.ts",
+        "TaskEventKind.ts",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }

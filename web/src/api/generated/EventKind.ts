@@ -5,10 +5,11 @@ import type { BlockedReason } from "./BlockedReason";
 import type { RepoRequest } from "./RepoRequest";
 import type { Status } from "./Status";
 import type { StopCause } from "./StopCause";
+import type { TaskEvent } from "./TaskEvent";
 import type { Workspace } from "./Workspace";
 
 export type EventKind = { "type": "agent_created", agent: Agent, } | { "type": "status_changed", id: AgentId, status: Status, activity: string, since: number, has_changes: boolean, paused: boolean, blocked_reason: BlockedReason | null, 
 /**
  * Set while `blocked_reason` is `RepoAccess`.
  */
-repo_request?: RepoRequest | null, stop_cause?: StopCause | null, disk_bytes?: number | null, } | { "type": "workspaces_changed", id: AgentId, workspaces: Array<Workspace>, } | { "type": "title_changed", id: AgentId, title: string, } | { "type": "agent_removed", id: AgentId, };
+repo_request?: RepoRequest | null, stop_cause?: StopCause | null, disk_bytes?: number | null, } | { "type": "workspaces_changed", id: AgentId, workspaces: Array<Workspace>, } | { "type": "title_changed", id: AgentId, title: string, } | { "type": "agent_removed", id: AgentId, } | { "type": "supervisor_event", event: TaskEvent, };

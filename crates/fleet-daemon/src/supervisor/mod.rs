@@ -1,8 +1,11 @@
 //! A persona's supervisor: one agent of kind `Supervisor` per conversation, with no task and no product, running in
 //! the persona's own folder.
+mod events;
 mod files;
 pub(crate) mod tools;
 
+pub(crate) use events::route_with;
+pub use events::{route, start_event_watcher};
 pub use files::folder;
 
 use crate::agents::{

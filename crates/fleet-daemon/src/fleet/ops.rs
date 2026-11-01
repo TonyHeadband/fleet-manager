@@ -24,11 +24,12 @@ use crate::overrides;
 use crate::personas::{gh_agent_dir, PersonaEnv};
 use crate::repos::Resolved;
 use crate::store::StoreError;
+use crate::supervisor;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
     DecideBreakdown, DefKind, Effort, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
     PermissionMode, PrRules, PrState, SettingSource, SpawnRequest, Status, Step, StepDraft,
-    StepState, StopCause, Task, TaskPr, Workspace,
+    StepState, StopCause, Task, TaskEventKind, TaskPr, Workspace,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1910,6 +1911,20 @@ impl AgentService {
         self.store
             .update_task(&p.id, |x| x.gate_runs.push(stored))
             .await?;
+        let (kind, text) = match run.steps.iter().find(|s| s.exit_code != Some(0)) {
+            Some(failed) => (
+                TaskEventKind::ChecksFailed,
+                format!("checks failed · {}", failed.name),
+            ),
+            None if run.passed() => (TaskEventKind::ChecksPassed, "checks passed".to_string()),
+            None => (
+                TaskEventKind::ChecksFailed,
+                "checks failed · no step ran".to_string(),
+            ),
+        };
+        if let Err(e) = supervisor::route(self, &p.id, kind, text).await {
+            warn!(task = %p.id.0, error = %e, "cannot store the gate's event");
+        }
         let results: Vec<String> = run
             .steps
             .iter()
@@ -2067,6 +2082,12 @@ impl AgentService {
         let verb = if updated { "updated" } else { "opened" };
         info!(url = %url, "PR {verb}");
         self.log_task(&p.id, format!("PR {verb}: {url}")).await;
+        if !updated {
+            let text = format!("PR opened · {url}");
+            if let Err(e) = supervisor::route(self, &p.id, TaskEventKind::PrOpened, text).await {
+                warn!(task = %p.id.0, error = %e, "cannot store the PR's event");
+            }
+        }
         let labels: Vec<String> = p.pr_rules.iter().flat_map(|r| r.labels.clone()).collect();
         if !labels.is_empty() {
             // A label the remote lacks is no reason to lose the PR, so a failure is only logged.

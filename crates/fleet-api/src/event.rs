@@ -1,4 +1,4 @@
-use crate::{Agent, AgentId, BlockedReason, RepoRequest, Status, StopCause, Workspace};
+use crate::{Agent, AgentId, BlockedReason, RepoRequest, Status, StopCause, TaskEvent, Workspace};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utoipa::ToSchema;
@@ -44,6 +44,10 @@ pub enum EventKind {
     },
     AgentRemoved {
         id: AgentId,
+    },
+    /// A task's event, routed to the supervisor conversation that started it.
+    SupervisorEvent {
+        event: TaskEvent,
     },
 }
 

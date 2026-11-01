@@ -5412,3 +5412,45 @@ async fn open_pr_checks_no_commit_under_a_style_without_a_commits_rule() {
     );
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
 }
+
+#[tokio::test]
+async fn gate_pass_and_fail_become_events() {
+    let fx = fleet_fixture().await;
+    let conv = fleet_daemon::supervisor::Supervisor::new(fx.svc.clone())
+        .new_conversation(PERSONA, "hello")
+        .await
+        .unwrap();
+    let texts = |fx: &Fx| {
+        let store = fx.store.clone();
+        let conv = conv.clone();
+        async move {
+            let got = store.task_events(&conv, 0).await.unwrap();
+            got.into_iter().map(|e| e.text).collect::<Vec<_>>()
+        }
+    };
+
+    let (a, _, _, _) = done_task(&fx, &one_step("exit 3")).await;
+    fx.svc.open_pr(&a.id, "t", "b").await.unwrap_err();
+    assert_eq!(texts(&fx).await, ["checks failed · test"]);
+
+    let (b, _, _, _) = done_task(&fx, &one_step("true")).await;
+    plan_release_note(&fx, &b).await;
+    let url = fx.svc.open_pr(&b.id, "t", "b").await.unwrap().to_string();
+    assert_eq!(
+        texts(&fx).await,
+        [
+            "checks failed · test".to_string(),
+            "checks passed".to_string(),
+            format!("PR opened · {url}")
+        ]
+    );
+    let kinds: Vec<_> = fx
+        .store
+        .task_events(&conv, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.kind, e.task))
+        .collect();
+    assert_eq!(kinds[2], (fleet_api::TaskEventKind::PrOpened, b.id.clone()));
+}

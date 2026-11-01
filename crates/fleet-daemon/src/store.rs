@@ -2,7 +2,7 @@
 use fleet_api::{
     task_id, task_outcome, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind,
     FleetEvent, FleetEventKind, GithubAuth, LogEntry, ProductOverride, Snapshot, Status,
-    StatusTimes, StepState, StopCause, Task, TaskOutcome, TaskState,
+    StatusTimes, StepState, StopCause, Task, TaskEvent, TaskEventKind, TaskOutcome, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -1514,6 +1514,64 @@ impl Store {
                 last_used_at: r.get("last_used_at"),
             })
             .collect())
+    }
+
+    /// Stores a task event and broadcasts it (and keeps it in the event log) after the commit.
+    pub async fn add_task_event(&self, e: &TaskEvent) -> Result<Event> {
+        let _w = self.write_lock.lock().await;
+        let ev = self
+            .write_tx(async |tx| {
+                let id = sqlx::query(
+                    "INSERT INTO supervisor_events (conversation, persona, task, kind, text, at) \
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                )
+                .bind(e.conversation.as_ref().map(|c| c.0.as_str()))
+                .bind(&e.persona)
+                .bind(&e.task.0)
+                .bind(serde_json::to_value(e.kind)?.as_str().unwrap_or_default())
+                .bind(&e.text)
+                .bind(e.at)
+                .execute(&mut *tx)
+                .await?
+                .last_insert_rowid();
+                let stored = TaskEvent { id, ..e.clone() };
+                self.append(tx, EventKind::SupervisorEvent { event: stored })
+                    .await
+            })
+            .await?;
+        let _ = self.live.send(ev.clone());
+        Ok(ev)
+    }
+
+    /// The conversation's events with an id above `after`, oldest first.
+    pub async fn task_events(&self, conversation: &AgentId, after: i64) -> Result<Vec<TaskEvent>> {
+        let rows = sqlx::query(
+            "SELECT e.id, e.conversation, e.persona, e.task, e.kind, e.text, e.at, json_extract(t.data, '$.title') AS title \
+             FROM supervisor_events e LEFT JOIN tasks t ON t.id = e.task \
+             WHERE e.conversation = ? AND e.id > ? ORDER BY e.id",
+        )
+        .bind(&conversation.0)
+        .bind(after)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|r| {
+                let task = AgentId(r.get("task"));
+                let kind: String = r.get("kind");
+                Ok(TaskEvent {
+                    id: r.get("id"),
+                    conversation: r.get::<Option<String>, _>("conversation").map(AgentId),
+                    persona: r.get("persona"),
+                    task_title: r
+                        .get::<Option<String>, _>("title")
+                        .unwrap_or_else(|| task.0.clone()),
+                    task,
+                    kind: serde_json::from_value::<TaskEventKind>(kind.into())?,
+                    text: r.get("text"),
+                    at: r.get("at"),
+                })
+            })
+            .collect()
     }
 
     pub async fn latest_conversation(&self, persona: &str) -> Result<Option<AgentId>> {

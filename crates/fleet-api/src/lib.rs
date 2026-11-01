@@ -58,7 +58,9 @@ pub use requests::{
     WorkflowState, WorkspaceDiff,
 };
 pub use status::{BlockedReason, Status, StopCause};
-pub use supervisor::{Conversation, ConversationMessage, NewConversation, TaskMark};
+pub use supervisor::{
+    Conversation, ConversationMessage, NewConversation, TaskEvent, TaskEventKind, TaskMark,
+};
 pub use task::{
     format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
     OrphanKind, PlanItem, PrState, StatusTimes, Task, TaskList, TaskOutcome, TaskPr, TaskState,

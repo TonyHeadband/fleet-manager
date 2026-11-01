@@ -49,5 +49,7 @@ pub fn apply(state: &mut Snapshot, e: &Event) {
             }
         }
         EventKind::AgentRemoved { id } => state.agents.retain(|a| &a.id != id),
+        // The board shows agents; task events are for the supervisor page.
+        EventKind::SupervisorEvent { .. } => {}
     }
 }

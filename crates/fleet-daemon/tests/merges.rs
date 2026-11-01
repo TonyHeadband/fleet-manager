@@ -874,3 +874,31 @@ async fn a_hung_forge_fails_the_check_after_the_timeout() {
     assert_eq!(rows.len(), 1);
     assert!(!rows[0].ok);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_merged_becomes_an_event_once() {
+    let fx = fixture().await;
+    let conv = fleet_daemon::supervisor::Supervisor::new(fx.svc.clone())
+        .new_conversation(PERSONA, "hello")
+        .await
+        .unwrap();
+    let id = github_task(&fx, "t1").await;
+    let c = conv.clone();
+    fx.store
+        .update_task(&id, |t| t.origin = Some(c))
+        .await
+        .unwrap();
+    reply_merged(&fx);
+
+    fx.svc.check_merges().await;
+    fx.svc.check_merges().await;
+
+    let got = fx.store.task_events(&conv, 0).await.unwrap();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].kind, fleet_api::TaskEventKind::PrMerged);
+    assert_eq!(
+        got[0].text,
+        "PR merged · https://ghe.example.com/acme/core/pull/7"
+    );
+    assert_eq!(got[0].task, id);
+}

@@ -7,9 +7,10 @@ use crate::forge::{self, Forge, ForgeConfig, PrInfo, RepoRef};
 use crate::personas::Personas;
 use crate::repos::Repos;
 use crate::store::Store;
+use crate::supervisor;
 use fleet_api::{
-    task_id, task_outcome, AgentId, AgentKind, EventKind, Status, Task, TaskOutcome, TaskPr,
-    TaskState,
+    task_id, task_outcome, AgentId, AgentKind, EventKind, PrState, Status, Task, TaskEventKind,
+    TaskOutcome, TaskPr, TaskState,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -239,6 +240,7 @@ impl MergeChecker {
         let mut wrote_any = false;
         let mut finished = false;
         let mut stale = false;
+        let mut newly_merged = Vec::new();
         let wrote = self
             .store
             .update_task(&t.id, |x| {
@@ -253,6 +255,17 @@ impl MergeChecker {
                     return;
                 }
                 if x.prs != prs {
+                    newly_merged = prs
+                        .iter()
+                        .filter(|n| {
+                            n.state == PrState::Merged
+                                && !x
+                                    .prs
+                                    .iter()
+                                    .any(|o| o.url == n.url && o.state == PrState::Merged)
+                        })
+                        .map(|n| n.url.clone())
+                        .collect();
                     x.prs = prs;
                     wrote_any = true;
                 }
@@ -278,6 +291,20 @@ impl MergeChecker {
         }
         match wrote {
             Ok(()) if wrote_any => {
+                for url in newly_merged {
+                    let text = format!("PR merged · {url}");
+                    if let Err(e) = supervisor::route_with(
+                        &self.store,
+                        now,
+                        &t.id,
+                        TaskEventKind::PrMerged,
+                        text,
+                    )
+                    .await
+                    {
+                        warn!(task = %t.id.0, error = %e, "cannot store the PR's event");
+                    }
+                }
                 if finished {
                     info!(task = %t.id.0, "task's PRs merged");
                 }
