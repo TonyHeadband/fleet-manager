@@ -712,4 +712,47 @@ describe("App", () => {
     expect(within(footer).getByText("agent is not running")).not.toHaveAttribute("data-dimmed");
     vi.useRealTimers();
   });
+
+  describe("supervisor toasts", () => {
+    const taskEvent = (over: Record<string, unknown> = {}) => ({
+      id: 1, conversation: "s1", persona: "me", task: "a1", task_title: "fix the tests", kind: "needs_you", text: "wants you", at: 1200, ...over,
+    });
+    const emitEvent = (e: Record<string, unknown>, seq = 2) =>
+      act(() => FakeEventSource.for("/api/events").emit("event", { seq, kind: { type: "supervisor_event", event: e } }, String(seq)));
+    const conversation = (id: string) => ({ id, persona: "me", title: id, created_at: 0, last_used_at: 0, live: false, tasks: [] });
+    const open = async () => {
+      const conversations = vi.fn().mockResolvedValue([conversation("s1"), conversation("s2")]);
+      render(<App client={fakeClient({ personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), conversations })} eventSource={factory} nowSeconds={() => 1300} />);
+      await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+    };
+
+    it("an_event_toasts_on_another_page", async () => {
+      await open();
+      emitEvent(taskEvent());
+      expect(screen.getByRole("button", { name: /fix the tests/ })).toHaveTextContent("wants you");
+    });
+
+    it("no_toast_when_the_conversation_is_on_screen", async () => {
+      window.location.hash = "#supervisor?c=s1";
+      await open();
+      emitEvent(taskEvent());
+      expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
+      emitEvent(taskEvent({ id: 2, conversation: "s2", task_title: "other" }), 3);
+      expect(screen.getByRole("button", { name: /other/ })).toBeInTheDocument();
+    });
+
+    it("toasts_only_for_the_drawer_persona", async () => {
+      await open();
+      emitEvent(taskEvent({ persona: "someone-else" }));
+      expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
+    });
+
+    it("clicking_a_toast_opens_its_conversation", async () => {
+      await open();
+      emitEvent(taskEvent());
+      await userEvent.click(screen.getByRole("button", { name: /fix the tests/ }));
+      expect(window.location.hash).toBe("#supervisor?c=s1");
+      expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
+    });
+  });
 });

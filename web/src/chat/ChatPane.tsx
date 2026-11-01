@@ -39,7 +39,7 @@ const ended = (at: number) => `${MARKER.session_ended} · ${clock(at)}`;
 
 type EventKind = Extract<ChatBody, { type: "event" }>["kind"];
 /** An event's status mark: what needs the owner in the accent, a failure in danger, the rest done. */
-const EVENT_TONE: Record<EventKind, "accent" | "danger" | "done"> = {
+export const EVENT_TONE: Record<EventKind, "accent" | "danger" | "done"> = {
   needs_you: "accent",
   checks_failed: "danger",
   checks_passed: "done",

@@ -288,3 +288,36 @@
 /* A leading mark (the persona's avatar) beside the summary. */
 .filter-button:has(> .avatar) { display: flex; align-items: center; gap: var(--space-button-gap); }
 .filter-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Toasts: bottom right over the view, square, the tone as a bar like the chat's event marks. */
+.toast-stack {
+  position: fixed;
+  right: var(--space-panel-margin);
+  bottom: var(--space-panel-margin);
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-item);
+  width: var(--layout-panel);
+  max-width: calc(100vw - 2 * var(--space-panel-margin));
+}
+.toast {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-picker-gap);
+  align-items: center;
+  padding: var(--layout-card-padding);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--size-body);
+  text-align: left;
+  cursor: pointer;
+}
+.toast:hover { border-color: var(--fill); }
+.toast-mark { width: var(--layout-bar-w); height: var(--layout-bar-h); background: var(--tone-done); }
+.toast-mark[data-tone="accent"] { background: var(--fill); }
+.toast-mark[data-tone="danger"] { background: var(--danger); }
+.toast-title { font-size: var(--size-title); }
+.toast-text { grid-column: 2; color: var(--text-low); font-size: var(--size-small); overflow-wrap: anywhere; }

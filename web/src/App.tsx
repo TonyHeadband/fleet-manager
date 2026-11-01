@@ -43,7 +43,9 @@ import {
   tasksRouteFromHash,
   useHash,
   useFleetTab,
+  supervisorHref,
   useRoute,
+  useSupervisorConversation,
   useSettingsTab,
   useTasksRoute,
   type Route,
@@ -68,6 +70,9 @@ import { Shell } from "./shell/Shell";
 import { TaskReadouts } from "./shell/TaskReadouts";
 import { Button } from "./ui/Button";
 import { SupervisorPage } from "./supervisor/SupervisorPage";
+import { EVENT_TONE } from "./chat/ChatPane";
+import { ToastStack, useToasts } from "./ui/Toast";
+import type { TaskEvent } from "./api/generated/TaskEvent";
 import { entryId, entryName, liveTasks } from "./tasks/model";
 import { Passport } from "./tasks/Passport";
 import { ArchiveDialog, useArchive } from "./tasks/ArchiveDialog";
@@ -126,6 +131,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tokensTaken is the reason to make a new one
     [eventSource, client, tokensTaken],
   );
+  const toasts = useToasts();
+  // Read as of the latest render: the stream's callback outlives it.
+  const taskToast = useRef<(e: TaskEvent) => void>(() => {});
   const {
     snapshot,
     loaded,
@@ -143,7 +151,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     refreshTasks,
     connected,
     error,
-  } = useFleet(client, streams);
+  } = useFleet(client, streams, (e) => taskToast.current(e));
   const retakeToken = useCallback(async () => {
     const before = client.token;
     await takeDaemonToken(native, client);
@@ -277,6 +285,12 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     personas.state !== "ready" || personas.value.some((p) => p.id === savedPersona)
       ? savedPersona
       : (personas.value.find((p) => p.ready)?.id ?? null);
+  const onScreen = useSupervisorConversation();
+  taskToast.current = (e) => {
+    // A task event is for the drawer's supervisor, and not worth a toast where its conversation is already open.
+    if (e.persona !== persona || (route === "supervisor" && e.conversation !== null && e.conversation === onScreen)) return;
+    toasts.push({ title: e.task_title, text: e.text, tone: EVENT_TONE[e.kind], href: supervisorHref(e.conversation) });
+  };
   useEffect(() => {
     if (personas.state !== "ready" || persona === savedPersona) return;
     setSavedPersona(persona);
@@ -684,6 +698,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
   const appDialogs = (main: ReactNode) => (
     <>
       {main}
+      <ToastStack toasts={toasts.toasts} onDismiss={toasts.dismiss} />
       <CloseDialog native={native} agents={snapshot.agents} />
       {versionOffer.dialog}
       {wizardOpen && (

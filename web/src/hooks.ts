@@ -6,6 +6,7 @@ import type { Persona } from "./api/generated/Persona";
 import type { Product } from "./api/generated/Product";
 import type { RepoInfo } from "./api/generated/RepoInfo";
 import type { Snapshot } from "./api/generated/Snapshot";
+import type { TaskEvent } from "./api/generated/TaskEvent";
 import type { TaskList } from "./api/generated/TaskList";
 import type { UiSchema } from "./api/generated/UiSchema";
 import type { Load } from "./shell/choices";
@@ -106,7 +107,14 @@ export function useLoad<T>(fetch: () => Promise<T>, poll = false): [Load<T>, () 
   return [load, ask];
 }
 
-export function useFleet(client: FleetClient, factory: EventSourceFactory = browserEventSource): Fleet {
+export function useFleet(
+  client: FleetClient,
+  factory: EventSourceFactory = browserEventSource,
+  /** A task event the daemon logged for a supervisor conversation; read as of the latest render. */
+  onTaskEvent?: (e: TaskEvent) => void,
+): Fleet {
+  const taskEvent = useRef(onTaskEvent);
+  taskEvent.current = onTaskEvent;
   const [snapshot, setSnapshot] = useState<Snapshot>({ seq: 0, agents: [] });
   const [loaded, setLoaded] = useState(false);
   // Retried like the lists below: a page opened while the daemon is down fills in once it answers.
@@ -167,6 +175,7 @@ export function useFleet(client: FleetClient, factory: EventSourceFactory = brow
       (e) => {
         setSnapshot((prev) => boardReducer(prev, e));
         const k = e.kind;
+        if (k.type === "supervisor_event") taskEvent.current?.(k.event);
         if (k.type === "agent_created" || k.type === "agent_removed" || (k.type === "status_changed" && k.status === "stopped"))
           reloadTasks();
       },

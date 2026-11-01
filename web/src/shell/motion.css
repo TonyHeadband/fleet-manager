@@ -57,6 +57,12 @@
       calc(var(--after) + var(--motion-at-board) + var(--motion-at-cards) + var(--i) * var(--motion-stagger)) both;
   }
 }
+@media (prefers-reduced-motion: no-preference) {
+  /* A toast steps in where it lands; it never moves the view. */
+  .toast {
+    animation: fui-step-in var(--motion-step-in) ease-out both;
+  }
+}
 @keyframes fui-wipe {
   from {
     clip-path: inset(0 100% 0 0);
