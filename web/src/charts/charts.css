@@ -51,6 +51,10 @@
   /* Column bars grow up from the baseline; the shared entry wipes in from the left. */
   :root:not([data-animations="off"]) [data-enter="grow"] { animation-name: chart-grow; }
 }
+@media (prefers-reduced-motion: no-preference) {
+  /* A bar that changes value moves to its new height rather than jumping. */
+  :root:not([data-animations="off"]) .chart-col-bar { transition: y var(--motion-wipe) var(--ease-push), height var(--motion-wipe) var(--ease-push); }
+}
 @keyframes chart-grow {
   from { clip-path: inset(100% 0 0 0); }
   to { clip-path: inset(0); }

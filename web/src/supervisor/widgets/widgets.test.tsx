@@ -58,6 +58,14 @@ describe("widgets", () => {
     expect(joined).toMatch(/Queued\s*0/);
   });
 
+  it("agents_by_status_bars_still_grow_when_the_agents_arrive_after_an_empty_first_render", () => {
+    const { container, rerender } = render(AGENTS_BY_STATUS.render({ persona: "me", agents: [], tasks: [], loaded: false, ...live }));
+    const grow = () => Array.from(container.querySelectorAll(".chart-col-bar")).map((r) => r.getAttribute("data-enter"));
+    expect(grow().every((g) => g === null)).toBe(true);
+    rerender(AGENTS_BY_STATUS.render({ persona: "me", agents, tasks: [], loaded: true, ...live }));
+    expect(grow().every((g) => g === "grow")).toBe(true);
+  });
+
   it("the_total_is_no_data_until_the_snapshot_arrives", () => {
     const stat = (loaded: boolean) => {
       const { container, unmount } = render(AGENTS_BY_STATUS.render({ persona: "me", agents: [], tasks: [], loaded, ...live }));

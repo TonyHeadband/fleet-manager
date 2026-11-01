@@ -172,6 +172,42 @@ describe("ColumnBars", () => {
     expect(entering()).toEqual([null, null, null]);
   });
 
+  it("bars_wait_for_a_value_to_enter_so_an_empty_first_render_does_not_spend_the_entry", () => {
+    vi.useFakeTimers();
+    const zeros = bars.map((b) => ({ ...b, value: 0 }));
+    const { container, rerender } = render(<ColumnBars label="A" bars={zeros} />);
+    size(300);
+    const entering = () => Array.from(container.querySelectorAll(".chart-col-bar")).map((r) => r.getAttribute("data-enter"));
+    expect(entering()).toEqual([null, null, null]);
+    act(() => void vi.advanceTimersByTime(motion.wipe + motion.stagger * motion.staggerCap + 1));
+    rerender(<ColumnBars label="A" bars={bars} />);
+    expect(entering()).toEqual(["grow", "grow", "grow"]);
+  });
+
+  it("bars_never_enter_with_motion_off_even_when_values_arrive_late", () => {
+    motionOff();
+    const zeros = bars.map((b) => ({ ...b, value: 0 }));
+    const { container, rerender } = render(<ColumnBars label="A" bars={zeros} />);
+    size(300);
+    rerender(<ColumnBars label="A" bars={bars} />);
+    expect(container.querySelectorAll(".chart-col-bar[data-enter]")).toHaveLength(0);
+  });
+
+  it("bar_geometry_is_a_style_so_a_value_change_can_transition", () => {
+    const { container } = render(<ColumnBars label="A" bars={bars} />);
+    size(300);
+    const bar = container.querySelector(".chart-col-bar") as SVGElement;
+    expect(bar.style.height).toMatch(/px$/);
+  });
+
+  it("column_bars_transition_height_and_y_on_tokens_and_only_with_motion_on", () => {
+    const css = readFileSync("src/charts/charts.css", "utf8").replace(/\s+/g, " ");
+    const block = css.match(/@media \(prefers-reduced-motion: no-preference\) \{ (?:\/\*.*?\*\/ )?:root:not\(\[data-animations="off"\]\) \.chart-col-bar[^{]*\{[^}]*\}/);
+    expect(block).not.toBeNull();
+    expect(block![0]).toMatch(/transition:[^;]*\bheight var\(--motion-[a-z]+\) var\(--ease-[a-z]+\)/);
+    expect(block![0]).toMatch(/\by var\(--motion-/);
+  });
+
   it("the_stagger_is_capped", () => {
     vi.useFakeTimers();
     const many = Array.from({ length: motion.staggerCap + 5 }, (_, i) => ({ label: `L${i}`, value: i, paint: { series: 0 as const } }));
