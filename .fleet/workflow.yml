@@ -16,6 +16,6 @@ steps:
     paths: [scripts/bundle.sh, scripts/test-bundle.sh, scripts/lib.sh, packaging/**]
   demo:
     run: cargo test -p fleet-demo
-    paths: [crates/fleet-demo/**, demo/**, fixtures/hooks/**, scripts/tauri-smoke.sh, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-daemon/src/status.rs, crates/fleet-daemon/src/hooks_cfg.rs, crates/fleet-gui/assets/**]
+    paths: [crates/fleet-demo/**, demo/**, fixtures/hooks/**, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-daemon/src/status.rs, crates/fleet-daemon/src/hooks_cfg.rs, crates/fleet-daemon/src/repo_rules.rs, crates/fleet-daemon/src/agents.rs, crates/fleet-gui/assets/**]
 pr:
   style: conventional-semver-pre1.0
