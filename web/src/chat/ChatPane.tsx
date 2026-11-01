@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { panel } from "../generated/layout";
 import type { FleetClient } from "../api/client";
 import { browserEventSource, subscribeChat, type EventSourceFactory } from "../api/events";
 import type { ChatAsk } from "../api/generated/ChatAsk";
 import type { ChatBody } from "../api/generated/ChatBody";
 import type { ChatItem } from "../api/generated/ChatItem";
 import { clock } from "../shell/Footer";
+import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
 import { PlusMinus } from "../ui/PlusMinus";
 import { AskMessage } from "./AskMessage";
@@ -212,6 +214,39 @@ function Message({ className, from, speaker, at, head, children }: { className: 
 }
 
 /**
+ * A message's text, folded past `panel.foldMax` of measured height: cut clean at the limit, with a Read more / Show
+ * less button under it. A short message shows no button.
+ */
+function Folding({ children }: { children: ReactNode }) {
+  const text = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [tall, setTall] = useState(false);
+  const [open, setOpen] = useState(false);
+  // Measured at the full height (a folded box is clipped, its scrollHeight is not), again when the text changes.
+  useLayoutEffect(() => {
+    if (text.current) setTall(text.current.scrollHeight > panel.foldMax);
+  }, [children]);
+  const toggle = () => {
+    setOpen(!open);
+    // Folding back shortens the feed: keep the message in view rather than let the scroll land elsewhere.
+    if (open) box.current?.scrollIntoView?.({ block: "nearest" });
+  };
+  const folded = tall && !open;
+  return (
+    <div ref={box} className="chat-fold">
+      <div ref={text} className="chat-fold-text" data-folded={folded ? "" : undefined}>
+        {children}
+      </div>
+      {tall && (
+        <Button className="chat-fold-toggle" aria-expanded={open} onClick={toggle}>
+          {open ? "Show less" : "Read more"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
  * One chat item. An owner's prompt or a reply is a message from `speaker`, under a header unless it continues the
  * speaker's run (`head` false); every other item is a narrow row without one.
  */
@@ -222,7 +257,9 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
       // Prompts the owner did not type (a resume, an orchestrator's message) are a small line, not the owner's block.
       return body.from === "owner" && speaker ? (
         <Message className="chat-prompt" from="owner" speaker={speaker} at={item.at} head={head}>
-          <Markdown text={body.text} />
+          <Folding>
+            <Markdown text={body.text} />
+          </Folding>
         </Message>
       ) : (
         <p className="chat-line" data-from="system">
@@ -233,11 +270,15 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
       // Without a speaker the text still shows, unheaded: a message must never vanish for want of a name.
       return speaker ? (
         <Message className="chat-reply" speaker={speaker} at={item.at} head={head}>
-          <Markdown text={body.text} />
+          <Folding>
+            <Markdown text={body.text} />
+          </Folding>
         </Message>
       ) : (
         <div className="chat-reply">
-          <Markdown text={body.text} />
+          <Folding>
+            <Markdown text={body.text} />
+          </Folding>
         </div>
       );
     case "marker":

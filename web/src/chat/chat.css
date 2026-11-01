@@ -22,6 +22,10 @@
 .chat-line[data-marker="new_session"] { text-align: center; }
 .chat-earlier { align-self: center; padding: 0; border: none; background: transparent; color: var(--text-low); }
 
+/* A long message folds at a measured height and is cut clean there: no fade. */
+.chat-fold-text[data-folded] { max-height: var(--panel-fold-max); overflow: hidden; }
+.chat-fold-toggle { margin-top: var(--panel-gap-s); }
+
 /* Claude's rich text. */
 .markdown { line-height: 1.5; }
 .markdown > :first-child { margin-top: 0; }
