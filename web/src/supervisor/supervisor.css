@@ -4,9 +4,12 @@
 .supervisor-chat-head { flex: none; display: flex; align-items: center; padding: var(--layout-list-row-y) var(--layout-list-row-x); border-bottom: 1px solid var(--border); }
 .supervisor-chat-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--layout-pane-inset); }
 .supervisor-empty { margin: auto; text-align: center; color: var(--text-low); }
-/* A fixed layout for now: Agents beside Storage, each filling its cell. */
-.supervisor-grid { flex: 1; min-width: 0; min-height: 0; display: flex; gap: var(--layout-section-gap); padding: var(--layout-card-padding); }
-.supervisor-cell { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* A fixed layout for now: Agents, Storage and Rooms side by side, each filling its cell. A grid too narrow for all
+   three wraps, Rooms going under the others; it scrolls rather than reach over the chat. */
+.supervisor-grid { flex: 1; min-width: 0; min-height: 0; display: flex; flex-wrap: wrap; gap: var(--layout-section-gap); padding: var(--layout-card-padding); overflow-y: auto; }
+.supervisor-cell { flex: 1 1 var(--layout-chart-compact); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* Rooms keeps its list beside a chat at least as wide as the side panel's narrowest. */
+.supervisor-cell[data-cell="rooms"] { flex: 2 1 calc(var(--layout-task-list) + var(--layout-panel-min)); min-height: var(--layout-panel-min); }
 .supervisor-cell > .widget { flex: 1; }
 
 .conversation-selector { display: flex; align-items: center; gap: var(--space-item); min-width: 0; width: 100%; }

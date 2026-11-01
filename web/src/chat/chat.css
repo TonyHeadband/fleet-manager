@@ -80,3 +80,8 @@
 .chat-ask-answered { font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-high); }
 .chat-ask-note { font-size: var(--size-small); color: var(--text-low); }
 .chat-empty { margin: 0; font-size: var(--size-small); color: var(--text-low); }
+
+/* Who said it, where several speak (a room): the avatar, then the name in mono caps. */
+.chat-speaker { display: flex; align-items: center; gap: var(--space-item); margin: 0 0 var(--panel-gap-s); font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-low); }
+.chat-speaker .avatar { width: calc(var(--size-meta) * 2 * 3 / 4); height: calc(var(--size-meta) * 2); }
+.chat-speaker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

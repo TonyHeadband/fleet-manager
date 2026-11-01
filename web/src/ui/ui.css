@@ -72,6 +72,11 @@
     color-mix(in srgb, var(--fill) calc(var(--selection-alpha-strong) * 100%), transparent)
   );
 }
+/* The open item of a list beside it: a 1px accent outline, no fade. */
+.list-row[aria-current="true"] {
+  outline: 1px solid var(--fill);
+  outline-offset: -1px;
+}
 /* egui's multiply_opacity(0.55) on an archived row. */
 .list-row[data-dimmed] {
   opacity: 0.55;

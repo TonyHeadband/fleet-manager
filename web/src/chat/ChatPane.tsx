@@ -180,13 +180,30 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource }: Props)
   );
 }
 
-function Entry({ item }: { item: ChatItem }) {
+/** Who said it, in a group chat (a room): the name over the text, after the sender's avatar. */
+export interface Speaker {
+  name: string;
+  avatar?: ReactNode;
+}
+
+function SpeakerLine({ speaker }: { speaker: Speaker }) {
+  return (
+    <p className="chat-speaker">
+      {speaker.avatar}
+      <span className="chat-speaker-name">{speaker.name}</span>
+    </p>
+  );
+}
+
+/** One chat item. `speaker` names the owner's prompt or a reply where several speak; an agent's own chat has none. */
+export function Entry({ item, speaker }: { item: ChatItem; speaker?: Speaker }) {
   const body = item.body;
   switch (body.type) {
     case "prompt":
       // Prompts the owner did not type (a resume, an orchestrator's message) are a small line, not the owner's block.
       return body.from === "owner" ? (
         <div className="chat-prompt" data-from="owner">
+          {speaker && <SpeakerLine speaker={speaker} />}
           <Markdown text={body.text} />
         </div>
       ) : (
@@ -197,6 +214,7 @@ function Entry({ item }: { item: ChatItem }) {
     case "reply":
       return (
         <div className="chat-reply">
+          {speaker && <SpeakerLine speaker={speaker} />}
           <Markdown text={body.text} />
         </div>
       );

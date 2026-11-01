@@ -10,10 +10,12 @@ import { navigate, supervisorHref, useSupervisorConversation } from "../shell/ro
 import { ErrorLine } from "../ui/ErrorLine";
 import { ConversationSelector } from "./ConversationSelector";
 import { AGENTS_BY_STATUS } from "./widgets/AgentsByStatus";
+import type { RoomsClient } from "./widgets/RoomChat";
+import { ROOMS } from "./widgets/Rooms";
 import { STORAGE } from "./widgets/Storage";
 import "./supervisor.css";
 
-export type SupervisorClient = ChatClient & Pick<FleetClient, "conversations" | "newConversation" | "sendToConversation">;
+export type SupervisorClient = ChatClient & RoomsClient & Pick<FleetClient, "conversations" | "newConversation" | "sendToConversation">;
 
 interface Props {
   baseUrl: string;
@@ -117,7 +119,12 @@ function Page({ baseUrl, client, persona, agents, tasks, loaded, factory }: Prop
         {persona !== null && <ReplyBox label="Message" text={text} onText={setText} onSend={send} busy={busy} />}
       </section>
       <section className="supervisor-grid outlined" aria-label="Fleet widgets">
-        {persona !== null && [AGENTS_BY_STATUS, STORAGE].map((w) => <div key={w.id} className="supervisor-cell">{w.render({ persona, agents, tasks, loaded })}</div>)}
+        {persona !== null &&
+          [AGENTS_BY_STATUS, STORAGE, ROOMS].map((w) => (
+            <div key={w.id} className="supervisor-cell" data-cell={w.id}>
+              {w.render({ persona, agents, tasks, loaded, baseUrl, client, factory })}
+            </div>
+          ))}
       </section>
     </div>
   );

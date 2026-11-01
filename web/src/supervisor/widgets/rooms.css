@@ -1,0 +1,16 @@
+/* The Rooms widget: the rooms list beside the open room's group chat (ListDetail), the chat drawn with the agent
+   chat's items. The widget wipes in once from the left; picking a room never replays it. */
+.rooms { flex: 1; min-height: 0; display: flex; }
+.rooms .list-detail { height: auto; }
+.rooms .list-detail-list { padding: 0 var(--space-item) 0 0; }
+.rooms .list-detail-detail { display: flex; flex-direction: column; gap: var(--space-item); padding: 0 0 0 var(--space-item); overflow: hidden; }
+.rooms-kind { flex: none; margin-left: auto; color: var(--accent-text); }
+/* Unread: a status bar in the accent, then the count as a readout, two digits at least. */
+.rooms-mark { flex: none; width: var(--layout-bar-w); height: var(--layout-bar-h); background: var(--fill); }
+.rooms-unread { flex: none; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-value); font-variant-numeric: tabular-nums; color: var(--text-high); }
+.rooms-empty { margin: 0; padding: var(--layout-list-row-y) var(--layout-list-row-x); font-size: var(--size-small); color: var(--text-low); }
+.room-post { flex: none; display: flex; flex-direction: column; gap: var(--space-item); }
+.room-post-pickers { display: flex; flex-wrap: wrap; gap: var(--space-item); }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-animations="off"]) .widget[data-widget="rooms"] { animation: fui-wipe var(--motion-wipe) var(--ease-push) both; }
+}

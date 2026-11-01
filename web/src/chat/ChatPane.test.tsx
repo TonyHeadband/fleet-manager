@@ -10,7 +10,7 @@ import type { ChatItem } from "../api/generated/ChatItem";
 import type { TaskEventKind } from "../api/generated/TaskEventKind";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { FakeEventSource, agent, factory, fakeClient, persona, product, schema } from "../test/fixtures";
-import { ChatPane, type ChatClient } from "./ChatPane";
+import { ChatPane, Entry, type ChatClient } from "./ChatPane";
 
 // 14:09 UTC, as the footer's clock reads it.
 const AT = 86_400 * 19_000 + 14 * 3600 + 9 * 60;
@@ -343,6 +343,21 @@ describe("ChatPane", () => {
     expect(css).toMatch(/\.chat-ask-options\[data-row\] button \{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis;/);
     // The default control padding leaves the three labels a few px short in the 420px panel.
     expect(css).toMatch(/\.chat-ask-options\[data-row\] button \{[^}]*padding-inline: var\(--layout-badge-x\);/);
+  });
+
+  it("the_detail_panel_chat_is_unchanged", () => {
+    // Without a speaker, Entry draws exactly what the agent's chat drew before rooms gave it one.
+    const html = (i: ChatItem) => {
+      const { container, unmount } = render(<Entry item={i} />);
+      const out = container.innerHTML;
+      unmount();
+      return out;
+    };
+    expect(html(reply("Done."))).toBe('<div class="chat-reply"><div class="markdown"><p>Done.</p>\n</div></div>');
+    expect(html(prompt("Go on"))).toBe('<div class="chat-prompt" data-from="owner"><div class="markdown"><p>Go on</p>\n</div></div>');
+    expect(html(prompt("Resumed", "system"))).toBe('<p class="chat-line" data-from="system">Resumed</p>');
+    const named = render(<Entry item={reply("Done.")} speaker={{ name: "Fix login" }} />);
+    expect(named.container.querySelector(".chat-reply > .chat-speaker")).toHaveTextContent("Fix login");
   });
 
   it("chat_css_uses_tokens_only", () => {

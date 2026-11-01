@@ -146,12 +146,15 @@ describe("Supervisor page", () => {
     await waitFor(() => expect(window.location.hash).toBe("#supervisor"));
   });
 
-  it("the_grid_section_holds_the_agents_and_storage_widgets", async () => {
+  it("the_grid_section_holds_the_agents_storage_and_rooms_widgets", async () => {
     const { container } = render(page());
     await waitFor(() => expect(chatOf("c2")).toHaveLength(1));
     const grid = container.querySelector(".supervisor-grid");
     expect(grid).toHaveClass("outlined");
-    expect([...grid!.querySelectorAll(".widget")].map((w) => w.getAttribute("data-widget"))).toEqual(["agents_by_status", "storage"]);
+    expect([...grid!.querySelectorAll(".widget")].map((w) => w.getAttribute("data-widget"))).toEqual(["agents_by_status", "storage", "rooms"]);
+    // The chat stays outside the grid, which wraps rather than covering it.
+    expect(container.querySelector(".supervisor-chat")!.contains(grid)).toBe(false);
+    expect(readFileSync("src/supervisor/supervisor.css", "utf8")).toMatch(/\.supervisor-grid \{[^}]*flex-wrap: wrap;/);
   });
 
   it("supervisor_agents_do_not_appear_on_the_kanban", async () => {

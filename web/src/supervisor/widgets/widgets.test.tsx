@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FootprintItem } from "../../api/generated/FootprintItem";
-import { agent, fullTask } from "../../test/fixtures";
+import { agent, fakeClient, fullTask } from "../../test/fixtures";
 import { AGENTS_BY_STATUS } from "./AgentsByStatus";
 import { STORAGE } from "./Storage";
 
@@ -12,6 +12,9 @@ const withItems = (items: FootprintItem[]) => ({
   items,
   total: items.reduce((s, i) => s + i.bytes, 0),
 });
+
+/** The daemon, which these widgets do not read. */
+const live = { baseUrl: "", client: fakeClient() };
 
 const agents = [
   agent({ id: "1", persona: "me", status: "working" }),
@@ -42,7 +45,7 @@ afterEach(() => {
 
 describe("widgets", () => {
   it("agents_by_status_counts_the_personas_live_agents_only", () => {
-    render(AGENTS_BY_STATUS.render({ persona: "me", agents, tasks: [], loaded: true }));
+    render(AGENTS_BY_STATUS.render({ persona: "me", agents, tasks: [], loaded: true, ...live }));
     const group = screen.getByRole("group", { name: "Agents" });
     expect(group).toBeTruthy();
     // The total is the big number: 2 working + 1 needs you.
@@ -57,7 +60,7 @@ describe("widgets", () => {
 
   it("the_total_is_no_data_until_the_snapshot_arrives", () => {
     const stat = (loaded: boolean) => {
-      const { container, unmount } = render(AGENTS_BY_STATUS.render({ persona: "me", agents: [], tasks: [], loaded }));
+      const { container, unmount } = render(AGENTS_BY_STATUS.render({ persona: "me", agents: [], tasks: [], loaded, ...live }));
       const text = container.querySelector(".widget-stat")?.textContent ?? "";
       unmount();
       return text;
@@ -75,7 +78,7 @@ describe("widgets", () => {
       fullTask("d", "d", "running", null, { persona: "other", footprint: withItems([item("core worktree", 9e9)]) }),
       fullTask("e", "e", "running", null, { persona: "me", footprint: null }),
     ];
-    render(STORAGE.render({ persona: "me", agents: [], tasks, loaded: true }));
+    render(STORAGE.render({ persona: "me", agents: [], tasks, loaded: true, ...live }));
     const joined = screen.getAllByRole("table", { hidden: true }).map((t) => t.textContent ?? "").join(" ");
     expect(joined).toMatch(/worktrees\s*5\.0 KB/);
     expect(joined).toMatch(/build output\s*1\.5 KB/);
@@ -84,7 +87,7 @@ describe("widgets", () => {
 
   it("widgets_show_their_source", () => {
     for (const def of [AGENTS_BY_STATUS, STORAGE]) {
-      const { container, unmount } = render(def.render({ persona: "me", agents: [], tasks: [], loaded: true }));
+      const { container, unmount } = render(def.render({ persona: "me", agents: [], tasks: [], loaded: true, ...live }));
       const widget = container.querySelector("section.widget") as HTMLElement;
       expect(within(widget).getByRole("heading", { name: def.title })).toBeTruthy();
       expect(widget.querySelector("footer.widget-source")?.textContent).toBe(def.source);
@@ -95,7 +98,7 @@ describe("widgets", () => {
   });
 
   it("widget_motion_is_off_when_motion_is_off", () => {
-    const props = { persona: "me", agents, tasks: [], loaded: true };
+    const props = { persona: "me", agents, tasks: [], loaded: true, ...live };
     const on = render(AGENTS_BY_STATUS.render(props));
     expect(on.container.querySelector("[data-enter]")).not.toBeNull();
     on.unmount();
