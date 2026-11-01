@@ -130,7 +130,7 @@ fn ratio_vars(prefix: &str, values: &[(&str, f32)]) -> String {
         .collect()
 }
 
-const LAYOUT: [(&str, &str, f32); 42] = [
+const LAYOUT: [(&str, &str, f32); 43] = [
     ("header", "header", layout::HEADER),
     ("strip", "strip", layout::STRIP),
     ("column-header", "columnHeader", layout::COLUMN_HEADER),
@@ -150,6 +150,7 @@ const LAYOUT: [(&str, &str, f32); 42] = [
         layout::RELEASE_MENU_MIN,
     ),
     ("task-list", "taskList", layout::TASK_LIST),
+    ("diff-tree", "diffTree", layout::DIFF_TREE),
     ("management-list", "managementList", layout::MANAGEMENT_LIST),
     ("page-x", "pageX", layout::PAGE_X),
     ("page-y", "pageY", layout::PAGE_Y),

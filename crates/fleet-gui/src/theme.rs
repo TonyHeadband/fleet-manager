@@ -285,6 +285,8 @@ pub mod layout {
     pub const RELEASE_MENU_MIN: f32 = 160.0;
     /// The Tasks view's list; the passport takes the rest.
     pub const TASK_LIST: f32 = 250.0;
+    /// The web Diff pane's file tree, beside the picked file's compare.
+    pub const DIFF_TREE: f32 = 250.0;
     /// Management's lists (definitions, personas, products); the detail takes the rest.
     pub const MANAGEMENT_LIST: f32 = 260.0;
     /// A page's side and top margins, which every view's body keeps.
