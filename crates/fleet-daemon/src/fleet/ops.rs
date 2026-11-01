@@ -139,7 +139,7 @@ fn refuse(text: impl Into<String>) -> ServiceError {
 }
 
 /// Runs `work` on its own task, so a caller that goes away (an MCP client hanging up) cannot stop it halfway.
-async fn detached<T: Send + 'static>(
+pub(crate) async fn detached<T: Send + 'static>(
     work: impl std::future::Future<Output = Result<T, ServiceError>> + Send + 'static,
 ) -> Result<T, ServiceError> {
     match tokio::spawn(work).await {

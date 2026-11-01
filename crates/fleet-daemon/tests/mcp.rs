@@ -889,7 +889,11 @@ async fn tools_by_kind() {
             "spawn_specialist",
             "wait_for_fleet",
             "fleet_status",
-            "open_pr"
+            "open_pr",
+            "room_post",
+            "room_read",
+            "room_ask",
+            "room_answer"
         ]
     );
     let (text, err) = call_as(&srv, &lead.id, "finish_step", json!({"report": "done"})).await;

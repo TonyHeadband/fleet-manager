@@ -1,8 +1,9 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
     task_id, task_outcome, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind,
-    FleetEvent, FleetEventKind, GithubAuth, LogEntry, ProductOverride, RoomKind, Snapshot, Status,
-    StatusTimes, StepState, StopCause, Task, TaskEvent, TaskEventKind, TaskOutcome, TaskState,
+    FleetEvent, FleetEventKind, GithubAuth, LogEntry, MemberRef, Post, PostKind, ProductOverride,
+    RoomKind, Snapshot, Status, StatusTimes, StepState, StopCause, Task, TaskEvent, TaskEventKind,
+    TaskOutcome, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Connection, Row, SqlitePool};
@@ -110,6 +111,48 @@ fn room_row(r: &sqlx::sqlite::SqliteRow) -> Result<RoomRow> {
         created_at: r.get("created_at"),
         archived_at: r.get("archived_at"),
     })
+}
+
+/// A stored post. The store keeps no names: `sender_name` is the sender's key until `rooms::posts` names it.
+fn post_row(r: &sqlx::sqlite::SqliteRow) -> Result<Post> {
+    let kind: String = r.get("kind");
+    let sender: String = r.get("sender");
+    Ok(Post {
+        id: r.get("id"),
+        room: r.get("room"),
+        sender_name: sender.clone(),
+        sender: MemberRef::from_key(&sender),
+        to: r
+            .get::<Option<String>, _>("recipient")
+            .map(|k| MemberRef::from_key(&k)),
+        kind: serde_json::from_value(serde_json::Value::String(kind))?,
+        reply_to: r.get("reply_to"),
+        text: r.get("text"),
+        at: r.get("at"),
+        answered_at: r.get("answered_at"),
+        breakdown_version: r
+            .get::<Option<i64>, _>("breakdown_version")
+            .map(|v| v as u32),
+    })
+}
+
+async fn insert_post(tx: &mut sqlx::SqliteConnection, p: &Post) -> Result<i64> {
+    Ok(sqlx::query(
+        "INSERT INTO posts (room, sender, recipient, kind, reply_to, text, at, answered_at, breakdown_version) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&p.room)
+    .bind(p.sender.key())
+    .bind(p.to.as_ref().map(|t| t.key()))
+    .bind(serde_json::to_value(p.kind)?.as_str().unwrap_or_default())
+    .bind(p.reply_to)
+    .bind(&p.text)
+    .bind(p.at)
+    .bind(p.answered_at)
+    .bind(p.breakdown_version.map(i64::from))
+    .execute(&mut *tx)
+    .await?
+    .last_insert_rowid())
 }
 
 /// A version of a product. Dates are `YYYY-MM-DD`.
@@ -1679,6 +1722,87 @@ impl Store {
         .fetch_one(&self.pool)
         .await?;
         Ok(n as u32)
+    }
+
+    /// Stores the post (its `id` is ignored) and broadcasts it with the id it got, after the commit.
+    pub async fn add_post(&self, p: &Post) -> Result<Event> {
+        let _w = self.write_lock.lock().await;
+        let ev = self
+            .write_tx(async |tx| {
+                let id = insert_post(tx, p).await?;
+                let post = Post { id, ..p.clone() };
+                self.append(tx, EventKind::RoomPost { post }).await
+            })
+            .await?;
+        let _ = self.live.send(ev.clone());
+        Ok(ev)
+    }
+
+    /// Answers the ask with `answer` (its `id` is ignored) unless it is answered already; false then, and nothing
+    /// is written. The check and both writes share one transaction, so of two answers only the first is stored.
+    pub async fn answer_ask(&self, ask: i64, answer: &Post) -> Result<bool> {
+        let _w = self.write_lock.lock().await;
+        let ev = self
+            .write_tx(async |tx| {
+                let marked = sqlx::query(
+                    "UPDATE posts SET answered_at = ? WHERE id = ? AND kind = 'ask' AND answered_at IS NULL",
+                )
+                .bind(answer.at)
+                .bind(ask)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+                if marked == 0 {
+                    return Ok(None);
+                }
+                let id = insert_post(tx, answer).await?;
+                let post = Post {
+                    id,
+                    reply_to: Some(ask),
+                    kind: PostKind::Answer,
+                    ..answer.clone()
+                };
+                self.append(tx, EventKind::RoomPost { post }).await.map(Some)
+            })
+            .await?;
+        let Some(ev) = ev else { return Ok(false) };
+        let _ = self.live.send(ev);
+        Ok(true)
+    }
+
+    pub async fn post(&self, id: i64) -> Result<Option<Post>> {
+        let row = sqlx::query("SELECT * FROM posts WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(post_row).transpose()
+    }
+
+    /// The room's posts with an id above `upto` that `member` did not send, oldest first.
+    pub async fn posts_after(&self, room: &str, member: &str, upto: i64) -> Result<Vec<Post>> {
+        let rows = sqlx::query(
+            "SELECT * FROM posts WHERE room = ? AND sender != ? AND id > ? ORDER BY id",
+        )
+        .bind(room)
+        .bind(member)
+        .bind(upto)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(post_row).collect()
+    }
+
+    /// Moves the member's `read_upto` forward to `upto`; never back.
+    pub async fn set_read_upto(&self, room: &str, member: &str, upto: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "UPDATE room_members SET read_upto = MAX(read_upto, ?) WHERE room = ? AND member = ?",
+        )
+        .bind(upto)
+        .bind(room)
+        .bind(member)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Stores a task event and broadcasts it (and keeps it in the event log) after the commit.

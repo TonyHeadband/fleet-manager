@@ -883,6 +883,7 @@ fn ts_bindings_export() {
     fleet_api::Conversation::export_all(&cfg).unwrap();
     fleet_api::Room::export_all(&cfg).unwrap();
     fleet_api::MemberRef::export_all(&cfg).unwrap();
+    fleet_api::Post::export_all(&cfg).unwrap();
     fleet_api::NewConversation::export_all(&cfg).unwrap();
     fleet_api::ConversationMessage::export_all(&cfg).unwrap();
     fleet_api::TaskEvent::export_all(&cfg).unwrap();
@@ -915,6 +916,8 @@ fn ts_bindings_export() {
         "Room.ts",
         "RoomKind.ts",
         "MemberRef.ts",
+        "Post.ts",
+        "PostKind.ts",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }

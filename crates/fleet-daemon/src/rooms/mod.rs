@@ -8,6 +8,8 @@
 //! start would see none. `record_orchestrator` calls `sync_task` for the record, and `start_task` again once it
 //! has set the origin. Ends change no event of their own (the merge checker, a stop and an archive store the
 //! record silently), so the watcher re-reads every task on the events that come with an end.
+pub mod asks;
+pub mod posts;
 mod watch;
 
 use crate::store::{RoomRow, Store, StoreError};

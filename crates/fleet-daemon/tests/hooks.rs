@@ -217,6 +217,10 @@ fn orchestrator_settings_deny_subagents_and_push() {
             "mcp__fleet__wait_for_fleet",
             "mcp__fleet__fleet_status",
             "mcp__fleet__open_pr",
+            "mcp__fleet__room_post",
+            "mcp__fleet__room_read",
+            "mcp__fleet__room_ask",
+            "mcp__fleet__room_answer",
         ]
     );
     assert_eq!(SPECIALIST_TOOLS, ["mcp__fleet__finish_step"]);

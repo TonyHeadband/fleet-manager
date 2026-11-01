@@ -41,7 +41,8 @@ export function boardReducer(state: Snapshot, e: Event): Snapshot {
     case "agent_removed":
       return { seq: e.seq, agents: state.agents.filter((a) => a.id !== k.id) };
     case "supervisor_event":
-      // Task events are for the supervisor page; the board only advances its seq.
+    case "room_post":
+      // Task events and room posts are for the supervisor page; the board only advances its seq.
       return { seq: e.seq, agents: state.agents };
   }
 }

@@ -40,21 +40,28 @@ const HTTP_EVENTS: [&str; 10] = [
 pub const ALLOWED_TOOLS: [&str; 2] = ["mcp__fleet__list_repos", "mcp__fleet__request_repo"];
 
 /// The fleet MCP tools an orchestrator calls, allowed for the same reason as `ALLOWED_TOOLS`.
-pub const ORCHESTRATOR_TOOLS: [&str; 5] = [
+pub const ORCHESTRATOR_TOOLS: [&str; 9] = [
     "mcp__fleet__propose_breakdown",
     "mcp__fleet__spawn_specialist",
     "mcp__fleet__wait_for_fleet",
     "mcp__fleet__fleet_status",
     "mcp__fleet__open_pr",
+    "mcp__fleet__room_post",
+    "mcp__fleet__room_read",
+    "mcp__fleet__room_ask",
+    "mcp__fleet__room_answer",
 ];
 pub const SPECIALIST_TOOLS: [&str; 1] = ["mcp__fleet__finish_step"];
 /// The fleet MCP tools a supervisor calls, allowed for the same reason as `ALLOWED_TOOLS`.
-pub const SUPERVISOR_TOOLS: [&str; 5] = [
+pub const SUPERVISOR_TOOLS: [&str; 8] = [
     "mcp__fleet__set_title",
     "mcp__fleet__fleet_overview",
     "mcp__fleet__file_issue",
     "mcp__fleet__write_doc",
     "mcp__fleet__start_task",
+    "mcp__fleet__room_post",
+    "mcp__fleet__room_read",
+    "mcp__fleet__room_answer",
 ];
 
 /// Denied to every orchestrator and specialist whatever its definition says (found in a spike):

@@ -65,3 +65,50 @@ impl MemberRef {
         }
     }
 }
+
+/// What a post costs its recipient: see `Post`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PostKind {
+    /// History only: wakes nobody.
+    Announcement,
+    /// Wakes its recipients; the sender carries on.
+    Message,
+    /// Wakes its recipient and holds the sender until it is answered.
+    Ask,
+    /// The one answer to an ask (`reply_to`); the first wins.
+    Answer,
+}
+
+/// One post in a room. It carries its sender and is never an instruction from the owner.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct Post {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub room: String,
+    pub sender: MemberRef,
+    /// The sender as people read it: the task's title, `supervisor`, `owner` or `Fleet Manager`.
+    pub sender_name: String,
+    /// One member, or None for everyone in the room.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub to: Option<MemberRef>,
+    pub kind: PostKind,
+    /// The ask an answer answers.
+    #[serde(default)]
+    #[ts(type = "number | null", optional)]
+    pub reply_to: Option<i64>,
+    pub text: String,
+    #[ts(type = "number")]
+    pub at: i64,
+    /// Set on an ask once it has its answer.
+    #[serde(default)]
+    #[ts(type = "number | null", optional)]
+    pub answered_at: Option<i64>,
+    /// The breakdown version an ask asks to approve.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub breakdown_version: Option<u32>,
+}
