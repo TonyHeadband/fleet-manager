@@ -703,9 +703,9 @@ fn the_series_palette_avoids_the_status_tones_and_the_accent() {
 }
 
 /// The hue of an sRGB colour in OKLCh, in degrees.
-fn oklch_hue(c: Color32) -> f32 {
+fn oklch_hue(c: Color32) -> f64 {
     let lin = |v: u8| {
-        let v = v as f32 / 255.0;
+        let v = f64::from(v) / 255.0;
         if v <= 0.04045 {
             v / 12.92
         } else {
