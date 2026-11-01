@@ -101,6 +101,32 @@ describe("Rooms widget", () => {
     expect(reads()).toBe(3);
   });
 
+  it("a_read_asked_while_one_is_in_flight_runs_once_after_it", async () => {
+    let release: (ps: Post[]) => void = () => {};
+    let r1Calls = 0;
+    const roomPosts = vi.fn((id: string) => {
+      if (id !== "r1") return Promise.resolve<Post[]>([]);
+      r1Calls += 1;
+      if (r1Calls === 2) return new Promise<Post[]>((r) => (release = r));
+      return Promise.resolve([FROM_TASK]);
+    });
+    show(clientWith(undefined, { roomPosts }));
+    await within(await log()).findByText("on it");
+    const reads = () => roomPosts.mock.calls.filter(([id]) => id === "r1").length;
+    emit(post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "one" }));
+    await waitFor(() => expect(reads()).toBe(2), { timeout: 2000 });
+    // Two more bursts while that read is out: they ask for one read after it, not two and not none.
+    emit(post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "two" }));
+    await settle();
+    emit(post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "three" }));
+    await settle();
+    expect(reads()).toBe(2);
+    await act(async () => release([FROM_TASK]));
+    await waitFor(() => expect(reads()).toBe(3));
+    await settle();
+    expect(reads()).toBe(3);
+  });
+
   it("a_pending_read_is_flushed_when_the_room_closes", async () => {
     const client = show();
     await within(await log()).findByText("on it");
