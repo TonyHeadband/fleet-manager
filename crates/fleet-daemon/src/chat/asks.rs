@@ -16,6 +16,7 @@ const ANSWERED_KEPT: usize = 256;
 
 struct Pending {
     ask: ChatAsk,
+    tool: String,
     input: Value,
     /// Claude's suggested `addRules`, rescoped to the session: what "allow for the session" sends back.
     session_rules: Vec<Value>,
@@ -87,7 +88,7 @@ pub enum AnswerError {
 }
 
 /// A PermissionRequest held open. Dropping it (the hook timed out, or Claude closed the connection) forgets its ask
-/// if still unanswered; nothing else removes an unanswered one.
+/// if still unanswered; besides that, only its own answer or `settled` removes an unanswered one.
 pub struct Held {
     asks: Asks,
     agent: AgentId,
@@ -130,7 +131,7 @@ impl Asks {
     /// Queues the PermissionRequest `body` as one of `agent`'s asks. None when the body is not one the chat can show
     /// (a question it cannot read), so the hook answers at once and Claude asks in its TUI.
     pub fn hold(&self, agent: &AgentId, body: &Value) -> Option<Held> {
-        let (kind, input, session_rules) = parse(body)?;
+        let (kind, tool, input, session_rules) = parse(body)?;
         let ask = ChatAsk {
             id: uuid::Uuid::new_v4().to_string(),
             kind,
@@ -145,6 +146,7 @@ impl Asks {
             .or_default()
             .push(Pending {
                 ask: ask.clone(),
+                tool,
                 input,
                 session_rules,
                 reply: Some(tx),
@@ -209,12 +211,36 @@ impl Asks {
     }
 
     /// The agent moved on (a tool ran, a turn ended): its answered prompts are done with. Unanswered ones wait for
-    /// their own answer, timeout or dropped connection, since another thread of the agent may be what moved.
+    /// their own answer, timeout, dropped connection or `settled`, since another thread of the agent may be what moved.
     pub fn moved_on(&self, agent: &AgentId) {
         let mut inner = self.inner.lock().expect("asks poisoned");
         if inner.remove(agent, |p| p.ask.answered.is_some()) {
             self.show(&mut inner, agent);
         }
+    }
+
+    /// A call ran, failed or was denied (its PostToolUse, PostToolUseFailure or PermissionDenied came): an unanswered
+    /// prompt for the same tool and input was answered elsewhere (the TUI, Lite, a terminal). Its hook answers `{}` and
+    /// it leaves the chat.
+    pub fn settled(&self, agent: &AgentId, tool: &str, input: &Value) {
+        let mut inner = self.inner.lock().expect("asks poisoned");
+        let Some(queue) = inner.pending.get_mut(agent) else {
+            return;
+        };
+        let Some(i) = queue
+            .iter()
+            .position(|p| p.reply.is_some() && p.tool == tool && &p.input == input)
+        else {
+            return;
+        };
+        let p = queue.remove(i);
+        if queue.is_empty() {
+            inner.pending.remove(agent);
+        }
+        if let Some(reply) = p.reply {
+            let _ = reply.send(json!({}));
+        }
+        self.show(&mut inner, agent);
     }
 
     /// The agent ended: every prompt goes, and its held hooks answer `{}`.
@@ -237,14 +263,20 @@ impl Asks {
     }
 }
 
-fn parse(body: &Value) -> Option<(AskKind, Value, Vec<Value>)> {
+/// A hook body's `tool_input`, `{}` when it has none.
+pub fn tool_input(body: &Value) -> Value {
+    body.get("tool_input").cloned().unwrap_or_else(|| json!({}))
+}
+
+fn parse(body: &Value) -> Option<(AskKind, String, Value, Vec<Value>)> {
     let tool = body.get("tool_name")?.as_str()?.to_string();
-    let input = body.get("tool_input").cloned().unwrap_or_else(|| json!({}));
+    let input = tool_input(body);
     if tool == "AskUserQuestion" {
         return Some((
             AskKind::Question {
                 questions: questions(&input)?,
             },
+            tool,
             input,
             Vec::new(),
         ));
@@ -274,10 +306,11 @@ fn parse(body: &Value) -> Option<(AskKind, Value, Vec<Value>)> {
     options.push(option("deny", "Deny"));
     Some((
         AskKind::Permission {
-            tool,
+            tool: tool.clone(),
             input: input.clone(),
             options,
         },
+        tool,
         input,
         session_rules,
     ))

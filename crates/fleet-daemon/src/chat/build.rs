@@ -1,9 +1,12 @@
-use crate::agents::{CONTINUE_PROMPT, PROMPT_POINTER, RESUME_PROMPT};
+use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
 use crate::chat::summary::{result_of, summarize};
 use crate::merges::parse_timestamp;
 use fleet_api::{CallStatus, ChatBody, ChatItem, MarkerKind, PromptFrom};
 use serde_json::Value;
 use std::collections::HashMap;
+
+/// Claude Code's note after Esc (`[Request interrupted by user]`, `… for tool use]`), recorded as a user line.
+const INTERRUPT_PREFIX: &str = "[Request interrupted by user";
 
 /// A `tool_use` still waiting for its `tool_result`.
 struct OpenCall {
@@ -124,11 +127,16 @@ impl Builder {
     }
 
     /// The prompt a user line shows, or None for a slash command and the output Claude Code records around one.
+    /// Commands come as `<command-name>` records; `/compact` also leaves its bare `/compact` line first, so a lone
+    /// `/name` goes too, but a path (`/tmp/x`) is the owner's message.
     fn prompt(&mut self, text: &str) -> Option<ChatItem> {
         let trimmed = text.trim();
+        let bare_command = trimmed
+            .strip_prefix('/')
+            .is_some_and(|name| !name.contains(|c: char| c == '/' || c.is_whitespace()));
         let command = trimmed.starts_with("<command-")
             || trimmed.starts_with("<local-command")
-            || (trimmed.starts_with('/') && !trimmed.contains(char::is_whitespace));
+            || bare_command;
         if trimmed.is_empty() || command {
             return None;
         }
@@ -137,7 +145,11 @@ impl Builder {
                 self.prompt_text.clone().unwrap_or_else(|| text.to_string()),
                 self.prompt_from,
             )
-        } else if text == RESUME_PROMPT || text == CONTINUE_PROMPT {
+        } else if text == RESUME_PROMPT
+            || text == CONTINUE_PROMPT
+            || text.starts_with(INTERRUPT_PREFIX)
+            || text.starts_with(NOTICE_PREFIX)
+        {
             (text.to_string(), PromptFrom::System)
         } else {
             (text.to_string(), PromptFrom::Owner)
@@ -229,7 +241,7 @@ fn display_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::{CONTINUE_PROMPT, PROMPT_POINTER, RESUME_PROMPT};
+    use crate::agents::{CONTINUE_PROMPT, NOTICE_PREFIX, PROMPT_POINTER, RESUME_PROMPT};
     use fleet_api::{CallStatus, ChatBody, PromptFrom};
     use serde_json::json;
 
@@ -314,6 +326,45 @@ mod tests {
                 text: "Review it.".into(),
                 from: PromptFrom::System
             }
+        );
+    }
+
+    #[test]
+    fn interrupts_and_daemon_notices_are_system_lines() {
+        let mut b = Builder::new(None, PromptFrom::Owner);
+        let interrupted = |i: &ChatItem| matches!(&i.body, ChatBody::Prompt { text, .. } if text.starts_with("[Request interrupted"));
+        let mut prompts: Vec<ChatItem> = run(&mut b, &fixture("permission"))
+            .into_iter()
+            .filter(interrupted)
+            .collect();
+        assert!(!prompts.is_empty());
+        let notice =
+            format!("{NOTICE_PREFIX}repo api is now available at /w/api (branch fleet/x).");
+        prompts.extend(b.line(&user(json!("[Request interrupted by user]"))));
+        prompts.extend(b.line(&user(json!(notice))));
+        let from: Vec<PromptFrom> = prompts
+            .iter()
+            .map(|i| match &i.body {
+                ChatBody::Prompt { from, .. } => *from,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert!(
+            from.len() >= 3 && from.iter().all(|f| *f == PromptFrom::System),
+            "{prompts:?}"
+        );
+    }
+
+    #[test]
+    fn a_message_starting_with_a_slash_is_kept() {
+        let mut b = Builder::new(None, PromptFrom::Owner);
+        let items = b.line(&user(json!("/tmp/x")));
+        assert_eq!(
+            items.first().map(|i| &i.body),
+            Some(&ChatBody::Prompt {
+                text: "/tmp/x".into(),
+                from: PromptFrom::Owner
+            })
         );
     }
 

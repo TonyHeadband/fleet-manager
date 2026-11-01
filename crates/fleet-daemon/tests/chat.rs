@@ -812,6 +812,42 @@ async fn needs_you_with_no_hook_data_shows_the_screen() {
     assert_eq!(ask_until(&mut sse, Option::is_none).await, None);
 }
 
+#[tokio::test]
+async fn a_startup_prompt_shows_the_screen() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    // Claude's "trust this folder" dialog: no hook covers it.
+    srv.fx
+        .store
+        .update_agent(&a.id, |x| {
+            x.status = Status::NeedsYou;
+            x.blocked_reason = Some(BlockedReason::Startup);
+        })
+        .await
+        .unwrap();
+    let (_, ask) = open_chat(&srv, &a.id).await;
+    assert!(
+        matches!(
+            &ask,
+            Some(ChatAsk {
+                kind: AskKind::Screen { .. },
+                ..
+            })
+        ),
+        "{ask:?}"
+    );
+    // A breakdown and a repo request have their own UI.
+    for reason in [BlockedReason::Breakdown, BlockedReason::RepoAccess] {
+        srv.fx
+            .store
+            .update_agent(&a.id, |x| x.blocked_reason = Some(reason))
+            .await
+            .unwrap();
+        let (_, ask) = open_chat(&srv, &a.id).await;
+        assert_eq!(ask, None, "{reason:?}");
+    }
+}
+
 /// Holds `body` as Claude would, returning the hook's eventual reply.
 async fn held(
     srv: &Server,
@@ -922,4 +958,61 @@ async fn an_ended_agents_prompts_are_released() {
         .expect("the hook stayed held")
         .unwrap();
     assert_eq!(reply, (200, json!({})));
+}
+
+#[tokio::test]
+async fn a_prompt_answered_in_the_terminal_leaves_the_chat() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let (mut sse, _) = open_chat(&srv, &a.id).await;
+    let mut h = held(&srv, &a.id, python_request()).await;
+    let ask = ask_until(&mut sse, Option::is_some).await.unwrap();
+    let input = python_request()["tool_input"].clone();
+    // The same tool with another input is a different call.
+    hook(
+        &srv,
+        &a.id,
+        json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}),
+    )
+    .await;
+    still_held(&mut h).await;
+    let (_, now) = open_chat(&srv, &a.id).await;
+    assert_eq!(now, Some(ask));
+    // The owner answered in the TUI: the call ran.
+    hook(
+        &srv,
+        &a.id,
+        json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": input}),
+    )
+    .await;
+    let reply = tokio::time::timeout(Duration::from_secs(5), h)
+        .await
+        .expect("the hook stayed held")
+        .unwrap();
+    assert_eq!(reply, (200, json!({})));
+    assert_eq!(ask_until(&mut sse, Option::is_none).await, None);
+}
+
+#[tokio::test]
+async fn a_prompt_denied_in_the_terminal_leaves_the_chat() {
+    let srv = start().await;
+    let a = spawn_ready(&srv.fx).await;
+    let (mut sse, _) = open_chat(&srv, &a.id).await;
+    for event in ["PostToolUseFailure", "PermissionDenied"] {
+        let h = held(&srv, &a.id, python_request()).await;
+        ask_until(&mut sse, Option::is_some).await;
+        let input = python_request()["tool_input"].clone();
+        hook(
+            &srv,
+            &a.id,
+            json!({"hook_event_name": event, "tool_name": "Bash", "tool_input": input}),
+        )
+        .await;
+        let reply = tokio::time::timeout(Duration::from_secs(5), h)
+            .await
+            .expect("the hook stayed held")
+            .unwrap();
+        assert_eq!(reply, (200, json!({})), "{event}");
+        assert_eq!(ask_until(&mut sse, Option::is_none).await, None, "{event}");
+    }
 }

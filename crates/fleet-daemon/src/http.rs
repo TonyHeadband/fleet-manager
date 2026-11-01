@@ -1,7 +1,7 @@
 //! The daemon's HTTP surface: JSON commands, SSE event, terminal and chat streams, and the hook ingress.
 use crate::agent_config;
 use crate::agents::{fleet_config, AgentService, ServiceError, SpawnError};
-use crate::chat::asks::{AnswerError, Asks, SCREEN_ID};
+use crate::chat::asks::{tool_input, AnswerError, Asks, SCREEN_ID};
 use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{Defs, FleetError};
 use crate::fleet::env;
@@ -1445,7 +1445,18 @@ async fn hook(
     } else {
         None
     };
+    // A call that ran, failed or was denied may be one whose prompt was answered outside the chat.
+    let ran = match event.as_deref() {
+        Some("PostToolUse" | "PostToolUseFailure" | "PermissionDenied") => body
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .map(|tool| (tool.to_string(), tool_input(&body))),
+        _ => None,
+    };
     let outcome = ingest(&st.store, &id, token, body, now).await?;
+    if let Some((tool, input)) = ran {
+        st.asks.settled(&id, &tool, &input);
+    }
     match event.as_deref() {
         Some("PermissionRequest") => {}
         // Fires while a prompt is still open (about 6 s in), so it says nothing about the prompt being answered.
@@ -1499,17 +1510,18 @@ async fn answer_ask(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// What the chat shows the agent waiting on: its held prompt, or, when it waits on a prompt no hook holds (the hook
-/// timed out or dropped, or never came), its current screen.
+/// What the chat shows the agent waiting on: its held prompt, or, when it needs you with no hook held (the hook timed
+/// out or dropped, or never came, as for Claude's folder-trust dialog), its current screen. A breakdown or a repo
+/// request is left to its own UI.
 /// Also the registry version it was read at (see `Asks::get`).
 fn current_ask(st: &AppState, agent: &Agent) -> (u64, Option<ChatAsk>) {
     let (version, held) = st.asks.get(&agent.id);
     let ask = held.or_else(|| {
-        let prompt = matches!(
+        let own_ui = matches!(
             agent.blocked_reason,
-            Some(BlockedReason::Permission | BlockedReason::Question)
+            Some(BlockedReason::Breakdown | BlockedReason::RepoAccess)
         );
-        (agent.status == Status::NeedsYou && prompt).then(|| ChatAsk {
+        (agent.status == Status::NeedsYou && !own_ui).then(|| ChatAsk {
             id: SCREEN_ID.into(),
             kind: AskKind::Screen {
                 text: st.sessions.screen_text(&agent.session).unwrap_or_default(),

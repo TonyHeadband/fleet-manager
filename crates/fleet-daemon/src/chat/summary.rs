@@ -3,7 +3,8 @@ use serde_json::Value;
 
 pub const OUTPUT_LINES: usize = 40;
 pub const OUTPUT_BYTES: usize = 8 * 1024;
-const MAX_TARGET_CHARS: usize = 200;
+/// The most characters a call's target or result line shows; a longer one is cut, ending in an ellipsis.
+const MAX_LINE_CHARS: usize = 200;
 
 /// What a tool call acts on, for the chat's one-line view of it.
 pub fn summarize(tool: &str, input: &Value) -> String {
@@ -19,7 +20,16 @@ pub fn summarize(tool: &str, input: &Value) -> String {
         _ => return String::new(),
     };
     let target = input.get(key).and_then(Value::as_str).unwrap_or_default();
-    target.chars().take(MAX_TARGET_CHARS).collect()
+    clip(target)
+}
+
+fn clip(line: &str) -> String {
+    if line.chars().count() <= MAX_LINE_CHARS {
+        return line.to_string();
+    }
+    let mut cut: String = line.chars().take(MAX_LINE_CHARS - 1).collect();
+    cut.push('…');
+    cut
 }
 
 /// The status, short result line and (for a failure) capped output of a finished call. `result` is the
@@ -32,11 +42,7 @@ pub fn result_of(
 ) -> (CallStatus, Option<String>, Option<String>) {
     let text = result_text(result);
     if is_error {
-        let first = text
-            .lines()
-            .next()
-            .filter(|l| !l.is_empty())
-            .map(str::to_string);
+        let first = text.lines().next().filter(|l| !l.is_empty()).map(clip);
         return (
             CallStatus::Failed,
             first,
@@ -133,6 +139,20 @@ mod tests {
         let (status, line, _) = result_of(tool, &input, &result, false);
         assert_eq!(status, CallStatus::Done);
         line
+    }
+
+    #[test]
+    fn a_huge_first_line_is_capped() {
+        let line = "x".repeat(5000);
+        let (_, result, _) = result_of("Bash", &json!({}), &json!(format!("{line}\nmore")), true);
+        let result = result.unwrap();
+        assert_eq!(result.chars().count(), 200);
+        assert!(result.ends_with('…'), "{result}");
+        let target = summarize("Bash", &json!({"command": line}));
+        assert_eq!(target.chars().count(), 200);
+        assert!(target.ends_with('…'), "{target}");
+        // Short ones are untouched.
+        assert_eq!(summarize("Bash", &json!({"command": "ls"})), "ls");
     }
 
     #[test]

@@ -70,6 +70,9 @@ pub const RESUMED: &str = "resumed after daemon restart";
 /// Claude's prompt for an agent interrupted mid-work.
 pub const RESUME_PROMPT: &str =
     "The fleet daemon restarted and interrupted you. Continue where you left off.";
+/// Starts every line the daemon types into an agent's session (a repo attached, granted or refused), so the chat
+/// shows it as the daemon's, not the owner's.
+pub const NOTICE_PREFIX: &str = "Fleet Manager: ";
 /// What `resume` types into a session that is still alive.
 pub const CONTINUE_PROMPT: &str = "continue";
 /// A resumed claude that exits within this long could not resume; it is stopped, not retried.
@@ -2094,7 +2097,7 @@ impl AgentService {
         self.log_task(id, format!("repo {} added", w.repo)).await;
         let warning = warning.map(|w| one_line(&w));
         let mut line = format!(
-            "Fleet Manager: repo {} is now available at {} (branch {}).",
+            "{NOTICE_PREFIX}repo {} is now available at {} (branch {}).",
             w.repo, w.worktree, w.branch
         );
         if let Some(warn) = &warning {
@@ -2383,7 +2386,7 @@ impl AgentService {
             }
         } else {
             let mut line = format!(
-                "Fleet Manager: granted {} at {} (branch {})",
+                "{NOTICE_PREFIX}granted {} at {} (branch {})",
                 w.repo, w.worktree, w.branch
             );
             if let Some(warn) = &warning {
@@ -2413,7 +2416,7 @@ impl AgentService {
         if !self.answer_held(id, RepoAnswer::Refused(reason.clone())) {
             self.type_line(
                 &before,
-                &format!("Fleet Manager: refused {}: {reason}", request.repo),
+                &format!("{NOTICE_PREFIX}refused {}: {reason}", request.repo),
             )
             .await;
         }
