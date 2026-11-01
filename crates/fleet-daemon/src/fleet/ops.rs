@@ -2228,6 +2228,10 @@ impl AgentService {
         self.store
             .update_task(&p.id, |x| x.gate_runs.push(stored))
             .await?;
+        let text = format!("checks failed · {}", run.steps[0].name);
+        if let Err(e) = supervisor::route(self, &p.id, TaskEventKind::ChecksFailed, text).await {
+            warn!(task = %p.id.0, error = %e, "cannot store the PR rules' event");
+        }
         self.log_task(
             &p.id,
             format!(

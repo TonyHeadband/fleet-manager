@@ -5454,3 +5454,25 @@ async fn gate_pass_and_fail_become_events() {
         .collect();
     assert_eq!(kinds[2], (fleet_api::TaskEventKind::PrOpened, b.id.clone()));
 }
+
+#[tokio::test]
+async fn a_pr_rules_refusal_becomes_a_failed_checks_event() {
+    let fx = fleet_fixture().await;
+    let conv = fleet_daemon::supervisor::Supervisor::new(fx.svc.clone())
+        .new_conversation(PERSONA, "hello")
+        .await
+        .unwrap();
+    let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
+    set_rules(&fx, &a, Some(strict_rules())).await;
+    let err = fx.svc.open_pr(&a.id, "nope", GOOD_BODY).await.unwrap_err();
+    pr_refusal(&err);
+    let got = fx.store.task_events(&conv, 0).await.unwrap();
+    let got: Vec<_> = got.into_iter().map(|e| (e.kind, e.text)).collect();
+    assert_eq!(
+        got,
+        [(
+            fleet_api::TaskEventKind::ChecksFailed,
+            "checks failed · pr".to_string()
+        )]
+    );
+}
