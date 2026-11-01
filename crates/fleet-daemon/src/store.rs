@@ -1,7 +1,7 @@
 //! SQLite persistence: current agents plus an append-only, trimmed event log with global `seq`.
 use fleet_api::{
     task_id, task_outcome, Agent, AgentId, AgentKind, Approval, BlockedReason, Event, EventKind,
-    FleetEvent, FleetEventKind, GithubAuth, LogEntry, ProductOverride, Snapshot, Status,
+    FleetEvent, FleetEventKind, GithubAuth, LogEntry, ProductOverride, RoomKind, Snapshot, Status,
     StatusTimes, StepState, StopCause, Task, TaskEvent, TaskEventKind, TaskOutcome, TaskState,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -76,6 +76,40 @@ pub struct ConversationRow {
     pub persona: String,
     pub created_at: i64,
     pub last_used_at: i64,
+}
+
+/// A room as stored; `rooms::list` adds its title and the owner's unread count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomRow {
+    pub id: String,
+    pub kind: RoomKind,
+    pub product: Option<String>,
+    pub conversation: Option<AgentId>,
+    pub persona: Option<String>,
+    pub created_at: i64,
+    pub archived_at: Option<i64>,
+}
+
+/// One member's place in a room; `left_at` is set while they are out, and `member` is the `MemberRef::key`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemberRow {
+    pub member: String,
+    pub joined_at: i64,
+    pub left_at: Option<i64>,
+    pub read_upto: i64,
+}
+
+fn room_row(r: &sqlx::sqlite::SqliteRow) -> Result<RoomRow> {
+    let kind: String = r.get("kind");
+    Ok(RoomRow {
+        id: r.get("id"),
+        kind: serde_json::from_value(serde_json::Value::String(kind))?,
+        product: r.get("product"),
+        conversation: r.get::<Option<String>, _>("conversation").map(AgentId),
+        persona: r.get("persona"),
+        created_at: r.get("created_at"),
+        archived_at: r.get("archived_at"),
+    })
 }
 
 /// A version of a product. Dates are `YYYY-MM-DD`.
@@ -264,7 +298,7 @@ impl Store {
         }
         // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 12] = [
+        let steps: [(i64, &'static str, &'static str); 13] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -324,6 +358,11 @@ impl Store {
                 15,
                 include_str!("../migrations/015_supervisor.sql"),
                 "PRAGMA user_version = 15",
+            ),
+            (
+                16,
+                include_str!("../migrations/016_rooms.sql"),
+                "PRAGMA user_version = 16",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -1523,6 +1562,123 @@ impl Store {
                 last_used_at: r.get("last_used_at"),
             })
             .collect())
+    }
+
+    /// Makes the room unless one has its id; an existing room is left as it is.
+    pub async fn insert_room(&self, r: &RoomRow) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "INSERT OR IGNORE INTO rooms (id, kind, product, conversation, persona, created_at, archived_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&r.id)
+        .bind(serde_json::to_value(r.kind)?.as_str().unwrap_or_default())
+        .bind(&r.product)
+        .bind(r.conversation.as_ref().map(|c| c.0.as_str()))
+        .bind(&r.persona)
+        .bind(r.created_at)
+        .bind(r.archived_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn rooms(&self) -> Result<Vec<RoomRow>> {
+        let rows = sqlx::query("SELECT * FROM rooms ORDER BY created_at, rowid")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(room_row).collect()
+    }
+
+    pub async fn room(&self, id: &str) -> Result<Option<RoomRow>> {
+        let row = sqlx::query("SELECT * FROM rooms WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(room_row).transpose()
+    }
+
+    /// Archives the room at `at`, or reopens it with None.
+    pub async fn set_room_archived(&self, id: &str, at: Option<i64>) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("UPDATE rooms SET archived_at = ? WHERE id = ?")
+            .bind(at)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Puts the member in the room: new, or back after leaving with the place they had read to.
+    pub async fn add_member(&self, room: &str, member: &str, at: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "INSERT INTO room_members (room, member, joined_at) VALUES (?, ?, ?) \
+             ON CONFLICT (room, member) DO UPDATE SET left_at = NULL, joined_at = excluded.joined_at \
+             WHERE room_members.left_at IS NOT NULL",
+        )
+        .bind(room)
+        .bind(member)
+        .bind(at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Marks the member as out of the room; one already out keeps the time it left.
+    pub async fn remove_member(&self, room: &str, member: &str, at: i64) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query(
+            "UPDATE room_members SET left_at = ? WHERE room = ? AND member = ? AND left_at IS NULL",
+        )
+        .bind(at)
+        .bind(room)
+        .bind(member)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Everyone who has been in the room, those who left included.
+    pub async fn room_members(&self, room: &str) -> Result<Vec<MemberRow>> {
+        let rows = sqlx::query(
+            "SELECT member, joined_at, left_at, read_upto FROM room_members WHERE room = ? ORDER BY rowid",
+        )
+        .bind(room)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| MemberRow {
+                member: r.get("member"),
+                joined_at: r.get("joined_at"),
+                left_at: r.get("left_at"),
+                read_upto: r.get("read_upto"),
+            })
+            .collect())
+    }
+
+    /// The rooms the member is in now.
+    pub async fn rooms_of(&self, member: &str) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT room FROM room_members WHERE member = ? AND left_at IS NULL ORDER BY rowid",
+        )
+        .bind(member)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Posts in the room above the member's `read_upto` that they did not send.
+    pub async fn unread_posts(&self, room: &str, member: &str) -> Result<u32> {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM posts p WHERE p.room = ?1 AND p.sender != ?2 \
+             AND p.id > COALESCE((SELECT read_upto FROM room_members WHERE room = ?1 AND member = ?2), 0)",
+        )
+        .bind(room)
+        .bind(member)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n as u32)
     }
 
     /// Stores a task event and broadcasts it (and keeps it in the event log) after the commit.

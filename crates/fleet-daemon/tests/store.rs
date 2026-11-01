@@ -981,7 +981,7 @@ async fn fresh_start_keeps_personas_and_drops_the_rest() {
         assert!(s.products().await.unwrap().is_empty());
         assert!(s.snapshot().await.unwrap().agents.is_empty());
         drop(s);
-        assert_eq!(user_version(&path).await, 15);
+        assert_eq!(user_version(&path).await, 16);
     }
 }
 
@@ -996,7 +996,7 @@ async fn a_fresh_database_matches_an_upgraded_one() {
     // Opened again: the first migrations run on every open and must not bring an old table back.
     drop(Store::open(&fresh).await.unwrap());
     assert_eq!(schema(&fresh).await, schema(&upgraded).await);
-    assert_eq!(user_version(&fresh).await, 15);
+    assert_eq!(user_version(&fresh).await, 16);
 }
 
 #[tokio::test]
@@ -1179,6 +1179,9 @@ async fn a_repo_roster_is_dropped_and_nothing_is_hidden_after_the_upgrade() {
         "DROP TABLE forge_calls",
         "DROP TABLE supervisor_conversations",
         "DROP TABLE supervisor_events",
+        "DROP TABLE rooms",
+        "DROP TABLE room_members",
+        "DROP TABLE posts",
         "ALTER TABLE products DROP COLUMN internal_url",
         "ALTER TABLE products DROP COLUMN hidden_specialists",
         "ALTER TABLE repos ADD COLUMN roster TEXT NOT NULL DEFAULT '[]'",
@@ -1227,6 +1230,9 @@ async fn stored_agents_from_before_the_rename_still_load() {
         "DROP TABLE forge_calls",
         "DROP TABLE supervisor_conversations",
         "DROP TABLE supervisor_events",
+        "DROP TABLE rooms",
+        "DROP TABLE room_members",
+        "DROP TABLE posts",
     ] {
         sqlx::query(old).execute(&pool).await.unwrap();
     }
@@ -1268,6 +1274,9 @@ async fn an_agent_from_before_session_ids_has_none_and_a_set_one_is_read_back() 
         "DROP TABLE forge_calls",
         "DROP TABLE supervisor_conversations",
         "DROP TABLE supervisor_events",
+        "DROP TABLE rooms",
+        "DROP TABLE room_members",
+        "DROP TABLE posts",
         "PRAGMA user_version = 9",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();
@@ -1326,6 +1335,9 @@ async fn the_migration_keeps_existing_sessions() {
         "DROP TABLE forge_calls",
         "DROP TABLE supervisor_conversations",
         "DROP TABLE supervisor_events",
+        "DROP TABLE rooms",
+        "DROP TABLE room_members",
+        "DROP TABLE posts",
         "PRAGMA user_version = 12",
     ] {
         sqlx::query(sql).execute(&pool).await.unwrap();

@@ -791,7 +791,13 @@ impl AgentService {
                 p.repo_env = repo_env;
                 p.plan = task_plan;
             })
-            .await
+            .await?;
+        // The origin is not stored yet (`start_task` sets it after the spawn and syncs again), so this joins the
+        // product's room only. A room failure must not undo a start.
+        if let Err(e) = crate::rooms::sync_task(&self.store, self.opts.clock.now(), id).await {
+            tracing::warn!(task = %id.0, error = %e, "cannot join the task to its rooms");
+        }
+        Ok(())
     }
 }
 

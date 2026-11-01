@@ -11,6 +11,7 @@ mod pr;
 mod product;
 mod progress;
 mod requests;
+mod rooms;
 pub mod routes;
 mod status;
 mod supervisor;
@@ -57,6 +58,7 @@ pub use requests::{
     RefuseRepoRequest, RepoInfo, RepoList, RepoPick, SetToken, SpawnRequest, SpawnResponse,
     WorkflowState, WorkspaceDiff,
 };
+pub use rooms::{MemberRef, Room, RoomKind};
 pub use status::{BlockedReason, Status, StopCause};
 pub use supervisor::{
     Conversation, ConversationMessage, NewConversation, TaskEvent, TaskEventKind, TaskMark,

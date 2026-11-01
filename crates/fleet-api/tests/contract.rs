@@ -881,6 +881,8 @@ fn ts_bindings_export() {
     fleet_api::VersionInfo::export_all(&cfg).unwrap();
     PrRules::export_all(&cfg).unwrap();
     fleet_api::Conversation::export_all(&cfg).unwrap();
+    fleet_api::Room::export_all(&cfg).unwrap();
+    fleet_api::MemberRef::export_all(&cfg).unwrap();
     fleet_api::NewConversation::export_all(&cfg).unwrap();
     fleet_api::ConversationMessage::export_all(&cfg).unwrap();
     fleet_api::TaskEvent::export_all(&cfg).unwrap();
@@ -910,6 +912,9 @@ fn ts_bindings_export() {
         "ConversationMessage.ts",
         "TaskEvent.ts",
         "TaskEventKind.ts",
+        "Room.ts",
+        "RoomKind.ts",
+        "MemberRef.ts",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }

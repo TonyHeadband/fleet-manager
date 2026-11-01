@@ -21,6 +21,7 @@ pub mod personas;
 pub mod products;
 pub mod repo_rules;
 pub mod repos;
+pub mod rooms;
 pub mod session;
 pub mod status;
 pub mod store;

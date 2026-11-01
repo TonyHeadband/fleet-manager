@@ -273,6 +273,10 @@ async fn start_task(
         .update_task(&task, |t| t.origin = Some(origin))
         .await
         .map_err(|e| e.to_string())?;
+    // The task joined its product's room at spawn; the origin adds the conversation's operation room.
+    if let Err(e) = crate::rooms::sync_task(&svc.store, svc.options().clock.now(), &task).await {
+        tracing::warn!(task = %task.0, error = %e, "cannot join the task to its rooms");
+    }
     Ok(format!(
         "started {} {}",
         task.0,
