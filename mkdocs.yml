@@ -29,7 +29,7 @@ nav:
   - Contributing:
       - Development: contributing/development.md
       - UI internals: contributing/ui-internals.md
-      - Demo media: contributing/demo.md
+      - Demo stand-ins: contributing/demo.md
       - Release checklist: contributing/acceptance/gui.md
       - What fleet management means here: concept.md
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Tauri app's smoke test, as CI runs it on Ubuntu: a throwaway HOME with a daemon up and a ready persona (the
-# demo's stand-ins for claude, gh and GitHub's API, as scripts/demo.sh), then WebdriverIO drives the release app through
+# demo's stand-ins for claude, gh and GitHub's API), then WebdriverIO drives the release app through
 # tauri-driver under Xvfb. Needs: the release binaries (fleet-gui-tauri, fleet-daemon, fleet-demo-*), xvfb-run,
 # tauri-driver and WebKitWebDriver. Your own daemon and settings are never read or touched.
 set -euo pipefail

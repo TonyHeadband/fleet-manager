@@ -15,7 +15,7 @@ steps:
     run: bash scripts/test-bundle.sh
     paths: [scripts/bundle.sh, scripts/test-bundle.sh, scripts/lib.sh, packaging/**]
   demo:
-    run: cargo test -p fleet-demo && bash scripts/test-demo-lock.sh
-    paths: [crates/fleet-demo/**, demo/**, fixtures/hooks/**, scripts/demo.sh, scripts/test-demo-lock.sh, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-daemon/src/status.rs, crates/fleet-daemon/src/hooks_cfg.rs, crates/fleet-gui/assets/**]
+    run: cargo test -p fleet-demo
+    paths: [crates/fleet-demo/**, demo/**, fixtures/hooks/**, scripts/tauri-smoke.sh, crates/fleet-client/**, crates/fleet-api/**, crates/fleet-daemon/src/status.rs, crates/fleet-daemon/src/hooks_cfg.rs, crates/fleet-gui/assets/**]
 pr:
   style: conventional-semver-pre1.0

@@ -46,4 +46,4 @@ rejected: the real terminal stays, and `fleet-attach` is the way to take over.
 | `fleet-gui` | The egui desktop app |
 | `fleet-fs` | Per-OS folders, child-process setup, and the filesystem and git queries behind the folder picker |
 | `fleet-log` | Logging shared by the daemon and the app |
-| `fleet-demo` | The scripted stand-in for `claude` and the director that record the demo media; see [Demo media](../contributing/demo.md) |
+| `fleet-demo` | The scripted stand-ins for `claude`, `gh` and GitHub behind the Tauri smoke test and the demo media; see [Demo stand-ins](../contributing/demo.md) |

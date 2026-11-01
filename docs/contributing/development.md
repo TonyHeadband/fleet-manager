@@ -51,7 +51,7 @@ release ships each OS's archive once that OS's CI passed on the tagged commit (`
 
 Run the tests on the machine you work on before merging; that is the gate for a pull request. CI runs on every pull
 request and push to `main` but nothing waits for it: a red run on `main` is fixed forward. The only hard gate is a
-release tag, which needs green Linux and Windows CI on its commit (see below). The Pages and Demo media workflows run only when started by hand for now.
+release tag, which needs green Linux and Windows CI on its commit (see below). The Pages workflow runs only when started by hand for now.
 
 `.fleet/workflow.yml` lists the checks the Fleet app's pull-request gate runs on a branch, and which changed paths
 trigger each.
@@ -114,7 +114,7 @@ from its tag (`git switch -c release/0.2 v0.2.0`), gets CI on push, and is tagge
 - [What fleet management means here](../concept.md): the problem Fleet Manager manages.
 - [UI internals](ui-internals.md): how both UIs are put together.
 - [Architecture](../reference/architecture.md): the daemon, the app and the crates.
-- [Demo media](demo.md): how the board image and animation are recorded.
+- [Demo stand-ins](demo.md): the scripted claude, gh and GitHub behind the smoke test and the demo media.
 
 ## Issues and commits
 

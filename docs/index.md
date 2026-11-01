@@ -41,7 +41,7 @@ next: see `ROADMAP.md` in the [repository](https://github.com/TonyHeadband/fleet
 
 - [Development](contributing/development.md): setup, builds, tests, design notes and commits.
 - [UI internals](contributing/ui-internals.md): how the web UI and the desktop app are put together.
-- [Demo media](contributing/demo.md): how the board image and animation are recorded.
+- [Demo stand-ins](contributing/demo.md): the scripted claude, gh and GitHub behind the smoke test and the demo media.
 - [Release checklist](contributing/acceptance/gui.md): what to check on each system before tagging a release.
 
 ## Background

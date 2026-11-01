@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The egui app and the web UI side by side on one throwaway daemon, for comparing the two. The world is demo.sh's
-# (own HOME, port and state, the scripted demo agent instead of claude), so the owner's fleet is never touched.
+# The egui app and the web UI side by side on one throwaway daemon, for comparing the two. The world is the demo
+# stand-ins' (own HOME, port and state, the scripted demo agent instead of claude), so the owner's fleet is never touched.
 # The demo timeline plays once to fill the board. --lan serves the web UI to the local network as well: anyone who
 # can reach this machine can then drive the throwaway daemon, which only ever runs the demo agent.
 source "$(dirname "$0")/lib.sh"

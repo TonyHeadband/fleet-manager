@@ -47,7 +47,6 @@ jobs:
           pnpm --dir web typecheck
           pnpm --dir web build
       - run: cargo test --workspace --locked -j2
-      # No demo-media check here: stale media must not fail a pull request; demo-media.yml re-records on main.
       - name: No files changed by the build or tests
         run: git diff --exit-code
 

@@ -117,5 +117,5 @@ card that needs you (a slow pulse), the radar in the drawer, and egui's own tran
 
 `theme::set_animations` stores the setting in the egui context's temporary data; `theme::animate` reads it there.
 Every animation asks `animate` before it asks for a repaint, so with the setting off, or the window unfocused, the
-window repaints only on events. A scripted demo run (`FLEET_GUI_CUES`, see [Demo media](demo.md)) forces
+window repaints only on events. A scripted demo run (`FLEET_GUI_CUES`, see [Demo stand-ins](demo.md)) forces
 animation on with `theme::force_animation`, over the setting and focus: under Xvfb the window never reports focus.

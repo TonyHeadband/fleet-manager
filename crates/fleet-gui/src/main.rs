@@ -112,7 +112,8 @@ fn main() -> eframe::Result {
             if let Ok(exe) = std::env::current_exe() {
                 root = root.with_shortcuts(fleet_client::shortcuts::places(), exe);
             }
-            // Set only by the demo recorder (`scripts/demo.sh`), which cannot click into the window.
+            // Set only by the demo recorder (the fleet-manager-marketing repo's `scripts/record.sh`), which cannot click into
+            // the window.
             // The recording stays free of a new-version notice.
             if let Some(path) = std::env::var_os("FLEET_GUI_CUES") {
                 root = root.with_cues(PathBuf::from(path));
