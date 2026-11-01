@@ -259,7 +259,7 @@ describe("Definitions", () => {
     expect(screen.getByRole("button", { name: "Reset to built-in" })).toBeInTheDocument();
   });
 
-  it("the_list_row_names_the_origin_in_the_specs_words_and_keeps_the_nickname_whole", async () => {
+  it("the_list_row_marks_the_origin_with_an_icon_and_keeps_the_nickname_whole", async () => {
     await defsTab("Specialists", [
       def("specialist", "rust", null, { nickname: "Ferris" }),
       def("specialist", "go", null, { builtin: false, overridden: true }),
@@ -267,11 +267,22 @@ describe("Definitions", () => {
     ]);
     const rust = await row("rust built-in");
     expect(within(rust).getByText("Ferris")).toBeInTheDocument();
-    expect(within(rust).getByText("built-in")).toBeInTheDocument();
-    expect(within(await row("go your copy")).getByText("your copy")).toBeInTheDocument();
-    expect(within(await row("mine yours")).getByText("yours")).toBeInTheDocument();
+    // The origin is an icon that names itself on hover; a persona's own definition carries none.
+    expect(within(rust).getByRole("img", { name: "Built-in" })).toBeInTheDocument();
+    expect(within(rust).queryByText("built-in")).toBeNull();
+    expect(within(await row("go your copy")).getByRole("img", { name: "Your copy · overrides built-in" })).toBeInTheDocument();
+    expect(within(await row("mine yours")).queryByRole("img")).toBeNull();
     expect(css).toMatch(/\.definition-row-nick \{[^}]*min-width: 6ch/);
-    expect(css).toMatch(/\.definition-row-tag \{[^}]*white-space: nowrap/);
+    expect(css).toMatch(/\.definition-row-tag \{[^}]*flex-shrink: 0/);
+  });
+
+  it("the_second_line_is_model_mode_and_effort", async () => {
+    await defsTab("Specialists", [
+      def("specialist", "rust", null, { model: "sonnet", mode: "auto", effort: "medium" }),
+      def("specialist", "go", null, { mode: "auto" }),
+    ]);
+    expect(await screen.findByText("sonnet · auto · medium")).toBeInTheDocument();
+    expect(within(await row("go built-in")).getByText("auto")).toBeInTheDocument();
   });
 
   it("a_long_caption_and_error_wrap", () => {

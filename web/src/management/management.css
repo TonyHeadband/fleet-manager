@@ -91,6 +91,7 @@
 .definition-row {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
 }
 .definition-row-head {
@@ -98,16 +99,20 @@
   align-items: baseline;
   gap: var(--space-item);
 }
-/* The name gives way first: the nickname keeps at least its first six characters and the origin never wraps. */
+/* The name gives way first: the nickname keeps at least its first six characters and the origin icon never shrinks. */
 .definition-row-nick {
   min-width: 6ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The origin icon sits at the row's far end, in the accent as the FUI's marks are. */
 .definition-row-tag {
   flex-shrink: 0;
-  white-space: nowrap;
+  margin-left: auto;
+  align-self: center;
+  display: flex;
+  color: var(--accent-text);
 }
 .definition-row-error {
   display: flex;

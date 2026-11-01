@@ -198,15 +198,18 @@ export function SpecialistForm({ persona, kind, name, info, defs, skills, roleFi
             <span className="mono-label caption">Skills</span>
             <div className="form-chips">
               {fields.skills.map((s) => (
-                <span key={s} className="skill-chip" data-tone={skills.includes(s) ? undefined : "danger"}>
-                  <Chip
-                    selected={false}
-                    disabled={!editable}
-                    title={skills.includes(s) ? undefined : "Not one of this persona's skills"}
-                    onClick={() => change({ skills: fields.skills.filter((x) => x !== s) })}
-                  >
-                    {s} ×
-                  </Chip>
+                <span
+                  key={s}
+                  className="skill-chip"
+                  data-tone={skills.includes(s) ? undefined : "danger"}
+                  title={skills.includes(s) ? undefined : "Not one of this persona's skills"}
+                >
+                  {s}
+                  {editable && (
+                    <button type="button" className="skill-chip-remove" aria-label={`Remove ${s}`} onClick={() => change({ skills: fields.skills.filter((x) => x !== s) })}>
+                      ×
+                    </button>
+                  )}
                 </span>
               ))}
               {editable && skills.some((s) => !fields.skills.includes(s)) && (

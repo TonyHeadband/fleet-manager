@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { useEffect } from "react";
@@ -90,7 +90,7 @@ describe("SpecialistForm", () => {
     expect(field("Nickname")).toHaveValue("Ferris");
     expect(screen.getByText("Specialist")).toBeInTheDocument();
     expect(field("Summary")).toHaveValue("Rust code");
-    expect(button("test-driven-development ×")).toBeInTheDocument();
+    expect(button("Remove test-driven-development")).toBeInTheDocument();
     expect(field("Model")).toHaveValue("sonnet");
     expect(screen.getByRole("combobox", { name: "Mode" })).toHaveTextContent("Auto");
     expect(button("Medium")).toHaveAttribute("aria-pressed", "true");
@@ -134,8 +134,11 @@ describe("SpecialistForm", () => {
     await userEvent.click(screen.getByRole("combobox", { name: "Add skill" }));
     expect(screen.queryByRole("option", { name: "test-driven-development" })).toBeNull();
     await userEvent.click(screen.getByRole("option", { name: "systematic-debugging" }));
-    expect(button("systematic-debugging ×")).toBeInTheDocument();
-    await userEvent.click(button("test-driven-development ×"));
+    expect(button("Remove systematic-debugging")).toBeInTheDocument();
+    // Only the × removes: clicking the skill's name leaves it.
+    await userEvent.click(screen.getByText("test-driven-development"));
+    expect(button("Remove test-driven-development")).toBeInTheDocument();
+    await userEvent.click(button("Remove test-driven-development"));
     await userEvent.click(button("Save"));
     expect(client.savePersonaDefinition).toHaveBeenCalledWith(
       "a",
@@ -159,7 +162,15 @@ describe("SpecialistForm", () => {
 
   it("an_unknown_skill_is_a_danger_chip", async () => {
     await form({ text: TEXT.replace("[test-driven-development]", "[ghost]"), builtin: false }, { builtin: false, overridden: true });
-    expect(button("ghost ×").closest(".skill-chip")).toHaveAttribute("data-tone", "danger");
+    expect(button("Remove ghost").closest(".skill-chip")).toHaveAttribute("data-tone", "danger");
+  });
+
+  it("a_skill_is_an_accent_tag_and_read_only_has_no_remove", async () => {
+    await form({ text: TEXT, builtin: true }, { builtin: true, overridden: false });
+    const tag = screen.getByText("test-driven-development").closest(".skill-chip")!;
+    expect(tag.tagName).not.toBe("BUTTON");
+    expect(screen.queryByRole("button", { name: "Remove test-driven-development" })).toBeNull();
+    expect(readFileSync("src/management/specialistForm.css", "utf8")).toMatch(/\.skill-chip \{[^}]*color: var\(--accent-text\)/);
   });
 
   it("an_unmapped_error_shows_on_the_bottom_line", async () => {
@@ -394,7 +405,7 @@ describe("New definition", () => {
     render(<Tab client={client} />);
     const row = await screen.findByRole("button", { name: /^rust / });
     expect(row).toHaveTextContent("Ferris");
-    expect(row).toHaveTextContent("your copy");
+    expect(within(row).getByRole("img", { name: "Your copy · overrides built-in" })).toBeInTheDocument();
     await userEvent.click(row);
     expect(await screen.findByText(/your copy · overrides built-in/i)).toHaveClass("badge");
   });

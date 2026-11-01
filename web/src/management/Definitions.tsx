@@ -43,8 +43,25 @@ const tag = (d: DefInfo) => ORIGIN_SHORT[origin(d)];
 /** The role column: orchestrators are marked; a specialist's role is its name, already shown. */
 const role = (d: DefInfo) => (d.kind === "orchestrator" ? "orchestrator" : null);
 
-/** `auto · high`: what the definition's agents start with; nothing for a file that names neither. */
-const modeEffort = (d: DefInfo) => [d.mode, d.effort].filter(Boolean).join(" · ");
+/** The row's origin icon: a persona's own definition carries none, so the mark only flags what came from the app. */
+const ORIGIN_MARK = {
+  builtin: { icon: "builtin", label: "Built-in" },
+  copy: { icon: "copy", label: "Your copy · overrides built-in" },
+} as const;
+
+function OriginMark({ d }: { d: DefInfo }) {
+  const o = origin(d);
+  if (o === "yours") return null;
+  const { icon, label } = ORIGIN_MARK[o];
+  return (
+    <span className="definition-row-tag">
+      <Mark name={icon} label={label} />
+    </span>
+  );
+}
+
+/** `sonnet · auto · high`: what the definition's agents start with; nothing for a file that names none of them. */
+const startsWith = (d: DefInfo) => [d.model, d.mode, d.effort].filter(Boolean).join(" · ");
 
 const isForm = (kind: DefKind): kind is "orchestrator" | "specialist" => kind === "orchestrator" || kind === "specialist";
 
@@ -115,10 +132,10 @@ export function Definitions({
                     <span className="definition-row-head">
                       <span className="list-row-name">{d.name}</span>
                       {d.nickname && <span className="low definition-row-nick">{d.nickname}</span>}
-                      <span className="low definition-row-tag">{tag(d)}</span>
                       {role(d) && <Badge label="Role">{role(d)}</Badge>}
+                      <OriginMark d={d} />
                     </span>
-                    {modeEffort(d) && <span className="low">{modeEffort(d)}</span>}
+                    {startsWith(d) && <span className="low">{startsWith(d)}</span>}
                     {d.error && (
                       <span className="definition-row-error">
                         <Mark name="warn" label="Cannot be used" />

@@ -1,6 +1,6 @@
 import { card, fleet } from "../generated/layout";
 
-export type IconName = "stop" | "pause" | "resume" | "info" | "orchestrator" | "code" | "eye" | "flask" | "specialist" | "pullRequest" | "close" | "expand" | "collapse" | "terminal" | "system" | "dark" | "light";
+export type IconName = "stop" | "pause" | "resume" | "info" | "orchestrator" | "code" | "eye" | "flask" | "specialist" | "pullRequest" | "close" | "expand" | "collapse" | "terminal" | "system" | "dark" | "light" | "builtin" | "copy";
 
 /**
  * Lite's painted glyphs (crates/fleet-gui/src/widgets/icon.rs `glyph`) as SVG, centred in a `size` square and
@@ -116,6 +116,21 @@ export function Glyph({ name, size = card.iconButton, half = card.iconGlyph }: {
             </g>
           </>
         );
+      // A shipped part: a square frame holding a solid core. Your copy keeps the frame and swaps the core for an edit stroke.
+      case "builtin":
+      case "copy": {
+        const [o, i] = [half * 0.9, half * 0.4];
+        return (
+          <>
+            <rect x={c - o} y={c - o} width={2 * o} height={2 * o} fill="none" stroke="currentColor" strokeWidth={1.2} />
+            {name === "builtin" ? (
+              <rect x={c - i} y={c - i} width={2 * i} height={2 * i} />
+            ) : (
+              <line x1={c - i * 1.2} y1={c + i * 1.2} x2={c + i * 1.2} y2={c - i * 1.2} stroke="currentColor" strokeWidth={1.5} />
+            )}
+          </>
+        );
+      }
       case "pullRequest":
         return (
           <g fill="none" stroke="currentColor" strokeWidth={1.3}>
