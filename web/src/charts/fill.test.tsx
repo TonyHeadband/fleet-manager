@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { column, layout, motion } from "../generated/layout";
+import { column, layout, motion, space } from "../generated/layout";
 import { ColumnBars } from "./ColumnBars";
 import { Donut } from "./Donut";
 import { Meter } from "./Meter";
@@ -97,8 +97,36 @@ describe("blocks fill their container's height", () => {
     expect(svgH(container)).toBe(min);
     cleanup();
     const withLegend = render(<Donut label="D" slices={two} />).container;
-    size(400, 300);
+    // A wide cell keeps the legend beside the ring.
+    size(600, 200);
     expect(svgH(withLegend)).toBe(200);
+    expect(withLegend.querySelector(".chart-donut")!.getAttribute("data-layout")).toBeNull();
+  });
+
+  it("a_donut_in_a_square_or_tall_cell_stacks_its_legend_for_a_bigger_ring", () => {
+    off();
+    const two = [
+      { label: "a", value: 1, paint: { series: 0 as const } },
+      { label: "b", value: 1, paint: { series: 1 as const } },
+    ];
+    const { container } = render(<Donut label="D" slices={two} />);
+    size(200, 300);
+    const root = container.querySelector(".chart-donut")!;
+    expect(root.getAttribute("data-layout")).toBe("stacked");
+    // The full width, not half of it beside the legend (jsdom measures the legend at 0).
+    expect(svgH(container)).toBe(200);
+    // A square cell stacks too: under the ring the legend leaves more room than beside it.
+    size(200, 200);
+    expect(root.getAttribute("data-layout")).toBe("stacked");
+    // Height less the gap when that is the tighter side.
+    size(200, 205);
+    expect(svgH(container)).toBe(205 - space.item);
+    expect(container.querySelectorAll(".chart-legend li")).toHaveLength(2);
+    size(400, 200);
+    expect(root.getAttribute("data-layout")).toBeNull();
+    expect(svgH(container)).toBe(200);
+    const rule = readFileSync("src/charts/charts.css", "utf8");
+    expect(rule).toMatch(/\.chart-donut\[data-layout="stacked"\] \{[^}]*flex-direction: column/);
   });
 
   it("stat_sparkline_shrinks_to_fit_a_short_cell", () => {

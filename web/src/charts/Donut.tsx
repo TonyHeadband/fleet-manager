@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { column, layout, motion } from "../generated/layout";
+import { useLayoutEffect, useRef, useState } from "react";
+import { column, layout, motion, space } from "../generated/layout";
 import { ChartTooltip } from "./ChartTooltip";
 import { HiddenTable } from "./HiddenTable";
 import { Legend } from "./Legend";
@@ -36,9 +36,20 @@ export function Donut({ label, slices, center, format = plainFormat }: {
   const [hover, setHover] = useState<{ i: number; x: number } | null>(null);
   const total = slices.reduce((sum, s) => sum + Math.max(finite(s.value), 0), 0);
   const empty = total <= 0;
-  // Square, as tall as the container gives; never wider than the width left beside the legend.
+  const legendRef = useRef<HTMLDivElement>(null);
+  const [legendH, setLegendH] = useState(0);
   const legend = !empty && slices.length >= 2 && width >= layout.chartCompact;
-  const SIZE = Math.max(MIN, Math.min(measured, legend ? width / 2 : width));
+  // The legend sits beside the ring or under it, whichever leaves the bigger ring (a square or tall cell stacks).
+  // The ring is square, as tall as the container gives.
+  const beside = Math.min(measured, legend ? width / 2 : width);
+  const under = Math.min(width, measured - legendH - space.item);
+  const stacked = legend && under > beside;
+  const SIZE = Math.max(MIN, stacked ? under : beside);
+  // The stacked legend's height depends on the width only, so reading it after layout settles in one pass.
+  useLayoutEffect(() => {
+    const h = legendRef.current?.offsetHeight ?? 0;
+    if (h !== legendH) setLegendH(h);
+  });
   const C = SIZE / 2;
   const MID = midRadius(SIZE);
   const drawn = width > 0 && !empty;
@@ -61,7 +72,7 @@ export function Donut({ label, slices, center, format = plainFormat }: {
   ];
 
   return (
-    <div ref={ref} className="chart-parts chart-donut" role="group" aria-label={label}>
+    <div ref={ref} className="chart-parts chart-donut" data-layout={stacked ? "stacked" : undefined} role="group" aria-label={label}>
       {empty && <NoData />}
       {width > 0 && (
         <svg width={SIZE} height={SIZE} aria-hidden="true">
@@ -101,7 +112,9 @@ export function Donut({ label, slices, center, format = plainFormat }: {
         </svg>
       )}
       {drawn && legend && (
-        <Legend items={slices.map((s, i) => ({ label: `${s.label} ${percent(share(i))}`, paint: s.paint }))} />
+        <div ref={legendRef} className="chart-donut-legend">
+          <Legend items={slices.map((s, i) => ({ label: `${s.label} ${percent(share(i))}`, paint: s.paint }))} />
+        </div>
       )}
       {hover && slices[hover.i] && (
         <ChartTooltip
