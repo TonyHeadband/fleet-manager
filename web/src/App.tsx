@@ -452,8 +452,9 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       );
     })();
 
-  // The open agent's first input action (Answer) gets the panel's reply box, unless a repo request takes its place.
-  const replyAction = open && schema ? visibleActions(schema, open).find((a) => a.input !== null) : undefined;
+  // The open agent's first input action (Answer) gets the panel's reply box, unless a repo request takes its place. A
+  // stopped agent has none: the chat's "Session ended" line closes the view.
+  const replyAction = open && schema && open.status !== "stopped" ? visibleActions(schema, open).find((a) => a.input !== null) : undefined;
   const reply =
     requestBox ||
     (open && replyAction && (
@@ -480,7 +481,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             });
           }
         }}
-        focus={takesFocus(open.id)}
+        // Only an agent that waits on the owner takes the cursor; one at work or in review is read first.
+        focus={takesFocus(open.id) && open.status === "needs_you"}
       />
     ));
 
@@ -954,6 +956,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
             <PreviewPane
               baseUrl={client.baseUrl}
               agentId={open.id}
+              client={client}
               factory={streams}
               loadDiff={() => client.diff(open.id)}
               extraTabs={openTask !== null ? [breakdownTab(open, openTask)] : []}

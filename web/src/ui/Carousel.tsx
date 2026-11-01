@@ -8,7 +8,7 @@ interface Props<Id extends string> {
   current: Id;
   /**
    * What stays off to the side: every pane visited, mounted (the detail panel's tabs, so the Diff loads once and the
-   * terminal keeps following), or, as it slides away, only a still copy of the pane just left (a view's tabs, whose
+   * chat keeps following), or, as it slides away, only a still copy of the pane just left (a view's tabs, whose
    * pages stop their work the moment they are left).
    */
   keep: "visited" | "sliding";

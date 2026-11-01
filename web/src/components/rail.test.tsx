@@ -70,7 +70,7 @@ describe("the board and the panel", () => {
       expect(detail).toHaveAttribute("data-layout", "side");
       await userEvent.click(within(detail).getByRole("tab", { name: "Diff" }));
       expect(detail).toHaveAttribute("data-layout", "full");
-      await userEvent.click(within(detail).getByRole("tab", { name: "Terminal" }));
+      await userEvent.click(within(detail).getByRole("tab", { name: "Chat" }));
       expect(detail).toHaveAttribute("data-layout", "side");
       await userEvent.click(within(detail).getByRole("button", { name: "Close" }));
       expect(column("Stopped")).not.toHaveAttribute("data-rail");

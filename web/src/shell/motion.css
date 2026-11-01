@@ -227,6 +227,10 @@
   .fold-bar {
     transition: transform var(--motion-marker) var(--ease-push);
   }
+  /* A chat section opens as a menu does, drawn down from its header. */
+  .chat-calls {
+    animation: fui-menu var(--motion-menu) var(--ease-push) both;
+  }
   /* The goal's tooltip opens as a dialog does, from its top: a line drawn out from the icon's side, then down. */
   .goal-tooltip {
     animation: fui-tip var(--motion-menu) var(--ease-push) both;

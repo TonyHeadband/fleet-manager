@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DiffReport } from "../api/generated/DiffReport";
+import { ChatPane, type ChatClient } from "../chat/ChatPane";
 import { DiffView } from "../diff/DiffView";
-import { browserEventSource, subscribePane, type EventSourceFactory } from "../api/events";
+import type { EventSourceFactory } from "../api/events";
 import { Button } from "../ui/Button";
 import { Carousel } from "../ui/Carousel";
 import { Tabs } from "../ui/Tabs";
@@ -17,6 +18,8 @@ export interface ExtraTab {
 interface Props {
   baseUrl: string;
   agentId: string;
+  /** Loads the chat's earlier history and answers the agent's prompts. */
+  client: ChatClient;
   /** Drawn only when the pane stands alone; inside the detail panel, the panel's top row carries it. */
   title?: string;
   factory?: EventSourceFactory;
@@ -31,24 +34,12 @@ interface Props {
   onClose?: () => void;
 }
 
-/** Lite's `MAX_LINE_CHARS`: a longer line is cut, so one runaway line cannot stall the pane. */
-const MAX_LINE_CHARS = 2000;
-
 export type Diff =
   { state: "none" } | { state: "loading" } | { state: "loaded"; report: DiffReport } | { state: "failed"; message: string };
 
-/** The daemon sends the whole screen, empty rows under short output included: kept, they would push the text out of
- * the bottom-stuck view. */
-export const screenText = (text: string) =>
-  text
-    .trimEnd()
-    .split("\n")
-    .map((line) => [...line].slice(0, MAX_LINE_CHARS).join(""))
-    .join("\n");
-
 /**
- * Lite's panel tabs: the terminal, read-only, stuck to its bottom; the diff, loaded once and kept until Refresh or
- * another agent. Read-only by design: use "Open in terminal" or `fleet-attach` for control.
+ * The detail panel's tabs: the agent's chat, where its prompts are answered; the diff, loaded once and kept until
+ * Refresh or another agent. The live TUI stays "Open in terminal" or `fleet-attach`.
  */
 export function PreviewPane(props: Props) {
   // Another agent starts afresh from its first frame: a reset after the render would paint one frame of the previous
@@ -56,27 +47,14 @@ export function PreviewPane(props: Props) {
   return <AgentPane key={props.agentId} {...props} />;
 }
 
-function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, loadDiff, extraTabs = [], tab, onTab, onShown, onClose }: Props) {
+function AgentPane({ baseUrl, agentId, client, title, factory, loadDiff, extraTabs = [], tab, onTab, onShown, onClose }: Props) {
   // A newly opened agent starts on the tab that waits on the owner if one does (Lite's `opened_fleet_panel`); a tab
   // turning `first` later does not pull the owner away.
-  const [ownTab, setOwnTab] = useState(() => extraTabs.find((t) => t.first)?.id ?? "terminal");
+  const [ownTab, setOwnTab] = useState(() => extraTabs.find((t) => t.first)?.id ?? "chat");
   const [diff, setDiff] = useState<Diff>({ state: "none" });
-  const [text, setText] = useState("");
-  const [closed, setClosed] = useState(false);
-  const pre = useRef<HTMLPreElement>(null);
   // Only the latest diff request's answer is shown: pressing Refresh again makes any answer still out a stale one.
   const asked = useRef(0);
   const current = tab ?? ownTab;
-
-  useEffect(() => {
-    setText("");
-    setClosed(false);
-    return subscribePane(baseUrl, agentId, setText, () => setClosed(true), factory);
-  }, [baseUrl, agentId, factory]);
-
-  useEffect(() => {
-    if (pre.current) pre.current.scrollTop = pre.current.scrollHeight;
-  }, [text, current]);
 
   const load = () => {
     if (!loadDiff) return;
@@ -94,23 +72,16 @@ function AgentPane({ baseUrl, agentId, title, factory = browserEventSource, load
     if (id === "diff" && diff.state === "none") load();
   };
 
-  const own = [{ id: "terminal", label: "Terminal" }, ...(loadDiff ? [{ id: "diff", label: "Diff" }] : [])];
+  const own = [{ id: "chat", label: "Chat" }, ...(loadDiff ? [{ id: "diff", label: "Diff" }] : [])];
   const tabs = [...extraTabs.filter((t) => t.first), ...own, ...extraTabs.filter((t) => !t.first)];
-  // The Breakdown tab of an orchestrator left for another panel falls back to the terminal.
-  const shownTab = tabs.some((t) => t.id === current) ? current : "terminal";
+  // The Breakdown tab of an orchestrator left for another panel falls back to the chat.
+  const shownTab = tabs.some((t) => t.id === current) ? current : "chat";
   useEffect(() => onShown?.(shownTab), [shownTab, onShown]);
   const pane = (id: string) => {
     const extra = extraTabs.find((t) => t.id === id);
     if (extra) return extra.node;
     if (id === "diff") return <DiffView diff={diff} />;
-    return (
-      <>
-        {closed && <p className="note ended">Session ended</p>}
-        <pre ref={pre} className="pane" aria-label="Terminal preview">
-          {screenText(text)}
-        </pre>
-      </>
-    );
+    return <ChatPane baseUrl={baseUrl} agentId={agentId} client={client} factory={factory} />;
   };
 
   return (

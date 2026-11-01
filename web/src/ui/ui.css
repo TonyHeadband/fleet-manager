@@ -229,6 +229,10 @@
   letter-spacing: var(--track-value);
   font-variant-numeric: tabular-nums;
 }
+/* The fold's plus (PlusMinus.tsx), in the accent: open, its upright turns flat onto its bar, a minus. */
+.plus-minus { flex: none; fill: var(--fill); }
+.plus-minus .fold-bar { transform-box: fill-box; transform-origin: center; }
+.plus-minus[data-open] .fold-bar { transform: rotate(90deg); }
 /* A carousel (Carousel.tsx): panes side by side on a track, each the carousel's full width and scrolling on its own;
    the carousel clips the neighbours and the track moves to the current pane (motion.css slides it). */
 .carousel {

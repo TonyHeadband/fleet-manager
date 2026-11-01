@@ -102,10 +102,6 @@
 .tally { gap: calc(var(--card-item-gap) + var(--fleet-tally-after)); }
 .tally-entry { display: inline-flex; align-items: center; gap: var(--fleet-tally-gap); font-size: var(--size-small); color: var(--text-low); }
 .fold { flex: none; display: inline-flex; align-items: center; height: var(--card-row-tally); padding: 0; border: none; background: transparent; color: var(--fill); }
-.fold svg { fill: currentColor; }
-/* Open, the plus's upright turns flat onto its bar: a minus. */
-.fold-bar { transform-box: fill-box; transform-origin: center; }
-.fold[aria-expanded="true"] .fold-bar { transform: rotate(90deg); }
 /* Lite's dashed_outline: 1px dashes of --fleet-dash with --fleet-dash-gap between, round a fleet card or row; the
    attention tone while it needs you, the accent while selected. */
 [data-outline] { --outline-ink: var(--dashed); }

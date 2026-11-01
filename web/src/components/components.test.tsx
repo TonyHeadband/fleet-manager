@@ -15,7 +15,8 @@ import { ReleaseFilter } from "./ReleaseFilter";
 import { FormsPage } from "./FormsPage";
 import { FleetClient } from "../api/client";
 import type { UiSchema } from "../api/generated/UiSchema";
-import { FakeEventSource, agent, agentIn, fileDiff, persona, schema, workspace } from "../test/fixtures";
+import { FakeEventSource, agent, agentIn, fakeClient, fileDiff, persona, schema, workspace } from "../test/fixtures";
+import { screenText } from "../ui/screenText";
 import { title } from "../api/schema";
 import { personaRows, personaTags } from "../board/filters";
 
@@ -24,6 +25,8 @@ const NOW = 1000 + 5 * 60;
 const o = (over: Partial<Agent> = {}) => agent({ id: "o", kind: "orchestrator", goal: "Fix login", status: "working", ...over });
 const f = (id: string, over: Partial<Agent> = {}) => agent({ id, kind: "specialist", task: "o", role: "rust", goal: `step ${id}`, status: "working", ...over });
 beforeEach(() => FakeEventSource.reset());
+/** The chat reads its history and answers asks through these; the panel tests only open it. */
+const chatClient = fakeClient();
 
 describe("Board", () => {
   it("Board_renders_columns_from_schema_only", () => {
@@ -642,8 +645,8 @@ describe("PreviewPane diff tab", () => {
 
   it("PreviewPane_diff_tab_shows_each_workspace_diff", async () => {
     const loadDiff = vi.fn().mockResolvedValue(report);
-    render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
-    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(await screen.findByText("hello")).toBeInTheDocument();
     expect(screen.getByText("core")).toBeInTheDocument();
@@ -655,7 +658,7 @@ describe("PreviewPane diff tab", () => {
 
   it("reloads on Refresh and shows a failure instead of an empty diff", async () => {
     const loadDiff = vi.fn().mockRejectedValueOnce(new Error("no such agent")).mockResolvedValue(report);
-    render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("no such agent");
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -664,14 +667,14 @@ describe("PreviewPane diff tab", () => {
   });
 
   it("stays read-only on both tabs", async () => {
-    const { container } = render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    const { container } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("hello");
     expect(container.querySelector("input, textarea, [contenteditable='true'], select")).toBeNull();
   });
 
   it("offers no Diff tab when the caller cannot load one", () => {
-    render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
     expect(screen.queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
   });
 });
@@ -683,44 +686,44 @@ describe("PreviewPane as a carousel", () => {
   const slots = () => [...track().querySelectorAll<HTMLElement>(":scope > .pane-slot")];
 
   it("tabs_slide_the_track", async () => {
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
     expect(track().style.getPropertyValue("--index")).toBe("0");
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(track().style.getPropertyValue("--index")).toBe("1");
-    // The Output pane stays mounted, out of reach while it is off to the side.
-    expect(screen.getByLabelText("Terminal preview")).toBeInTheDocument();
+    // The Chat pane stays mounted, out of reach while it is off to the side.
+    expect(screen.getByRole("log", { name: "Chat", hidden: true })).toBeInTheDocument();
     expect(slots()[0]).toHaveAttribute("inert");
     expect(slots()[0]).toHaveAttribute("aria-hidden", "true");
     expect(slots()[1]).not.toHaveAttribute("inert");
   });
 
-  it("output_still_follows_the_end", async () => {
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
-    const pre = screen.getByLabelText("Terminal preview");
-    Object.defineProperty(pre, "scrollHeight", { configurable: true, get: () => 500 });
+  it("the_chat_still_follows_the_end", async () => {
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn().mockResolvedValue(report)} />);
+    const log = screen.getByRole("log", { name: "Chat" });
+    Object.defineProperty(log, "scrollHeight", { configurable: true, get: () => 500 });
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    act(() => FakeEventSource.for("/terminal").emit("pane", "$ new line"));
-    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
-    expect(screen.getByLabelText("Terminal preview")).toBe(pre);
-    expect(pre.scrollTop).toBe(500);
+    act(() => FakeEventSource.for("/chat").emit("items", [{ seq: 0, at: 0, body: { type: "reply", text: "new line" } }]));
+    await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    expect(screen.getByRole("log", { name: "Chat" })).toBe(log);
+    expect(log.scrollTop).toBe(500);
   });
 
   it("diff_loads_on_first_visit_only", async () => {
     const loadDiff = vi.fn().mockResolvedValue(report);
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
     expect(loadDiff).not.toHaveBeenCalled();
     expect(slots()[1]).toBeEmptyDOMElement();
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("hello");
-    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(loadDiff).toHaveBeenCalledTimes(1);
   });
 
   it("the_breakdown_slot_exists_only_with_its_tab", () => {
-    const { rerender } = render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
+    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} />);
     expect(slots()).toHaveLength(1);
-    rerender(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ id: "breakdown", label: "Breakdown", first: false, node: <p>plan</p> }]} />);
+    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ id: "breakdown", label: "Breakdown", first: false, node: <p>plan</p> }]} />);
     expect(slots()).toHaveLength(3);
   });
 
@@ -743,9 +746,9 @@ describe("PreviewPane as Lite draws it", () => {
     const answers: Array<(r: { workspaces: { repo: string; diff: string; truncated: boolean }[] }) => void> = [];
     const loadDiff = vi.fn(() => new Promise<never>((resolve) => answers.push(resolve as never)));
     const report = (repo: string) => ({ workspaces: [{ repo, diff: fileDiff(`${repo}.txt`, `+${repo} change`), truncated: false }] });
-    const { rerender } = render(<PreviewPane baseUrl="" agentId="a" factory={factory} loadDiff={loadDiff} />);
+    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
-    rerender(<PreviewPane baseUrl="" agentId="b" factory={factory} loadDiff={loadDiff} />);
+    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="b" factory={factory} loadDiff={loadDiff} />);
     await act(async () => answers[0]!(report("from-a")));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(loadDiff, "b's own diff is asked for").toHaveBeenCalledTimes(2);
@@ -765,49 +768,46 @@ describe("PreviewPane as Lite draws it", () => {
       return <p>{`${id}'s plan`}</p>;
     };
     const tabs = (id: string) => [{ id: "breakdown", label: "Breakdown", first: false, node: <Probe id={id} /> }];
-    const { rerender } = render(<PreviewPane baseUrl="" agentId="a" factory={factory} extraTabs={tabs("a")} />);
+    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a" factory={factory} extraTabs={tabs("a")} />);
     await userEvent.click(screen.getByRole("tab", { name: "Breakdown" }));
-    rerender(<PreviewPane baseUrl="" agentId="b" factory={factory} extraTabs={tabs("b")} />);
-    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="b" factory={factory} extraTabs={tabs("b")} />);
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
     expect(drawn, "not even one frame of b on a's Breakdown tab").not.toContain("b");
   });
 
   it("preview_says_session_ended_when_closed", () => {
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
-    act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready"));
-    act(() => FakeEventSource.for("/terminal").emit("closed", ""));
-    const note = screen.getByText("Session ended");
-    expect(note.compareDocumentPosition(screen.getByLabelText("Terminal preview")) & Node.DOCUMENT_POSITION_FOLLOWING, "the note sits above the text").toBeTruthy();
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} />);
+    act(() => FakeEventSource.for("/chat").emit("page", { items: [{ seq: 0, at: 0, body: { type: "reply", text: "ready" } }], earlier: 0 }));
+    act(() => FakeEventSource.for("/chat").emit("ended", 0));
+    const log = screen.getByRole("log", { name: "Chat" });
+    expect(log.lastElementChild, "the line closes the chat").toHaveTextContent("Session ended · 00:00");
   });
 
+  // The passport's last screen still shows an agent's screen as text.
   it("a_pane_padded_with_blank_rows_still_shows_its_text", () => {
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
-    act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready\n> hello   \n\n\n   \n"));
-    expect(screen.getByLabelText("Terminal preview").textContent).toBe("$ ready\n> hello");
+    expect(screenText("$ ready\n> hello   \n\n\n   \n")).toBe("$ ready\n> hello");
   });
 
   it("long_terminal_lines_keep_one_row_each_instead_of_wrapping_over_their_neighbours", () => {
     expect(css).toMatch(/\.pane \{[^}]*white-space: pre;/);
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} />);
-    act(() => FakeEventSource.for("/terminal").emit("pane", "x".repeat(2500)));
-    expect(screen.getByLabelText("Terminal preview").textContent, "a line is cut at 2000 characters").toHaveLength(2000);
+    expect(screenText("x".repeat(2500)), "a line is cut at 2000 characters").toHaveLength(2000);
   });
 
   it("diff_lines_are_coloured_by_their_kind", async () => {
     const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("x", "-old", "+new", " same"), truncated: false }] });
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("new");
     const kinds = [...screen.getByLabelText("Changes").querySelectorAll(".diff-cell")].map((l) => l.getAttribute("data-kind"));
     expect(kinds).toEqual(["del", "add", "ctx", "ctx"]);
   });
 
-  it("switching_back_to_the_terminal_keeps_the_loaded_diff", async () => {
+  it("switching_back_to_the_chat_keeps_the_loaded_diff", async () => {
     const loadDiff = vi.fn().mockResolvedValue({ workspaces: [{ repo: "core", diff: fileDiff("x.txt", "+x"), truncated: false }] });
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={loadDiff} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={loadDiff} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     await screen.findByText("x");
-    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText("x")).toBeInTheDocument();
     expect(loadDiff).toHaveBeenCalledTimes(1);
@@ -815,7 +815,7 @@ describe("PreviewPane as Lite draws it", () => {
 
   it("the_diff_says_loading_until_it_lands", async () => {
     let land!: (r: { workspaces: [] }) => void;
-    render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={() => new Promise((r) => (land = r))} />);
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={() => new Promise((r) => (land = r))} />);
     await userEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     await act(async () => land({ workspaces: [] }));
@@ -825,31 +825,31 @@ describe("PreviewPane as Lite draws it", () => {
   it("another_tab_can_come_first_and_be_picked", async () => {
     const onTab = vi.fn();
     const extra = [{ id: "breakdown", label: "Breakdown", first: true, node: <p>the plan</p> }];
-    const { rerender } = render(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={extra} tab="breakdown" onTab={onTab} />);
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Terminal", "Diff"]);
+    const { rerender } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={extra} tab="breakdown" onTab={onTab} />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Chat", "Diff"]);
     expect(screen.getByText("the plan")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("tab", { name: "Terminal" }));
-    expect(onTab).toHaveBeenCalledWith("terminal");
-    rerender(<PreviewPane baseUrl="" agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ ...extra[0]!, first: false }]} tab="terminal" onTab={onTab} />);
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Terminal", "Diff", "Breakdown"]);
+    await userEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    expect(onTab).toHaveBeenCalledWith("chat");
+    rerender(<PreviewPane baseUrl="" client={chatClient} agentId="a1" factory={factory} loadDiff={vi.fn()} extraTabs={[{ ...extra[0]!, first: false }]} tab="chat" onTab={onTab} />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Chat", "Diff", "Breakdown"]);
   });
 });
 
 describe("PreviewPane", () => {
-  it("PreviewPane_renders_text_stream_read_only", () => {
+  it("PreviewPane_renders_the_chat_stream_read_only", () => {
     const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-    const { container } = render(<PreviewPane baseUrl="" agentId="a1" title="fix the tests" factory={factory} />);
-    act(() => FakeEventSource.for("/terminal").emit("pane", "$ ready\n> hello"));
-    const pane = screen.getByLabelText("Terminal preview");
-    expect(pane.textContent).toBe("$ ready\n> hello");
+    const { container } = render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="fix the tests" factory={factory} />);
+    expect(FakeEventSource.for("/chat").url).toBe("/api/agents/a1/chat");
+    act(() => FakeEventSource.for("/chat").emit("page", { items: [{ seq: 0, at: 0, body: { type: "reply", text: "hello" } }], earlier: 0 }));
+    expect(screen.getByRole("log", { name: "Chat" })).toHaveTextContent("hello");
     expect(container.querySelector("input, textarea, [contenteditable='true'], select")).toBeNull();
   });
 
   it("says so when the session has ended", () => {
     const factory = (u: string) => new FakeEventSource(u) as unknown as EventSource;
-    render(<PreviewPane baseUrl="" agentId="a1" title="t" factory={factory} />);
-    act(() => FakeEventSource.for("/terminal").emit("closed", ""));
-    expect(screen.getByText("Session ended")).toBeInTheDocument();
+    render(<PreviewPane baseUrl="" client={chatClient} agentId="a1" title="t" factory={factory} />);
+    act(() => FakeEventSource.for("/chat").emit("ended", 0));
+    expect(screen.getByText(/^Session ended/)).toBeInTheDocument();
   });
 });
 

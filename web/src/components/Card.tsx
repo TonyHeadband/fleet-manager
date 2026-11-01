@@ -5,8 +5,8 @@ import type { UiSchema } from "../api/generated/UiSchema";
 import { iconOf, repoSummary, shownFields, slotOf, stateBadge, stateLine, useConfirm, type Slot } from "../board/card";
 import { canRestart, columnOfGroup, leadDown, liveFleet, rollup, specialistIcon, stuck, taskId, type FleetDisplay, type Group } from "../board/groups";
 import type { Status } from "../api/generated/Status";
-import { fleet as fleetSize } from "../generated/layout";
 import { Mark } from "../ui/icons";
+import { PlusMinus } from "../ui/PlusMinus";
 import { EdgeMotion } from "./EdgeMotion";
 import { Avatar } from "../ui/Avatar";
 import { Badge } from "../ui/Badge";
@@ -82,8 +82,6 @@ function Tally({ schema, fleet }: { schema: UiSchema; fleet: Agent[] }) {
  * says what the fleet is doing.
  */
 function FoldToggle({ n, open, onFold }: { n: number; open: boolean; onFold: () => void }) {
-  const s = fleetSize.foldText;
-  const c = s / 2;
   return (
     <button
       type="button"
@@ -95,10 +93,7 @@ function FoldToggle({ n, open, onFold }: { n: number; open: boolean; onFold: () 
         onFold();
       }}
     >
-      <svg width={s} height={s} viewBox={`0 0 ${s} ${s}`} aria-hidden="true">
-        <rect x={1} y={c - 0.75} width={s - 2} height={1.5} />
-        <rect className="fold-bar" x={c - 0.75} y={1} width={1.5} height={s - 2} />
-      </svg>
+      <PlusMinus open={open} />
     </button>
   );
 }

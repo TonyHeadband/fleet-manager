@@ -145,7 +145,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Working" });
     act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [agent({ id: "a" })] }, "1"));
     await userEvent.click(screen.getByText("fix the tests"));
-    expect(FakeEventSource.for("/api/agents/a/terminal")).toBeTruthy();
+    expect(FakeEventSource.for("/api/agents/a/chat")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
   });
 
@@ -581,7 +581,7 @@ describe("App", () => {
       act(() => FakeEventSource.for("/api/events").emit("snapshot", { seq: 1, agents: [waiting, agent({ id: "x", goal: "other task" })] }, "1"));
       await userEvent.click(screen.getByText("Fix login"));
       const panel = screen.getByRole("complementary", { name: "Detail" });
-      expect(within(panel).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Terminal", "Diff"]);
+      expect(within(panel).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Breakdown", "Chat", "Diff"]);
       expect(within(panel).getByRole("tab", { name: "Breakdown" })).toHaveAttribute("aria-selected", "true");
       expect(await within(panel).findByText("v2 · proposed")).toBeInTheDocument();
       // A decision goes once, with the version on screen, and the controls wait for a fresh view.
