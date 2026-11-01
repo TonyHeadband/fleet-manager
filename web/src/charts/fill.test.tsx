@@ -122,6 +122,9 @@ describe("column labels", () => {
     const rule = readFileSync("src/charts/charts.css", "utf8").match(/\.chart-col-label \{[^}]*\}/)![0];
     expect(rule).toMatch(/-webkit-line-clamp:\s*2/);
     expect(rule).not.toMatch(/nowrap/);
+    // Breaks fall between words only; a word too long for its column ends in an ellipsis.
+    expect(rule).not.toMatch(/overflow-wrap:\s*anywhere|word-break:\s*break-all/);
+    expect(rule).toMatch(/text-overflow:\s*ellipsis/);
     fireEvent.mouseEnter(container.querySelector(".chart-col-hit")!);
     expect(container.querySelector(".chart-tooltip")!.textContent).toContain(long);
     expect(Array.from(container.querySelectorAll(".chart-hidden th")).map((t) => t.textContent)).toContain(long);

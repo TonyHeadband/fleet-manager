@@ -37,7 +37,7 @@
 .chart-col-hit { fill: transparent; pointer-events: all; }
 .chart-col-labels { display: grid; margin-top: var(--space-summary-gap); font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text); }
 /* Two lines at most, ellipsis on the second: five bars in a 2×2 cell leave a label about six characters a line. */
-.chart-col-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; text-align: center; padding: 0 var(--space-chip-gap); }
+.chart-col-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; text-overflow: ellipsis; text-align: center; padding: 0 var(--space-chip-gap); }
 
 .chart-rank { display: flex; flex-direction: column; gap: var(--space-header-gap); font-family: var(--font-mono); font-size: var(--size-meta); }
 .chart-rank-row { display: grid; grid-template-columns: var(--layout-chart-label-w) minmax(0, 1fr) var(--layout-chart-value-w); gap: var(--space-button-gap); align-items: center; }
