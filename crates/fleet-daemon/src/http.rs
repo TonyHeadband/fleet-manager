@@ -1348,10 +1348,15 @@ async fn move_persona_definition(
     Path((persona, kind, name)): Path<(String, DefKind, String)>,
     Json(req): Json<MoveDefinition>,
 ) -> Result<Json<DefInfo>, ApiError> {
-    let info = with_persona_defs(&st, &persona, kind, move |d| {
-        d.move_role(kind, req.to, &name)
+    let moved = with_persona_defs(&st, &persona, kind, move |d| {
+        Ok(d.move_role(kind, req.to, &name))
     })
     .await?;
+    // A built-in source exists, so the global 404 for `Builtin` would mislead: it is a refused request.
+    let info = match moved {
+        Err(FleetError::Builtin(msg)) => return Err(ApiError::new(StatusCode::BAD_REQUEST, msg)),
+        other => other?,
+    };
     Ok(Json(nicknamed(&st, &persona, info).await?))
 }
 

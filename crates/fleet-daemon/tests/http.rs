@@ -1794,7 +1794,21 @@ async fn move_route_refuses_a_taken_name() {
         Some(&json!({"to": "orchestrator"})),
     )
     .await;
-    assert_eq!(s, 404);
+    assert_eq!(s, 400);
+
+    // An overridden built-in is still a built-in: it keeps its role.
+    let over = "---\nname: rust\nsummary: Mine\n---\nbody\n";
+    text_of(&srv, "PUT", &defs_path("/specialist/rust"), over).await;
+    let (s, v) = json_of(
+        srv.addr,
+        "POST",
+        &defs_path("/specialist/rust/move"),
+        Some(&json!({"to": "orchestrator"})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    assert!(folder.join("specialists/rust.md").is_file());
+    assert!(!folder.join("orchestrators/rust.md").exists());
 }
 
 #[tokio::test]
