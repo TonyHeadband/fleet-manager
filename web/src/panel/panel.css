@@ -1,10 +1,13 @@
 /* The detail panel's parts (Lite's preview.rs), sized only by the generated tokens. */
-.details, .repos-row { flex: none; padding: 0 var(--panel-margin) var(--panel-band-gap); min-width: 0; }
+.details { flex: none; padding: 0 var(--panel-margin) var(--panel-band-gap); min-width: 0; }
 .details { display: grid; gap: var(--panel-gap-s); }
-.details-status, .repos-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-button-gap); }
+/* One row across the panel's width: the status and its badges, the time closing it at the right end. */
+.details-status { display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; overflow: hidden; white-space: nowrap; }
+.details-status .badge { flex: none; }
+.details-time { margin-left: auto; flex: none; }
 .details-column { display: inline-flex; align-items: center; gap: var(--space-button-gap); color: var(--text-high); }
 .details-field { display: flex; align-items: baseline; gap: var(--space-item); min-width: 0; }
-.details-field .mono-label, .repos-row .mono-label { color: var(--text-low); }
+.details-field .mono-label { color: var(--text-low); }
 .details-meta { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); }
 /* The tabs and their body (preview.rs): a row of tabs on the surface, then the body on the page colour. */
 .preview { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -29,7 +32,7 @@
 .line[data-line="hunk"] { color: var(--tone-active); }
 .diff [role="alert"] { color: var(--danger); }
 /* A fleet agent's link to its task's lead, under the title (preview.rs's `↳` band). */
-.task-link { flex: none; align-self: flex-start; margin: 0 var(--panel-margin) var(--panel-band-gap); padding: 0; border: none; background: none; font-size: var(--size-small); color: var(--accent-text); text-decoration: underline; cursor: pointer; }
+.task-link { flex: none; align-self: flex-start; max-width: calc(100% - 2 * var(--panel-margin)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 var(--panel-margin) var(--panel-band-gap); padding: 0; border: none; background: none; font-size: var(--size-small); color: var(--accent-text); text-decoration: underline; cursor: pointer; }
 /* The Breakdown tab (breakdown.rs): the steps table, History, the decision, then the test gate. */
 .breakdown { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--panel-gap-s); min-width: 0; }
 .version-line { margin: 0; font-size: var(--size-small); font-weight: 500; color: var(--text-high); }

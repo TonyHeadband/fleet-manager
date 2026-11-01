@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { layout, motion } from "../generated/layout";
 import { END_SLACK, motionOn } from "./entry";
 import { layoutOf, type Panel } from "./panel";
 import type { Agent } from "../api/generated/Agent";
 import { title } from "../api/schema";
 import { panelPath, terminalBlocked } from "../panel/header";
+import { workspaceTip } from "../panel/workspaceTip";
+import { Avatar } from "../ui/Avatar";
+import { Glyph } from "../ui/icons";
 import { SmallIconButton } from "../ui/SmallIconButton";
 
 const typing = (t: EventTarget | null) =>
@@ -156,7 +159,7 @@ export function DetailPanel({
       }
     >
       <div className="detail-top">
-        <span className="detail-path" title={path}>
+        <span className="detail-path" title={agent.workspaces.length > 0 ? agent.workspaces.map((w) => `${w.repo}: ${workspaceTip(w)}`).join("\n") : path}>
           {path}
         </span>
         <SmallIconButton
@@ -182,12 +185,39 @@ export function DetailPanel({
         <SmallIconButton icon="close" label="Close" large onClick={onClose} />
       </div>
       <div className="detail-title">
+        {/* The card shows the persona; the panel shows which specialist this is. */}
+        {agent.kind === "specialist" && agent.role && <Avatar kind="specialist" seed={agent.role} title={agent.role} />}
         <h2>{title(agent)}</h2>
-        {agent.goal !== title(agent) && <p className="detail-goal">{agent.goal}</p>}
+        {agent.goal !== title(agent) && <GoalTip goal={agent.goal} />}
       </div>
       {bands}
       <div className="detail-body">{children}</div>
       {reply}
     </aside>
+  );
+}
+
+/** The full goal, which can run long, behind an icon by the title: shown while pointed at or focused, gone on leaving. */
+function GoalTip({ goal }: { goal: string }) {
+  const [shown, setShown] = useState(false);
+  const id = useId();
+  return (
+    <span className="goal-tip" onMouseEnter={() => setShown(true)} onMouseLeave={() => setShown(false)}>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Goal"
+        aria-describedby={shown ? id : undefined}
+        onFocus={() => setShown(true)}
+        onBlur={() => setShown(false)}
+      >
+        <Glyph name="info" />
+      </button>
+      {shown && (
+        <span id={id} role="tooltip" className="goal-tooltip">
+          {goal}
+        </span>
+      )}
+    </span>
   );
 }

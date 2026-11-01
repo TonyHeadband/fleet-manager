@@ -498,25 +498,43 @@ describe("App", () => {
 
     it("opening_a_card_fills_the_panel_path", async () => {
       const panel = await openOn([agent({ id: "a" })], "fix the tests");
-      expect(within(panel).getByText("core / fleet/fix-the-tests")).toBeInTheDocument();
+      // Its hover holds what the repos row said: each workspace's branch, base and where it was made.
+      expect(within(panel).getByText("core / fleet/fix-the-tests")).toHaveAttribute("title", expect.stringContaining("fleet/fix-the-tests"));
+    });
+
+    it("a_specialists_panel_shows_its_traces_by_the_title", async () => {
+      const panel = await openOn([agent({ id: "a", kind: "specialist", role: "rust", goal: "write code" })], "write code");
+      const pic = panel.querySelector(".detail-title .avatar");
+      expect(pic).toHaveAttribute("data-kind", "specialist");
+      expect(pic).toHaveAttribute("data-seed", "rust");
     });
 
     it("the_panel_title_is_the_agents_title_and_the_goal_follows", async () => {
       const goal = "Fix the flaky tests in the payments service. Then look at the retry logic too.";
       const panel = await openOn([agent({ id: "a", goal, title: "Flaky payments tests" })], "Flaky payments tests");
       expect(within(panel).getByRole("heading", { name: "Flaky payments tests" })).toBeInTheDocument();
-      expect(within(panel).getByText(goal)).toHaveClass("detail-goal");
+      // A long goal waits behind an icon: pointing at it shows it, leaving hides it.
+      expect(within(panel).queryByText(goal)).toBeNull();
+      const icon = within(panel).getByRole("button", { name: "Goal" });
+      await userEvent.hover(icon);
+      expect(screen.getByRole("tooltip")).toHaveTextContent(goal);
+      await userEvent.unhover(icon);
+      expect(screen.queryByRole("tooltip")).toBeNull();
     });
 
     it("a_goal_that_is_its_own_title_shows_once", async () => {
       const panel = await openOn([agent({ id: "a", goal: "fix the tests" })], "fix the tests");
       expect(within(panel).getAllByText("fix the tests")).toHaveLength(1);
+      expect(within(panel).queryByRole("button", { name: "Goal" })).toBeNull();
     });
 
     it("the_details_sit_between_the_title_and_the_tabs", async () => {
       const panel = await openOn([agent({ id: "a" })], "fix the tests");
-      const order = [...panel.querySelectorAll(".detail-title, .details, .repos-row, [role='tablist']")].map((e) => e.className || e.getAttribute("role"));
-      expect(order).toEqual(["detail-title", "details", "repos-row", "tabs"]);
+      const order = [...panel.querySelectorAll(".detail-title, .details, [role='tablist']")].map((e) => e.className || e.getAttribute("role"));
+      expect(order).toEqual(["detail-title", "details", "tabs"]);
+      // No repos row and no persona line: the path above and the card say them.
+      expect(panel.querySelector(".repos-row")).toBeNull();
+      expect(within(panel).queryByText(/^Persona:/)).toBeNull();
     });
 
     it("a_status_event_updates_the_open_panel", async () => {
