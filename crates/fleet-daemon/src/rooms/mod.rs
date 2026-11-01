@@ -142,7 +142,7 @@ async fn title_with(store: &Store, r: &RoomRow, agents: &[Agent]) -> Result<Stri
 
 /// Whether the task is over: archived, done, or every one of its PRs merged or closed. A task at Review with an
 /// open PR, or with none yet, is not.
-fn ended(t: &Task) -> bool {
+pub(crate) fn ended(t: &Task) -> bool {
     t.state == TaskState::Archived
         || t.done_at.is_some()
         || t.done_by_hand

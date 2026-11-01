@@ -8,7 +8,10 @@ use super::deliver::{deliver, notify};
 use crate::agents::{one_line, AgentService, ServiceError};
 use crate::fleet::ops::detached;
 use crate::store::RoomRow;
-use fleet_api::{task_id, Agent, AgentId, AgentKind, MemberRef, Post, PostKind, RoomKind};
+use fleet_api::{
+    task_id, Agent, AgentId, AgentKind, BreakdownVersion, DecideBreakdown, MemberRef, Post,
+    PostKind, RoomKind,
+};
 use std::sync::Arc;
 
 /// What a held `room_ask` came back with.
@@ -21,6 +24,17 @@ pub enum AskOutcome {
 
 pub const NO_ANSWER_YET: &str = "no answer yet; call room_read later";
 pub const SUPERVISOR_ASKS: &str = "the supervisor sends messages, not asks";
+pub const SUPERVISOR_DECIDES: &str = "breakdown approval waits for the owner until autopilot";
+pub const OWNER_DECIDES: &str = "breakdown approval waits for the owner";
+
+/// `breakdown vN: <n> steps — <first step title>, …`
+fn breakdown_line(v: &BreakdownVersion) -> String {
+    let n = v.steps.len();
+    let first = v.steps.first().map_or("", |s| s.title.as_str());
+    let more = if n > 1 { ", …" } else { "" };
+    let steps = if n == 1 { "step" } else { "steps" };
+    format!("breakdown v{}: {n} {steps} — {first}{more}", v.version)
+}
 
 /// One post as `room_read` shows it: `<id> <sender> → <to>: [<kind>] <text>`. Senders and recipients read as the
 /// values `to` takes, so a reply can be addressed from the line.
@@ -163,15 +177,21 @@ impl AgentService {
         })
     }
 
-    /// Names, stores, broadcasts and logs the post, and wakes whoever it is for; returns it with its id. A wake that
-    /// fails does not undo the post: it is in the room for `room_read`.
-    async fn publish(self: &Arc<Self>, room: &RoomRow, mut p: Post) -> Result<Post, ServiceError> {
+    /// Names, stores, broadcasts and logs the post; returns it with its id.
+    async fn store_post(&self, room: &RoomRow, mut p: Post) -> Result<Post, ServiceError> {
         p.sender_name = self.name_of(room, &p.sender).await?;
         let ev = self.store.add_post(&p).await?;
         if let fleet_api::EventKind::RoomPost { post } = ev.kind {
             p = post;
         }
         log_post(&p);
+        Ok(p)
+    }
+
+    /// `store_post`, then wakes whoever the post is for. A wake that fails does not undo the post: it is in the room
+    /// for `room_read`.
+    async fn publish(self: &Arc<Self>, room: &RoomRow, p: Post) -> Result<Post, ServiceError> {
+        let p = self.store_post(room, p).await?;
         if let Err(e) = deliver(self, &p).await {
             tracing::warn!(post = p.id, error = %one_line(&e.to_string()), "cannot wake the post's recipients");
         }
@@ -319,6 +339,9 @@ impl AgentService {
             .room(&q.room)
             .await?
             .ok_or_else(|| refuse(format!("no room {}", q.room)))?;
+        if let Some(v) = q.breakdown_version {
+            return self.decide_breakdown_ask(by, &q, v, text).await;
+        }
         if by != &MemberRef::Owner {
             if by == &q.sender {
                 return Err(refuse("you cannot answer your own ask"));
@@ -349,6 +372,130 @@ impl AgentService {
             self.notice_answer(&q, &answer).await;
         }
         Ok(true)
+    }
+
+    /// An answer to a breakdown's ask is the owner's decision on that version: `approve` approves it, any other
+    /// text asks for changes with the text as the comment. `decide_breakdown` marks the ask answered. False when the
+    /// version was decided already.
+    async fn decide_breakdown_ask(
+        &self,
+        by: &MemberRef,
+        q: &Post,
+        version: u32,
+        text: &str,
+    ) -> Result<bool, ServiceError> {
+        match by {
+            MemberRef::Owner => {}
+            MemberRef::Agent(a)
+                if self
+                    .find(a)
+                    .await
+                    .is_ok_and(|x| x.kind == AgentKind::Supervisor) =>
+            {
+                return Err(refuse(SUPERVISOR_DECIDES))
+            }
+            _ => return Err(refuse(OWNER_DECIDES)),
+        }
+        let MemberRef::Agent(task) = &q.sender else {
+            return Err(refuse(format!("no ask {}", q.id)));
+        };
+        if text.trim().is_empty() {
+            return Err(ServiceError::EmptyText);
+        }
+        let latest = self
+            .store
+            .task(task)
+            .await?
+            .and_then(|p| p.breakdowns.last().map(|v| v.version));
+        if let Some(latest) = latest.filter(|l| *l != version) {
+            return Err(refuse(format!(
+                "breakdown v{version} is stale: v{latest} is the latest"
+            )));
+        }
+        let approve = text.trim().eq_ignore_ascii_case("approve");
+        let d = DecideBreakdown {
+            approve,
+            comment: (!approve).then(|| text.to_string()),
+            version: Some(version),
+        };
+        match self.decide_breakdown_as(task, d, Some(text)).await {
+            Ok(()) => Ok(true),
+            Err(ServiceError::NoPendingBreakdown) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Puts a proposed breakdown version to the task's room as an ask: its operation room, addressed to the
+    /// supervisor, else its product room, to the owner. Only the owner answers it. An older version's ask still open
+    /// is closed as superseded.
+    pub(crate) async fn post_breakdown_ask(
+        &self,
+        task: &AgentId,
+        v: &BreakdownVersion,
+    ) -> Result<(), ServiceError> {
+        let me = MemberRef::Agent(task.clone());
+        for q in self.store.open_breakdown_asks(me.key()).await? {
+            let superseded = format!("superseded by v{}", v.version);
+            self.close_breakdown_ask(&q, &MemberRef::Daemon, &superseded)
+                .await?;
+        }
+        let mine = self.store.rooms_of(me.key()).await?;
+        let Some(id) = mine
+            .iter()
+            .find(|r| r.starts_with("operation:"))
+            .or(mine.first())
+        else {
+            return Ok(());
+        };
+        let Some(room) = self.store.room(id).await? else {
+            return Ok(());
+        };
+        let mut p = self.new_post(&room, me, PostKind::Ask, &breakdown_line(v))?;
+        p.to = Some(
+            room.conversation
+                .clone()
+                .map_or(MemberRef::Owner, MemberRef::Agent),
+        );
+        p.breakdown_version = Some(v.version);
+        self.store_post(&room, p).await?;
+        Ok(())
+    }
+
+    /// Marks the task's open ask for `version` answered by `by` with `text`, once a decision was made elsewhere.
+    pub(crate) async fn close_breakdown_asks_for(
+        &self,
+        task: &AgentId,
+        version: u32,
+        by: &MemberRef,
+        text: &str,
+    ) -> Result<(), ServiceError> {
+        for q in self.store.open_breakdown_asks(&task.0).await? {
+            if q.breakdown_version == Some(version) {
+                self.close_breakdown_ask(&q, by, text).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Stores the answer to a breakdown ask. Nobody is told: the decision reaches the orchestrator as
+    /// `propose_breakdown`'s answer or a fleet event.
+    async fn close_breakdown_ask(
+        &self,
+        q: &Post,
+        by: &MemberRef,
+        text: &str,
+    ) -> Result<(), ServiceError> {
+        let Some(room) = self.store.room(&q.room).await? else {
+            return Ok(());
+        };
+        let mut answer = self.new_post(&room, by.clone(), PostKind::Answer, text)?;
+        answer.to = Some(q.sender.clone());
+        answer.reply_to = Some(q.id);
+        answer.sender_name = self.name_of(&room, by).await?;
+        if self.store.answer_ask(q.id, &answer).await? {
+            log_post(&answer);
+        }
+        Ok(())
     }
 
     /// Tells the asker the answer as a fleet notice: typed now if it is at its input box, else when it next is, and

@@ -1778,13 +1778,27 @@ impl Store {
         row.as_ref().map(post_row).transpose()
     }
 
-    /// The open asks made at or before `before` that were never reposted, oldest first.
+    /// The open asks made at or before `before` that were never reposted, oldest first. Breakdown asks and asks in
+    /// archived rooms are left out.
     pub async fn stale_asks(&self, before: i64) -> Result<Vec<Post>> {
         let rows = sqlx::query(
-            "SELECT * FROM posts WHERE kind = 'ask' AND answered_at IS NULL AND reposted_at IS NULL AND at <= ? \
-             ORDER BY id",
+            "SELECT p.* FROM posts p JOIN rooms r ON r.id = p.room \
+             WHERE p.kind = 'ask' AND p.answered_at IS NULL AND p.reposted_at IS NULL AND p.at <= ? \
+             AND p.breakdown_version IS NULL AND r.archived_at IS NULL ORDER BY p.id",
         )
         .bind(before)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(post_row).collect()
+    }
+
+    /// The breakdown asks `sender` has open, oldest first.
+    pub async fn open_breakdown_asks(&self, sender: &str) -> Result<Vec<Post>> {
+        let rows = sqlx::query(
+            "SELECT * FROM posts WHERE kind = 'ask' AND answered_at IS NULL AND breakdown_version IS NOT NULL \
+             AND sender = ? ORDER BY id",
+        )
+        .bind(sender)
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(post_row).collect()

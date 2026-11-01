@@ -2,10 +2,12 @@ mod common;
 
 use common::*;
 use fleet_api::{
-    AgentId, AgentKind, EventKind, MemberRef, Post, PostKind, PrState, Room, RoomKind, Status,
-    TaskEvent, TaskEventKind, TaskPr, TaskState,
+    AgentId, AgentKind, Approval, DecideBreakdown, EventKind, MemberRef, Post, PostKind, PrState,
+    Room, RoomKind, Status, StepDraft, TaskEvent, TaskEventKind, TaskPr, TaskState,
 };
 use fleet_daemon::agents::AgentService;
+use fleet_daemon::agents::ServiceError;
+use fleet_daemon::fleet::breakdown::BreakdownAnswer;
 use fleet_daemon::rooms::posts::NO_ANSWER_YET;
 use fleet_daemon::session::SessionHost;
 use fleet_daemon::supervisor::Supervisor;
@@ -289,6 +291,11 @@ async fn the_watcher_follows_a_task_to_its_end() {
 
 /// A running `direct` orchestrator on `core`, started by `origin`, in its rooms and at its input box.
 async fn direct(fx: &Fx, origin: &AgentId) -> AgentId {
+    direct_from(fx, Some(origin)).await
+}
+
+/// `direct`, or with no origin a hand-made task, in its product's room only.
+async fn direct_from(fx: &Fx, origin: Option<&AgentId>) -> AgentId {
     if !fx.repo.join(".fleet").exists() {
         add_origin_with_workflow(fx, &one_step("true"));
     }
@@ -310,7 +317,7 @@ async fn direct(fx: &Fx, origin: &AgentId) -> AgentId {
         .await
         .unwrap();
     assert!(pane_contains(fx, &a.id, "ready").await);
-    let origin = Some(origin.clone());
+    let origin = origin.cloned();
     fx.store
         .update_task(&a.id, |t| t.origin = origin)
         .await
@@ -1329,4 +1336,381 @@ async fn a_mark_left_by_missed_events_does_not_hold_notices_back() {
         sup.0
     );
     assert!(pane_contains(&fx, &a, &second).await);
+}
+
+// The breakdown as an ask.
+
+fn draft(title: &str, depends_on: &[u32]) -> StepDraft {
+    StepDraft {
+        n: None,
+        title: title.into(),
+        specialist: "rust".into(),
+        brief: format!("build {title}"),
+        depends_on: depends_on.to_vec(),
+        release_note: false,
+        mode: None,
+        effort: None,
+    }
+}
+
+fn two_drafts() -> Vec<StepDraft> {
+    // Independent, so a later version can restate them as new steps.
+    vec![draft("api", &[]), draft("ui", &[])]
+}
+
+/// Starts a held `propose_breakdown` and waits until its ask is in `room`; returns the call and the ask.
+async fn propose(
+    fx: &Fx,
+    a: &AgentId,
+    room: &str,
+) -> (
+    tokio::task::JoinHandle<Result<BreakdownAnswer, ServiceError>>,
+    Post,
+) {
+    let before = asks(fx, room).await.len();
+    let (svc, held) = (fx.svc.clone(), a.clone());
+    let handle = tokio::spawn(async move { svc.propose_breakdown(&held, two_drafts()).await });
+    if !wait_until(|| async { asks(fx, room).await.len() > before }).await {
+        let refused = tokio::time::timeout(Duration::from_secs(1), handle).await;
+        panic!("no ask for the proposal: {refused:?}");
+    }
+    (handle, asks(fx, room).await.pop().unwrap())
+}
+
+async fn answer_to(fx: &Fx, ask: i64, room: &str) -> Post {
+    fx.store
+        .posts_after(room, "nobody", 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.reply_to == Some(ask))
+        .unwrap_or_else(|| panic!("ask {ask} has no answer"))
+}
+
+fn decision(approve: bool, comment: Option<&str>) -> DecideBreakdown {
+    DecideBreakdown {
+        approve,
+        comment: comment.map(String::from),
+        version: None,
+    }
+}
+
+async fn held_answer(
+    handle: tokio::task::JoinHandle<Result<BreakdownAnswer, ServiceError>>,
+) -> BreakdownAnswer {
+    tokio::time::timeout(Duration::from_secs(10), handle)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn proposing_a_breakdown_posts_an_ask_to_the_supervisor() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    let sup = conversation(&fx).await;
+    reach(&fx, &sup, Status::Review).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (_held, ask) = propose(&fx, &a, &room).await;
+    assert_eq!(ask.sender, MemberRef::Agent(a.clone()));
+    assert_eq!(ask.to, Some(MemberRef::Agent(sup.clone())));
+    assert_eq!(ask.breakdown_version, Some(1));
+    assert_eq!(ask.text, "breakdown v1: 2 steps — api, …");
+    assert_eq!(ask.answered_at, None);
+    // The owner hears of it from the card's Needs you; nothing wakes or types into the supervisor.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !screen(&fx.sessions, &sup).contains(NOTICE),
+        "{}",
+        screen(&fx.sessions, &sup)
+    );
+    assert!(events_of(&fx, &sup, TaskEventKind::RoomAsk)
+        .await
+        .is_empty());
+    assert_eq!(
+        fx.store
+            .task(&a)
+            .await
+            .unwrap()
+            .unwrap()
+            .inbox
+            .iter()
+            .filter(|e| e.kind == fleet_api::FleetEventKind::RoomPost)
+            .count(),
+        0
+    );
+
+    // A hand-made task has no operation room: its ask goes to the owner in the product's room.
+    let b = direct_from(&fx, None).await;
+    let product = format!("product:{PRODUCT}");
+    let (_held, ask) = propose(&fx, &b, &product).await;
+    assert_eq!(ask.sender, MemberRef::Agent(b));
+    assert_eq!(ask.to, Some(MemberRef::Owner));
+    assert_eq!(ask.breakdown_version, Some(1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn approving_in_the_panel_answers_the_ask() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, ask) = propose(&fx, &a, &room).await;
+
+    fx.svc
+        .decide_breakdown(&a, decision(true, None))
+        .await
+        .unwrap();
+    assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
+    let q = fx.store.post(ask.id).await.unwrap().unwrap();
+    assert!(q.answered_at.is_some());
+    let answer = answer_to(&fx, ask.id, &room).await;
+    assert_eq!(answer.sender, MemberRef::Owner);
+    assert_eq!(answer.text, "approved in the panel");
+
+    // Decided once: the room and the panel both find it decided.
+    assert!(!fx
+        .svc
+        .room_answer(&MemberRef::Owner, ask.id, "approve")
+        .await
+        .unwrap());
+    let err = fx
+        .svc
+        .decide_breakdown(&a, decision(true, None))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NoPendingBreakdown), "{err:?}");
+    let answers = fx
+        .store
+        .posts_after(&room, "nobody", 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|p| p.reply_to == Some(ask.id))
+        .count();
+    assert_eq!(answers, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn approving_the_ask_approves_the_breakdown() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+
+    // Any other text asks for changes, with the text as the comment.
+    let (held, ask) = propose(&fx, &a, &room).await;
+    assert!(fx
+        .svc
+        .room_answer(&MemberRef::Owner, ask.id, "split the api step")
+        .await
+        .unwrap());
+    assert_eq!(
+        held_answer(held).await,
+        BreakdownAnswer::ChangesRequested("split the api step".into())
+    );
+    let p = fx.store.task(&a).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[0].approval, Approval::ChangesRequested);
+    assert_eq!(
+        p.breakdowns[0].comment.as_deref(),
+        Some("split the api step")
+    );
+
+    let (held, ask) = propose(&fx, &a, &room).await;
+    assert_eq!(ask.breakdown_version, Some(2));
+    assert!(fx
+        .svc
+        .room_answer(&MemberRef::Owner, ask.id, "approve")
+        .await
+        .unwrap());
+    assert_eq!(held_answer(held).await, BreakdownAnswer::Approved);
+    let p = fx.store.task(&a).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[1].approval, Approval::Approved);
+    assert!(fx
+        .store
+        .post(ask.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .answered_at
+        .is_some());
+    assert_eq!(answer_to(&fx, ask.id, &room).await.text, "approve");
+    // Neither path leaves the other pending.
+    let err = fx
+        .svc
+        .decide_breakdown(&a, decision(true, None))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NoPendingBreakdown), "{err:?}");
+    assert!(!fx
+        .svc
+        .room_answer(&MemberRef::Owner, ask.id, "approve")
+        .await
+        .unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_supervisor_cannot_approve_a_breakdown() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let other = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, ask) = propose(&fx, &a, &room).await;
+
+    let reply = tool(
+        &fx.svc,
+        &sup,
+        "room_answer",
+        json!({ "ask": ask.id, "text": "approve" }),
+    )
+    .await;
+    assert_eq!(
+        reply,
+        (
+            "breakdown approval waits for the owner until autopilot".into(),
+            true
+        )
+    );
+    // Nor may another orchestrator in the room.
+    let reply = tool(
+        &fx.svc,
+        &other,
+        "room_answer",
+        json!({ "ask": ask.id, "text": "approve" }),
+    )
+    .await;
+    assert_eq!(
+        reply,
+        ("breakdown approval waits for the owner".into(), true)
+    );
+    let p = fx.store.task(&a).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[0].approval, Approval::Proposed);
+    assert_eq!(
+        fx.store.post(ask.id).await.unwrap().unwrap().answered_at,
+        None
+    );
+    assert!(!held.is_finished());
+    held.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stale_breakdown_version_ask_is_refused() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, v1) = propose(&fx, &a, &room).await;
+    fx.svc
+        .decide_breakdown(&a, decision(false, Some("fewer steps")))
+        .await
+        .unwrap();
+    held_answer(held).await;
+    assert_eq!(answer_to(&fx, v1.id, &room).await.text, "fewer steps");
+
+    let (held, v2) = propose(&fx, &a, &room).await;
+    let err = fx
+        .svc
+        .room_answer(&MemberRef::Owner, v1.id, "approve")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "breakdown v1 is stale: v2 is the latest");
+    let p = fx.store.task(&a).await.unwrap().unwrap();
+    assert_eq!(p.breakdowns[1].approval, Approval::Proposed);
+    assert_eq!(
+        fx.store.post(v2.id).await.unwrap().unwrap().answered_at,
+        None
+    );
+    held.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_version_supersedes_an_ask_left_open() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, v1) = propose(&fx, &a, &room).await;
+    held.abort();
+    // A decision that did not reach the room, as one made before rooms existed.
+    fx.store
+        .update_task(&a, |p| {
+            p.breakdowns[0].approval = Approval::ChangesRequested;
+        })
+        .await
+        .unwrap();
+
+    let (held, _v2) = propose(&fx, &a, &room).await;
+    let answer = answer_to(&fx, v1.id, &room).await;
+    assert_eq!(answer.text, "superseded by v2");
+    assert_eq!(answer.sender, MemberRef::Daemon);
+    let err = fx
+        .svc
+        .room_answer(&MemberRef::Owner, v1.id, "approve")
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "breakdown v1 is stale: v2 is the latest");
+    held.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_breakdown_ask_is_not_reposted() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let room = op_room(&sup);
+    let (held, ask) = propose(&fx, &a, &room).await;
+
+    fx.clock.advance(31 * 60);
+    rooms::repost_stale_asks(&fx.svc).await.unwrap();
+    assert!(events_of(&fx, &sup, TaskEventKind::RoomMessage)
+        .await
+        .is_empty());
+    assert_eq!(
+        fx.store.post(ask.id).await.unwrap().unwrap().answered_at,
+        None
+    );
+    held.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn asks_of_ended_tasks_or_archived_rooms_are_not_reposted() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let svc = with_hold(&fx, Duration::from_millis(200));
+    // An ask in the product room from a task that then ends.
+    let product = format!("product:{PRODUCT}");
+    let reply = tool(
+        &svc,
+        &a,
+        "room_ask",
+        json!({ "to": "owner", "text": "which port?", "room": product }),
+    )
+    .await;
+    assert_eq!(reply.0, NO_ANSWER_YET);
+    // An ask in a room that is then archived, from a task still running.
+    let b = direct(&fx, &sup).await;
+    let reply = tool(
+        &svc,
+        &b,
+        "room_ask",
+        json!({ "to": "owner", "text": "which db?" }),
+    )
+    .await;
+    assert_eq!(reply.0, NO_ANSWER_YET);
+    set_prs(&fx, &a, PrState::Merged).await;
+    rooms::sync(&fx.store, 20).await.unwrap();
+    fx.store
+        .set_room_archived(&op_room(&sup), Some(20))
+        .await
+        .unwrap();
+
+    fx.clock.advance(31 * 60);
+    rooms::repost_stale_asks(&fx.svc).await.unwrap();
+    assert!(events_of(&fx, &sup, TaskEventKind::RoomMessage)
+        .await
+        .is_empty());
 }

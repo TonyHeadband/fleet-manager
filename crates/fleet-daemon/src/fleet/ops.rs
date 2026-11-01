@@ -28,8 +28,8 @@ use crate::supervisor;
 use fleet_api::{
     task_id, Agent, AgentConfig, AgentId, AgentKind, Approval, BlockedReason, BreakdownVersion,
     DecideBreakdown, DefKind, Effort, FleetEvent, FleetEventKind, FleetView, GateRun, GateStep,
-    PermissionMode, PrRules, PrState, SettingSource, SpawnRequest, Status, Step, StepDraft,
-    StepState, StopCause, Task, TaskEventKind, TaskPr, Workspace,
+    MemberRef, PermissionMode, PrRules, PrState, SettingSource, SpawnRequest, Status, Step,
+    StepDraft, StepState, StopCause, Task, TaskEventKind, TaskPr, Workspace,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -928,6 +928,11 @@ impl AgentService {
             info!(agent_id = %orchestrator.0, version = n, "breakdown proposed");
             self.log_task(&task, format!("breakdown v{n} proposed"))
                 .await;
+            // Under the breakdown lock, so no decision can come before its ask. The card is what the owner acts on:
+            // a room failure must not undo the proposal.
+            if let Err(e) = self.post_breakdown_ask(&task, &v).await {
+                warn!(task = %task.0, version = n, error = %e, "cannot put the breakdown to its room");
+            }
             let (tx, rx) = oneshot::channel();
             self.breakdown_waiters
                 .lock()
@@ -950,12 +955,23 @@ impl AgentService {
         }
     }
 
-    /// The owner's decision on the task's proposed breakdown, handed to the held call or, when none is left,
-    /// queued as a fleet event for the lead's `wait_for_fleet`.
+    /// The owner's decision on the task's proposed breakdown from its side panel, handed to the held call or, when
+    /// none is left, queued as a fleet event for the lead's `wait_for_fleet`.
     pub async fn decide_breakdown(
         &self,
         task: &AgentId,
         d: DecideBreakdown,
+    ) -> Result<(), ServiceError> {
+        self.decide_breakdown_as(task, d, None).await
+    }
+
+    /// `decide_breakdown`, which also answers the version's room ask: with `in_room`, the owner's answer, when they
+    /// decided there, else as the panel's decision.
+    pub(crate) async fn decide_breakdown_as(
+        &self,
+        task: &AgentId,
+        d: DecideBreakdown,
+        in_room: Option<&str>,
     ) -> Result<(), ServiceError> {
         let _bd = self.breakdown_lock.lock().await;
         let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
@@ -1000,6 +1016,20 @@ impl AgentService {
             .await?;
         if let Some(v) = &decided {
             write_breakdown(&p.workdir, &p.goal, v);
+        }
+        let ask_answer = match (&approval, in_room) {
+            (_, Some(text)) => text.to_string(),
+            (Approval::Approved, None) => "approved in the panel".into(),
+            (_, None) => decided
+                .as_ref()
+                .and_then(|v| v.comment.clone())
+                .unwrap_or_else(|| "no comment given".into()),
+        };
+        if let Err(e) = self
+            .close_breakdown_asks_for(task, n, &MemberRef::Owner, &ask_answer)
+            .await
+        {
+            warn!(task = %task.0, version = n, error = %e, "cannot answer the breakdown's room ask");
         }
         info!(agent_id = %task.0, version = n, approved = d.approve, "breakdown decided");
         self.log_task(task, format!("breakdown v{n} {said}")).await;

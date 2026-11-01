@@ -102,9 +102,10 @@ impl Notices {
 }
 
 /// Wakes the recipients of a message or an ask, and surfaces it to the owner when it is theirs: one addressed to
-/// the owner, or an ask to the supervisor. Announcements and answers wake nobody here.
+/// the owner, or an ask to the supervisor. Announcements and answers wake nobody here, nor does a breakdown's ask:
+/// only the owner decides it, and they hear of it from the breakdown's own Needs you.
 pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), ServiceError> {
-    if !matches!(post.kind, PostKind::Message | PostKind::Ask) {
+    if !matches!(post.kind, PostKind::Message | PostKind::Ask) || post.breakdown_version.is_some() {
         return Ok(());
     }
     let Some(room) = svc.store.room(&post.room).await? else {
@@ -140,11 +141,7 @@ pub async fn deliver(svc: &Arc<AgentService>, post: &Post) -> Result<(), Service
         matches!((&post.to, &room.conversation), (Some(MemberRef::Agent(a)), Some(c)) if a == c);
     let kind = match post.kind {
         PostKind::Message if post.to == Some(MemberRef::Owner) => Some(TaskEventKind::RoomMessage),
-        // A breakdown's ask reaches the owner as the breakdown's own Needs you.
-        PostKind::Ask
-            if (post.to == Some(MemberRef::Owner) || to_supervisor)
-                && post.breakdown_version.is_none() =>
-        {
+        PostKind::Ask if post.to == Some(MemberRef::Owner) || to_supervisor => {
             Some(TaskEventKind::RoomAsk)
         }
         _ => None,
@@ -272,10 +269,17 @@ async fn surface(
     route_with(&svc.store, svc.options().clock.now(), sender, kind, text).await
 }
 
-/// Puts each ask open for `REPOST_AFTER` to the owner once more, as a message; the post records it.
+/// Puts each ask open for `REPOST_AFTER` to the owner once more, as a message; the post records it. Breakdown asks
+/// (the card's Needs you already says so), asks in archived rooms and asks from ended tasks are not reposted.
 pub async fn repost_stale_asks(svc: &AgentService) -> Result<(), ServiceError> {
     let now = svc.options().clock.now();
     for mut ask in svc.store.stale_asks(now - REPOST_AFTER).await? {
+        // The task left its rooms when it ended; nobody is waiting on the answer any more.
+        if let MemberRef::Agent(t) = &ask.sender {
+            if svc.store.task(t).await?.is_some_and(|t| super::ended(&t)) {
+                continue;
+            }
+        }
         if !svc.store.mark_reposted(ask.id, now).await? {
             continue;
         }
