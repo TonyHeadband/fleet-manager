@@ -685,7 +685,7 @@ impl AgentService {
     }
 }
 
-fn log_post(p: &Post) {
+pub(crate) fn log_post(p: &Post) {
     tracing::info!(
         room = %p.room,
         sender = p.sender.key(),

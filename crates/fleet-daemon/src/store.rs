@@ -1792,6 +1792,20 @@ impl Store {
         rows.iter().map(post_row).collect()
     }
 
+    /// Whether the daemon has announced exactly `text` in the room.
+    pub async fn daemon_said(&self, room: &str, text: &str) -> Result<bool> {
+        let said: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM posts WHERE room = ? AND sender = ? AND kind = 'announcement' \
+             AND text = ?)",
+        )
+        .bind(room)
+        .bind(MemberRef::Daemon.key())
+        .bind(text)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(said)
+    }
+
     /// The breakdown asks `sender` has open, oldest first.
     pub async fn open_breakdown_asks(&self, sender: &str) -> Result<Vec<Post>> {
         let rows = sqlx::query(

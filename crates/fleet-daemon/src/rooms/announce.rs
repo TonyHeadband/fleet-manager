@@ -1,5 +1,5 @@
 //! The daemon's own announcements in a product room: a landed PR, a migration number taken. They wake nobody.
-use super::posts::kind_word;
+use super::posts::log_post;
 use super::product_room;
 use crate::store::{Store, StoreError};
 use fleet_api::{MemberRef, Post, PostKind};
@@ -16,18 +16,20 @@ pub async fn landed(
     announce(store, product, format!("landed: {task_title} · {url}")).await
 }
 
-/// "migration <file> taken by <title>", one announcement per file.
+/// "migration <file> taken by <title> on <branch>", one announcement per file. The branch tells a later task of the
+/// same title apart from a PR opened again.
 pub async fn migrations_taken(
     store: &Store,
     product: &str,
     task_title: &str,
+    branch: &str,
     files: &[String],
 ) -> Result<(), StoreError> {
     for f in files {
         announce(
             store,
             product,
-            format!("migration {f} taken by {task_title}"),
+            format!("migration {f} taken by {task_title} on {branch}"),
         )
         .await?;
     }
@@ -38,14 +40,7 @@ pub async fn migrations_taken(
 /// a PR opened again for the same branch is announced once.
 async fn announce(store: &Store, product: &str, text: String) -> Result<(), StoreError> {
     let room = product_room(store, product).await?;
-    let said = store
-        .posts_after(&room, MemberRef::Owner.key(), 0)
-        .await?
-        .iter()
-        .any(|p| {
-            p.sender == MemberRef::Daemon && p.kind == PostKind::Announcement && p.text == text
-        });
-    if said {
+    if store.daemon_said(&room, &text).await? {
         return Ok(());
     }
     let p = Post {
@@ -62,12 +57,6 @@ async fn announce(store: &Store, product: &str, text: String) -> Result<(), Stor
         breakdown_version: None,
     };
     store.add_post(&p).await?;
-    tracing::info!(
-        room = %p.room,
-        sender = p.sender.key(),
-        to = "all",
-        kind = kind_word(p.kind),
-        "room post"
-    );
+    log_post(&p);
     Ok(())
 }

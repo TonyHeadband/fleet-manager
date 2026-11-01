@@ -713,3 +713,19 @@ pub async fn restart_with(
     ));
     (svc, sessions)
 }
+
+/// What the daemon said in the product room, oldest first.
+pub async fn daemon_announcements(fx: &Fx) -> Vec<String> {
+    let room = format!("product:{PRODUCT}");
+    fx.store
+        .posts_after(&room, fleet_api::MemberRef::Owner.key(), 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|p| p.sender == fleet_api::MemberRef::Daemon)
+        .map(|p| {
+            assert_eq!(p.kind, fleet_api::PostKind::Announcement);
+            p.text
+        })
+        .collect()
+}

@@ -960,14 +960,40 @@ async fn all_posts(fx: &Fx, room: &str) -> Vec<Post> {
     fx.store.posts_after(room, "nobody", 0).await.unwrap()
 }
 
+/// A migration is announced once per branch: the same PR opened again says nothing new, a later task with the same
+/// title does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_is_announced_once_per_branch() {
+    let fx = fixture().await;
+    let files = ["017_x.sql".to_string()];
+    for branch in ["fleet/one", "fleet/one", "fleet/two"] {
+        rooms::announce::migrations_taken(&fx.store, PRODUCT, "Rooms", branch, &files)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        daemon_announcements(&fx).await,
+        [
+            "migration 017_x.sql taken by Rooms on fleet/one",
+            "migration 017_x.sql taken by Rooms on fleet/two",
+        ]
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_operation_tasks_orchestrator_reads_the_daemons_migration_announcement() {
     let fx = fixture().await;
     let sup = conversation(&fx).await;
     let a = direct(&fx, &sup).await;
-    rooms::announce::migrations_taken(&fx.store, PRODUCT, "Other task", &["017_x.sql".into()])
-        .await
-        .unwrap();
+    rooms::announce::migrations_taken(
+        &fx.store,
+        PRODUCT,
+        "Other task",
+        "fleet/other",
+        &["017_x.sql".into()],
+    )
+    .await
+    .unwrap();
     let taken = all_posts(&fx, &product_room()).await[0].id;
     let hello = posted_id(
         &tool(
@@ -986,7 +1012,7 @@ async fn an_operation_tasks_orchestrator_reads_the_daemons_migration_announcemen
         (
             format!(
                 "# {} (operation)\n{hello} supervisor → all: [announcement] hello\n\
-                 # {} (product)\n{taken} daemon → all: [announcement] migration 017_x.sql taken by Other task",
+                 # {} (product)\n{taken} daemon → all: [announcement] migration 017_x.sql taken by Other task on fleet/other",
                 op_room(&sup),
                 product_room()
             ),

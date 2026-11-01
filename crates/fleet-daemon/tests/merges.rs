@@ -161,22 +161,6 @@ async fn merged_pr_marks_task_done() {
     assert_eq!(pr_lists(&fx).len(), 1);
 }
 
-/// What the daemon said in the product room, oldest first.
-async fn daemon_announcements(fx: &Fx) -> Vec<String> {
-    let room = format!("product:{PRODUCT}");
-    fx.store
-        .posts_after(&room, fleet_api::MemberRef::Owner.key(), 0)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|p| p.sender == fleet_api::MemberRef::Daemon)
-        .map(|p| {
-            assert_eq!(p.kind, fleet_api::PostKind::Announcement);
-            p.text
-        })
-        .collect()
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_merged_pr_is_announced_in_the_product_room() {
     let fx = fixture().await;

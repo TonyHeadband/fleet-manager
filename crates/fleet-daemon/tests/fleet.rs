@@ -2016,36 +2016,20 @@ async fn a_fixed_title_passes_and_opens_the_pr() {
     assert_eq!(p.gate_runs[1].pr_url.as_deref(), Some(url.as_str()));
 }
 
-/// What the daemon said in the product room, oldest first.
-async fn daemon_announcements(fx: &Fx) -> Vec<String> {
-    let room = format!("product:{PRODUCT}");
-    fx.store
-        .posts_after(&room, fleet_api::MemberRef::Owner.key(), 0)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|p| p.sender == fleet_api::MemberRef::Daemon)
-        .map(|p| {
-            assert_eq!(p.kind, fleet_api::PostKind::Announcement);
-            p.text
-        })
-        .collect()
-}
-
 #[tokio::test]
 async fn a_pr_adding_a_migration_announces_it() {
     let fx = fleet_fixture().await;
     let (a, _, _, _) = done_task(&fx, &one_step("true")).await;
     commit_lib(&a, "db/migrations/016_rooms.sql");
-    commit_lib(&a, "crates/x/migrations/017_more.sql");
+    let (_, branch) = commit_lib(&a, "crates/x/migrations/017_more.sql");
     fx.svc.open_pr(&a.id, "t", "b").await.unwrap();
     let t = fx.store.task(&a.id).await.unwrap().unwrap();
     let title = t.title.filter(|x| !x.is_empty()).unwrap_or(t.name);
     assert_eq!(
         daemon_announcements(&fx).await,
         [
-            format!("migration crates/x/migrations/017_more.sql taken by {title}"),
-            format!("migration db/migrations/016_rooms.sql taken by {title}"),
+            format!("migration crates/x/migrations/017_more.sql taken by {title} on {branch}"),
+            format!("migration db/migrations/016_rooms.sql taken by {title} on {branch}"),
         ]
     );
     // The PR opened again for the same branch announces nothing twice.

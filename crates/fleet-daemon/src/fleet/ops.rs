@@ -2194,7 +2194,8 @@ impl AgentService {
                 warn!(task = %p.id.0, error = %e, "cannot store the PR's event");
             }
         }
-        self.announce_migrations(&p, wt, &from, &tested).await;
+        self.announce_migrations(&p, wt, &w.branch, &from, &tested)
+            .await;
         let labels: Vec<String> = p.pr_rules.iter().flat_map(|r| r.labels.clone()).collect();
         if !labels.is_empty() {
             // A label the remote lacks is no reason to lose the PR, so a failure is only logged.
@@ -2235,7 +2236,14 @@ impl AgentService {
 
 impl AgentService {
     /// Announces in the product room the migrations the task branch adds. A failure is only logged.
-    async fn announce_migrations(&self, p: &Task, wt: &Path, from: &str, tested: &str) {
+    async fn announce_migrations(
+        &self,
+        p: &Task,
+        wt: &Path,
+        branch: &str,
+        from: &str,
+        tested: &str,
+    ) {
         if p.product.is_empty() {
             return;
         }
@@ -2256,7 +2264,8 @@ impl AgentService {
         let title = p.title.clone().filter(|t| !t.is_empty());
         let title = title.as_deref().unwrap_or(&p.name);
         if let Err(e) =
-            crate::rooms::announce::migrations_taken(&self.store, &p.product, title, &files).await
+            crate::rooms::announce::migrations_taken(&self.store, &p.product, title, branch, &files)
+                .await
         {
             warn!(task = %p.id.0, error = %e, "cannot announce the migrations in the product room");
         }
