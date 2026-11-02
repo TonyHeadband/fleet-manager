@@ -1500,9 +1500,10 @@ async fn an_archived_fleets_chats_are_still_readable() {
     let fx = fixture().await;
     let addr = serve(&fx).await;
     let (a, sp) = orchestrated(&fx).await;
+    // Once stopped: a fake Claude still starting would write over its session's transcript.
+    fx.svc.stop_task(&a.id).await.unwrap();
     chatted(&fx, &a.id, "lead").await;
     chatted(&fx, &sp.id, "step").await;
-    fx.svc.stop_task(&a.id).await.unwrap();
     let (lead_before, step_before) = (
         history(addr, &a.id, "").await,
         history(addr, &sp.id, "").await,
