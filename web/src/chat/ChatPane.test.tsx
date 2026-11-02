@@ -421,9 +421,14 @@ describe("the Chat in the app", () => {
     expect(document.querySelector(".chat-call-output")).toHaveTextContent("x".repeat(300));
     const css = readFileSync("src/chat/chat.css", "utf8");
     const rule = (sel: string) => css.match(new RegExp(`(?:^|\\n|\\})\\s*${sel.replace(/[.[\]="]/g, "\\$&")} \\{([^}]*)\\}`))?.[1] ?? "";
-    // The target is never squeezed to nothing beside a long result: the row wraps, so the result takes its own line.
+    // The tool and its target share a line however long the target is: it counts only its minimum (basis 0) when the
+    // row's lines are built, then grows into the room and is cut with an ellipsis. Only a long result wraps below,
+    // and the target keeps a minimum beside a result that fits.
     expect(rule(".chat-call")).toMatch(/flex-wrap: wrap/);
-    expect(rule(".chat-call-target")).toMatch(/flex: 1 1 auto/);
+    expect(rule(".chat-call-target")).toMatch(/flex: 1 1 0(px|%)?;/);
+    expect(rule(".chat-call-target")).toMatch(/min-width: \d+ch/);
+    expect(rule(".chat-call-target")).toMatch(/text-overflow: ellipsis/);
+    expect(rule(".chat-call-target")).toMatch(/white-space: nowrap/);
     expect(rule(".chat-call-result")).toMatch(/max-width: 100%/);
     // A table in a report scrolls inside its own box.
     expect(rule(".markdown table")).toMatch(/display: block/);
