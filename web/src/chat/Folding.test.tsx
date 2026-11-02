@@ -24,7 +24,7 @@ describe("Folding", () => {
     linesEndAt([18]);
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(30);
     render(
-      <Folding>
+      <Folding text="one line">
         <p>one line</p>
       </Folding>,
     );
@@ -35,7 +35,7 @@ describe("Folding", () => {
     const last = panel.foldMax - 4;
     linesEndAt([18, last, panel.foldMax + 16]);
     render(
-      <Folding>
+      <Folding text="nine lines">
         <p>nine lines</p>
       </Folding>,
     );
@@ -43,5 +43,41 @@ describe("Folding", () => {
     const text = document.querySelector<HTMLElement>(".chat-fold-text")!;
     expect(text).toHaveAttribute("data-folded");
     expect(text.style.getPropertyValue("--fold-limit")).toBe(`${last}px`);
+  });
+
+  it("rerendering_with_the_same_text_measures_once", () => {
+    linesEndAt([18]);
+    const walk = vi.spyOn(document, "createTreeWalker");
+    const { rerender } = render(
+      <Folding text="same">
+        <p>same</p>
+      </Folding>,
+    );
+    const after = walk.mock.calls.length;
+    expect(after).toBeGreaterThan(0);
+    for (let i = 0; i < 3; i++)
+      rerender(
+        <Folding text="same">
+          <p>same</p>
+        </Folding>,
+      );
+    expect(walk.mock.calls.length).toBe(after);
+  });
+
+  it("new_text_is_measured_again_and_the_fold_follows_it", () => {
+    linesEndAt([18]);
+    const { rerender } = render(
+      <Folding text="short">
+        <p>short</p>
+      </Folding>,
+    );
+    expect(screen.queryByRole("button", { name: "Read more" })).toBeNull();
+    linesEndAt([18, panel.foldMax + 16]);
+    rerender(
+      <Folding text="tall">
+        <p>tall</p>
+      </Folding>,
+    );
+    expect(screen.getByRole("button", { name: "Read more" })).toBeInTheDocument();
   });
 });
