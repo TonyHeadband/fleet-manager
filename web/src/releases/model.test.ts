@@ -45,7 +45,7 @@ describe("release model", () => {
   it("bars_match_release_progress", () => {
     const merged = fullTask("a", "task-a", "archived", "stopped", {
       release: 1,
-      prs: [{ url: "u", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false }],
+      prs: [{ url: "u", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false, merge_method: null }],
     });
     merged.repos[0]!.changed = true;
     const tasks = [

@@ -6,7 +6,7 @@ import { agent, workspace } from "../test/fixtures";
 import { workStage } from "./stage";
 
 const URL = "https://github.com/o/r/pull/499";
-const pr = (state: TaskPr["state"], url = URL): TaskPr => ({ url, repo: "core", state, merged_at: null, ci: "unknown", failing_checks: [], can_merge: false });
+const pr = (state: TaskPr["state"], url = URL): TaskPr => ({ url, repo: "core", state, merged_at: null, ci: "unknown", failing_checks: [], can_merge: false, merge_method: null });
 const run = (exit: number, pr_url: string | null = null): GateRun => ({
   at: 1,
   base: "main",

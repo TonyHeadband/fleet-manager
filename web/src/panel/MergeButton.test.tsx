@@ -10,7 +10,7 @@ import { fullTask } from "../test/fixtures";
 import { useMerge, type MergeApi } from "./MergeButton";
 
 const URL = "https://github.com/o/core/pull/504";
-const pr = (over: Partial<TaskPr> = {}): TaskPr => ({ url: URL, repo: "core", state: "open", merged_at: null, ci: "green", failing_checks: [], can_merge: true, ...over });
+const pr = (over: Partial<TaskPr> = {}): TaskPr => ({ url: URL, repo: "core", state: "open", merged_at: null, ci: "green", failing_checks: [], can_merge: true, merge_method: "rebase", ...over });
 const taskWith = (...prs: TaskPr[]): Task => fullTask("t1", "idea", "running", null, { prs });
 const merged: MergedPr = { url: URL, repo: "core", number: 504, method: "rebase" };
 
@@ -57,7 +57,7 @@ describe("the Merge button", () => {
   });
 
   it("is_disabled_when_github_says_the_pr_cannot_merge", () => {
-    setup(taskWith(pr({ can_merge: false })));
+    setup(taskWith(pr({ can_merge: false, merge_method: null })));
     expect(screen.getByRole("button", { name: "Merge" })).toBeDisabled();
   });
 
@@ -84,7 +84,7 @@ describe("the Merge button", () => {
     await userEvent.click(screen.getByRole("button", { name: "Merge" }));
     expect(api.merge).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("Merge PR #504 into main?");
+    expect(dialog).toHaveTextContent("Merge PR #504 into main with rebase?");
     await userEvent.click(screen.getByRole("button", { name: "Merge PR" }));
     expect(api.merge).toHaveBeenCalledWith("t1", "core");
     expect(await screen.findByRole("status")).toHaveTextContent("Merged PR #504 with rebase.");
