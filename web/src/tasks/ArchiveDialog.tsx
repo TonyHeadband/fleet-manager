@@ -165,10 +165,9 @@ export function ArchiveDialog({ dialog: d, onGo, onCancel }: Props) {
  * repo); a path elsewhere (the daemon's agent files) is cut from its start, where the paths agree, never its end.
  */
 function PlanRows({ plan }: { plan: ArchivePlan }) {
-  // The root is the task folder: the staying item every other staying item (the kept transcripts) is not above.
-  const staying = plan.items.filter((i) => i.stays);
-  const root =
-    (staying.find((r) => staying.every((o) => o === r || o.path.startsWith(`${r.path}/`))) ?? staying[0])?.path ?? null;
+  // The root is the task folder: the first staying item, because the daemon orders the folder before the kept
+  // transcripts row (which lives elsewhere, under the state dir).
+  const root = plan.items.find((i) => i.stays)?.path ?? null;
   const shown = (path: string) => (root !== null && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null);
   return (
     <>
