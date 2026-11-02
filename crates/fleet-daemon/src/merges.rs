@@ -9,12 +9,12 @@ use crate::repos::Repos;
 use crate::store::Store;
 use crate::supervisor;
 use fleet_api::{
-    task_id, task_outcome, AgentId, AgentKind, CiState, EventKind, MergedPr, PrState, Status, Task,
-    TaskEventKind, TaskOutcome, TaskPr, TaskState,
+    task_id, task_outcome, AgentId, AgentKind, CiState, EventKind, MergedPr, PrState, Status,
+    StopCause, Task, TaskEventKind, TaskOutcome, TaskPr, TaskState,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
@@ -115,6 +115,9 @@ fn merge_candidate(t: &Task, repo: Option<&str>) -> Result<TaskPr, String> {
     Ok(pr.clone())
 }
 
+/// The card's activity for an agent stopped because its task's PRs merged.
+const MERGED_ACTIVITY: &str = "stopped: its PRs merged";
+
 /// A task the watcher still asks about: not archived, not done.
 fn watched(t: &Task) -> bool {
     t.state != TaskState::Archived && t.done_at.is_none() && !t.done_by_hand
@@ -142,6 +145,8 @@ pub(crate) struct MergeChecker {
     clock: Arc<dyn Clock>,
     timeout: Duration,
     runs: Arc<AtomicUsize>,
+    /// Stops a merged task's agents; empty until `AgentService::enable_merge_stop`.
+    stopper: Arc<OnceLock<std::sync::Weak<AgentService>>>,
 }
 
 impl MergeChecker {
@@ -162,7 +167,17 @@ impl MergeChecker {
             clock,
             timeout,
             runs,
+            stopper: Arc::default(),
         }
+    }
+
+    /// Lets a check that finds the task merged stop its agents through the service `stopper` holds.
+    fn with_stopper(
+        mut self,
+        stopper: Arc<OnceLock<std::sync::Weak<AgentService>>>,
+    ) -> MergeChecker {
+        self.stopper = stopper;
+        self
     }
 
     /// The tasks whose `prs` changed while they were checked, to check again.
@@ -423,6 +438,11 @@ impl MergeChecker {
                 }
                 if finished {
                     info!(task = %t.id.0, "task's PRs merged");
+                    if let Some(svc) = self.stopper.get().and_then(std::sync::Weak::upgrade) {
+                        if let Err(e) = svc.stop_merged(&t.id).await {
+                            warn!(task = %t.id.0, error = %e, "cannot stop the merged task's agents");
+                        }
+                    }
                 }
                 // The record is not streamed; the lead's card is, and a client refetches the list on its events.
                 let card = t.lead.clone().unwrap_or_else(|| t.id.clone());
@@ -606,6 +626,38 @@ impl AgentService {
         self.merge_queue().push(task);
     }
 
+    /// From now on a check that finds a task's last PR merged stops the task's agents. Called by the watcher.
+    pub fn enable_merge_stop(self: &Arc<Self>) {
+        let _ = self.merge_stopper.set(Arc::downgrade(self));
+    }
+
+    /// Stops every live agent of a merged task, specialists first, with `StopCause::Merged`.
+    pub(crate) async fn stop_merged(&self, task: &AgentId) -> Result<u32, ServiceError> {
+        self.stop_task_with(task, StopCause::Merged, MERGED_ACTIVITY)
+            .await
+    }
+
+    /// Once at startup, after the resume: stops the live agents of every merged task not archived or marked done by
+    /// hand, so a restart does not bring them back.
+    pub async fn stop_merged_tasks(&self) {
+        let tasks = match self.store.tasks().await {
+            Ok(t) => t,
+            Err(e) => {
+                warn!(error = %e, "cannot list tasks to stop the merged ones");
+                return;
+            }
+        };
+        for t in tasks.iter().filter(|t| {
+            t.state != TaskState::Archived
+                && !t.done_by_hand
+                && task_outcome(t) == TaskOutcome::Merged
+        }) {
+            if let Err(e) = self.stop_merged(&t.id).await {
+                warn!(task = %t.id.0, error = %e, "cannot stop the merged task's agents");
+            }
+        }
+    }
+
     /// Queued checks finished so far.
     pub fn merge_checks_run(&self) -> usize {
         self.merge_runs.load(Ordering::SeqCst)
@@ -613,7 +665,8 @@ impl AgentService {
 
     /// Checks every task now and every `every` after, and a task whenever one of its agents reaches Stopped or
     /// Review. Must be called inside the tokio runtime, once.
-    pub fn start_merge_watcher(&self, every: Duration) {
+    pub fn start_merge_watcher(self: &Arc<Self>, every: Duration) {
+        self.enable_merge_stop();
         let queue = self.merge_queue().clone();
         let timer = queue.clone();
         tokio::spawn(async move {
@@ -808,6 +861,7 @@ impl AgentService {
             self.opts.merge_check_timeout,
             self.merge_runs.clone(),
         )
+        .with_stopper(self.merge_stopper.clone())
     }
 
     fn merge_queue(&self) -> &MergeQueue {

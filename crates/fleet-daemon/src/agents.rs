@@ -1066,6 +1066,8 @@ pub struct AgentService {
     /// The merge watcher's queue, started by the first request (`new` may run outside a runtime).
     pub(crate) merge_queue: OnceLock<crate::merges::MergeQueue>,
     pub(crate) merge_runs: Arc<AtomicUsize>,
+    /// Set by `enable_merge_stop`: lets the merge watcher stop the agents of a task whose last PR merged.
+    pub(crate) merge_stopper: Arc<OnceLock<std::sync::Weak<AgentService>>>,
     /// Agents relaunched by `resume_interrupted` whose grace is still running: an early exit is the watcher's to
     /// record, so reconcile must not call it a crash first.
     resuming: Arc<Mutex<HashSet<String>>>,
@@ -1144,6 +1146,7 @@ impl AgentService {
             orphans_gen: Arc::new(AtomicU64::new(0)),
             merge_queue: OnceLock::new(),
             merge_runs: Arc::new(AtomicUsize::new(0)),
+            merge_stopper: Arc::new(OnceLock::new()),
             resuming: Arc::new(Mutex::new(HashSet::new())),
             shutting_down: Arc::new(AtomicBool::new(false)),
         }
@@ -2748,6 +2751,17 @@ impl AgentService {
     /// Ends the session and keeps everything on disk: the worktrees, the branches and the task record. The pane
     /// is saved first, since a stopped agent has no terminal to show. Stopping a stopped agent changes nothing.
     pub async fn stop(&self, id: &AgentId) -> Result<(), ServiceError> {
+        self.stop_with(id, StopCause::Stopped, "stopped by you")
+            .await
+    }
+
+    /// `stop` with the cause and the card's activity text it records, for a stop the owner did not ask for.
+    pub async fn stop_with(
+        &self,
+        id: &AgentId,
+        cause: StopCause,
+        activity: &str,
+    ) -> Result<(), ServiceError> {
         let a = self.find(id).await?;
         if a.status == Status::Stopped {
             // Stopped on record over a session that still runs, which reconcile leaves alone: a second Stop is the
@@ -2774,8 +2788,8 @@ impl AgentService {
         self.store
             .update_agent(id, |x| {
                 x.status = Status::Stopped;
-                x.stop_cause = Some(StopCause::Stopped);
-                x.activity = "stopped by you".into();
+                x.stop_cause = Some(cause);
+                x.activity = activity.to_string();
                 x.status_since = now;
                 x.paused = false;
                 // The held call ends below; a request left set would claim one is still waiting.
@@ -2802,11 +2816,11 @@ impl AgentService {
         }
         let line = match a.kind {
             AgentKind::Specialist => format!(
-                "step {} ({}) stopped by you",
+                "step {} ({}) {activity}",
                 a.step.unwrap_or(0),
                 a.role.as_deref().unwrap_or("specialist")
             ),
-            _ => "stopped by you".into(),
+            _ => activity.to_string(),
         };
         self.log_task(task, line).await;
         info!(agent_id = %id.0, "agent stopped");

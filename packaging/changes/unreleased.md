@@ -20,5 +20,6 @@
 - **Archive keeps the chats.** Archiving a task now keeps its agents' chat transcripts (a few MB) in Fleet Manager's own folder, and the archive dialog lists them as staying, so a task's conversations survive the cleanup.
 - **Storage shows what you can clean up.** The Supervisor page's Storage widget now shows Fleet Manager's live disk use by kind (worktrees, build output, repo copies, kept chats, its own files) against the disk's free space, and lists the biggest merged or stopped tasks with an **Archive** button. Archived tasks no longer count.
 - **Merge from the app.** A task's side panel has a Merge button next to its pull request: green once its checks pass and GitHub says it can merge, red with the failing checks listed when CI fails. It merges with rebase, else squash, else merge. The supervisor can also merge a green PR and archive a merged or stopped task, but only after you answer yes to its ask in the room.
+- **Merged tasks stop themselves.** When a task's last pull request merges, Fleet Manager stops its agents, so Archive is one step.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.

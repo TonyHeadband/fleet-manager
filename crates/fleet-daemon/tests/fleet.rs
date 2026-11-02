@@ -2874,6 +2874,41 @@ async fn stop_task_stops_everything() {
 }
 
 #[tokio::test]
+async fn the_merged_sweep_stops_the_fleet_with_cause_merged() {
+    let fx = fleet_fixture().await;
+    let a = approved_parallel(&fx).await;
+    let s1 = fx.svc.spawn_specialist(&a.id, 1).await.unwrap();
+    let s2 = fx.svc.spawn_specialist(&a.id, 2).await.unwrap();
+    fx.store
+        .update_task(&a.id, |p| {
+            p.repos[0].changed = true;
+            p.prs = vec![fleet_api::TaskPr {
+                url: "https://example.com/acme/core/pull/1".into(),
+                repo: p.repos[0].repo.clone(),
+                state: fleet_api::PrState::Merged,
+                merged_at: Some(1),
+                ci: fleet_api::CiState::Unknown,
+                failing_checks: vec![],
+                can_merge: false,
+                merge_method: None,
+            }];
+        })
+        .await
+        .unwrap();
+
+    fx.svc.stop_merged_tasks().await;
+
+    for id in [&a.id, &s1.id, &s2.id] {
+        let x = agent(&fx, id).await;
+        assert_eq!(x.status, Status::Stopped, "{x:?}");
+        assert_eq!(x.stop_cause, Some(fleet_api::StopCause::Merged));
+        assert!(!fx.sessions.alive(&x.session));
+    }
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(p.stop_cause, Some(fleet_api::StopCause::Merged));
+}
+
+#[tokio::test]
 async fn stopping_specialist_fails_step_only() {
     let fx = fleet_fixture().await;
     let (a, _, _) = approved_task(&fx).await;
