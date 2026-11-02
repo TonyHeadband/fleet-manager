@@ -292,10 +292,11 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
       : (personas.value.find((p) => p.ready)?.id ?? null);
   taskToast.current = (e) => {
     // A task event is for the drawer's supervisor. The supervisor chat draws no row for it, so it always toasts, and
-    // the toast opens the task's product room, where the notice is posted.
+    // the toast opens the room the event names (an operation room's post), else the task's product room, where the
+    // notice is posted.
     if (e.persona !== persona) return;
     const taskProduct = snapshot.agents.find((a) => a.id === e.task)?.product;
-    const href = supervisorHref(e.conversation, taskProduct ? productRoomId(taskProduct) : null);
+    const href = supervisorHref(e.conversation, e.room ?? (taskProduct ? productRoomId(taskProduct) : null));
     toasts.push({ title: e.task_title, text: e.text, tone: EVENT_TONE[e.kind], href });
   };
   useEffect(() => {
