@@ -110,6 +110,14 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
 
   return (
     <div className="supervisor">
+      <section className="supervisor-grid outlined" aria-label="Fleet widgets">
+        {persona !== null &&
+          [AGENTS_BY_STATUS, STORAGE, ROOMS].map((w) => (
+            <div key={w.id} className="supervisor-cell" data-cell={w.id}>
+              {w.render({ persona, agents, tasks, loaded, baseUrl, client, factory })}
+            </div>
+          ))}
+      </section>
       <section className="supervisor-chat outlined" aria-label="Supervisor chat">
         <header className="supervisor-chat-head">
           <ConversationSelector conversations={conversations} current={current} onPick={pick} onNew={startNew} />
@@ -123,14 +131,6 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
         </div>
         {error && <ErrorLine text={error} />}
         {persona !== null && <ReplyBox label="Message" text={text} onText={setText} onSend={send} busy={busy} />}
-      </section>
-      <section className="supervisor-grid outlined" aria-label="Fleet widgets">
-        {persona !== null &&
-          [AGENTS_BY_STATUS, STORAGE, ROOMS].map((w) => (
-            <div key={w.id} className="supervisor-cell" data-cell={w.id}>
-              {w.render({ persona, agents, tasks, loaded, baseUrl, client, factory })}
-            </div>
-          ))}
       </section>
     </div>
   );

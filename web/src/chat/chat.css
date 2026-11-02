@@ -6,6 +6,20 @@
 /* A short chat sits at the bottom, by the reply box, and still scrolls whole once it grows. */
 .chat-feed > :first-child { margin-top: auto; }
 .chat-feed > * { flex: none; min-width: 0; }
+/* The scrollbar draws only while the feed moves (Feed.tsx); its width stays reserved so the text never shifts. */
+.chat-feed:not([data-scrolling])::-webkit-scrollbar-thumb, .chat-feed:not([data-scrolling])::-webkit-scrollbar-track { background: transparent; }
+@supports not selector(::-webkit-scrollbar) {
+  .chat-feed:not([data-scrolling]) { scrollbar-color: transparent transparent; }
+}
+/* More above or below: three lines narrowing to a point, in a band of their own so nothing covers the text. The
+   band keeps its height when empty, so the feed never jumps as a cue comes and goes. */
+.chat-cue { flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--panel-gap-xs); padding-block: var(--panel-gap-xs); opacity: 0; }
+.chat-cue[data-edge="bottom"] { flex-direction: column-reverse; }
+.chat-cue[data-shown] { opacity: 1; }
+.chat-cue > span { display: block; height: 1px; background: var(--fill); }
+.chat-cue > span:nth-child(1) { width: calc(2 * var(--space-item)); }
+.chat-cue > span:nth-child(2) { width: calc(4 * var(--space-item)); }
+.chat-cue > span:nth-child(3) { width: calc(6 * var(--space-item)); }
 
 .chat-prompt[data-from="owner"] { color: var(--text-high); }
 .chat-reply { color: var(--text); }

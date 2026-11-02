@@ -11,6 +11,7 @@ import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
 import { PlusMinus } from "../ui/PlusMinus";
 import { AskMessage } from "./AskMessage";
+import { Feed } from "./Feed";
 import { Folding } from "./Folding";
 import { Markdown } from "./Markdown";
 import { blocks, mergeItems, opensItself, type Section } from "./sections";
@@ -130,8 +131,7 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource, speakers
       .finally(() => (loading.current = false));
   };
 
-  const onScroll = () => {
-    const el = feed.current!;
+  const onScroll = (el: HTMLDivElement) => {
     atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_END;
     if (el.scrollTop < el.clientHeight) loadEarlier();
   };
@@ -166,8 +166,7 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource, speakers
   if (endedAt !== null && !endedShown) rows.push(<p key="ended" className="chat-line" data-marker="session_ended">{ended(endedAt)}</p>);
 
   return (
-    <div className="chat">
-      <div ref={feed} role="log" aria-label="Chat" className="chat-feed" onScroll={onScroll}>
+    <Feed feedRef={feed} label="Chat" onScroll={onScroll}>
         {earlier > 0 && (
           <button type="button" className="chat-earlier" onClick={loadEarlier}>
             ↑ {earlier} earlier {earlier === 1 ? "section" : "sections"}
@@ -176,8 +175,7 @@ function Chat({ baseUrl, agentId, client, factory = browserEventSource, speakers
         {historyError && <ErrorLine text={historyError} />}
         {loaded && rows.length === 0 && <p className="chat-empty">Nothing yet: the chat starts with the agent's first message.</p>}
         {rows}
-      </div>
-    </div>
+    </Feed>
   );
 }
 

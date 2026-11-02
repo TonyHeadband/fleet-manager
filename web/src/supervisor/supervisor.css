@@ -1,13 +1,13 @@
-/* The Supervisor page, layout A: the chat at the panel's width, the widgets' grid filling what is left. */
-.supervisor { display: flex; gap: var(--layout-canvas-gap); height: 100%; min-width: 0; min-height: 0; }
-.supervisor-chat { flex: none; width: var(--layout-panel); display: flex; flex-direction: column; min-height: 0; }
+/* The Supervisor page: the widgets' grid along the top at a fixed height, the chat filling the width below it. */
+.supervisor { display: flex; flex-direction: column; gap: var(--layout-canvas-gap); height: 100%; min-width: 0; min-height: 0; }
+.supervisor-chat { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .supervisor-chat-head { flex: none; display: flex; align-items: center; padding: var(--layout-list-row-y) var(--layout-list-row-x); border-bottom: 1px solid var(--border); }
 .supervisor-chat-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--layout-pane-inset); }
 .supervisor-empty { margin: auto; text-align: center; color: var(--text-low); }
-/* A fixed layout for now: Agents, Storage and Rooms side by side, Rooms twice as wide. Rows share the grid's height,
-   so a widget keeps the size it's given and scrolls inside itself. A grid too narrow for one row wraps Rooms
-   under the others; only too short for a readable row does the grid itself scroll. */
-.supervisor-grid { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--layout-chart-compact), 1fr)); grid-auto-rows: minmax(var(--layout-panel-min), 1fr); gap: var(--layout-section-gap); padding: var(--layout-card-padding); overflow-y: auto; }
+/* A fixed layout for now: Agents, Storage and Rooms side by side, Rooms twice as wide, one row tall. A widget keeps
+   the size it's given and scrolls inside itself; a grid too narrow for one row wraps Rooms under the others and
+   scrolls. Content-box, so the row's height is the token's whatever the padding and outline. */
+.supervisor-grid { flex: none; box-sizing: content-box; height: var(--layout-panel-min); min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--layout-chart-compact), 1fr)); grid-auto-rows: minmax(var(--layout-panel-min), 1fr); gap: var(--layout-section-gap); padding: var(--layout-card-padding); overflow-y: auto; }
 .supervisor-cell { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .supervisor-cell[data-cell="rooms"] { grid-column: span 2; }
 .supervisor-cell > .widget { flex: 1; }

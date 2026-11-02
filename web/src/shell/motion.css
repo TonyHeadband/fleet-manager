@@ -221,6 +221,10 @@
   .chat-calls {
     animation: fui-menu var(--motion-menu) var(--ease-push) both;
   }
+  /* A chat's more-above / more-below cue comes and goes as the feed reaches an end. */
+  .chat-cue {
+    transition: opacity var(--motion-step-in);
+  }
   /* A tooltip (the goal's, a chart's) is drawn left to right in one wipe, as every HUD panel is. */
   .fui-tooltip {
     animation: fui-wipe var(--motion-menu) var(--ease-push) both;

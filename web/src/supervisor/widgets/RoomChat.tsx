@@ -8,6 +8,7 @@ import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
 import { AskFrame } from "../../chat/AskFrame";
 import { Entry } from "../../chat/ChatPane";
+import { Feed } from "../../chat/Feed";
 import { grouper, type Speaker } from "../../chat/speakers";
 import { ReplyBox } from "../../components/ReplyBox";
 import { Avatar } from "../../ui/Avatar";
@@ -212,22 +213,17 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
 
   return (
     <>
-      <div className="chat">
-        <div
-          ref={feed}
-          role="log"
-          aria-label="Room posts"
-          className="chat-feed"
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_END;
-          }}
-        >
+      <Feed
+        feedRef={feed}
+        label="Room posts"
+        onScroll={(el) => {
+          atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_END;
+        }}
+      >
           {error && <ErrorLine text={error} />}
           {loaded && rows.length === 0 && <p className="chat-empty">Nothing yet: the room starts with its first post.</p>}
           {rows}
-        </div>
-      </div>
+      </Feed>
       <div className="room-post">
         <div className="room-post-pickers">
           <ChoiceMenu label="To" name="Recipient" width="menu" items={recipients} value={to} onPick={setTo} />
