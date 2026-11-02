@@ -6,8 +6,22 @@ Stop ends the agent and keeps everything on disk: worktrees, branches, the task 
 from the Tasks view, cleans up a stopped task's disk after showing exactly what it will delete and what stays;
 branches are never deleted, and the record stays in the history.
 
-Each agent's chat stays readable too. Archive first copies its prompt and Claude transcripts to
-`transcripts/<task-id>/<agent-id>/` in the daemon's state folder, listed in the plan as staying, and never deletes
-that folder. If the copy fails, nothing is removed and the task's log says why.
+## The chats stay
+
+An archive deletes the agents, their sessions and their folders, and Claude Code removes the transcripts with them. So
+before anything is deleted, Archive copies each agent's chat into Fleet Manager's own state folder, so a task's
+conversations survive the cleanup:
+
+- Where: `transcripts/<task-id>/<agent-id>/` in the state folder (`state_dir`, see
+  [Configuration](../reference/configuration.md)).
+- What: the prompt that opened the chat (`PROMPT.md`), one `<session-id>.jsonl` transcript per Claude session, and a
+  `chat.json` with the session list and when the agent stopped. Expect a few MB per task.
+- In the plan: the archive confirmation lists this folder as staying, with its size. It is not counted in the space
+  the archive frees.
+- Never deleted: Archive does not remove this folder.
+- If the copy fails, nothing is deleted, and the task's log says why.
+
+An archived agent's chat history can still be read through the chat history API
+(`GET /api/agents/{id}/chat/history`). The task page does not show it yet.
 
 A task with an open pull request cannot be archived: merge or close the PR first.

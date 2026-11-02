@@ -17,5 +17,6 @@
 - **Task notices go to the product room.** A task's needs-you, checks and pull request notices are posted in its product room instead of filling the supervisor conversation, which now keeps only what you and the supervisor say.
 - **Chats never scroll sideways.** Long tool errors, call output and code wrap or scroll inside their own box, and long unbroken words wrap.
 - **The supervisor reads current code.** When a supervisor conversation starts or resumes, and when a task starts, Fleet Manager fast-forwards its own copies of your product repos to the latest default branch. The supervisor checks that before it reasons about a product's code, and if a copy is still behind it tells you and asks before going on.
+- **Archive keeps the chats.** Archiving a task now keeps its agents' chat transcripts (a few MB) in Fleet Manager's own folder, and the archive dialog lists them as staying, so a task's conversations survive the cleanup.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.
