@@ -33,7 +33,7 @@ const inRelease = (id: string, release: number | null) => fullTask(id, `task-${i
 function merged(id: string, release: number | null): Task {
   const t = fullTask(id, `task-${id}`, "archived", "stopped", {
     release,
-    prs: [{ url: "u", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false }],
+    prs: [{ url: "u", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false, merge_method: null }],
   });
   t.repos[0]!.changed = true;
   return t;

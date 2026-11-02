@@ -63,7 +63,8 @@ export function useMerge(task: Task | undefined, api: MergeApi, onChanged: () =>
             ? "CI is green: merge the PR"
             : "CI is green, but GitHub says the PR cannot merge yet";
   const number = prNumber(pr.url);
-  // The branch the PR lands on is the task's base for that repo; the daemon names the method only once it has merged.
+  // The branch the PR lands on is the task's base for that repo; the method is the one the daemon read with the checks.
+  const method = pr.merge_method ?? "the repo's merge method";
   const base = task.repos.find((w) => w.repo === pr.repo)?.from_branch ?? "its base branch";
 
   const merge = () => {
@@ -91,7 +92,7 @@ export function useMerge(task: Task | undefined, api: MergeApi, onChanged: () =>
       {asking && (
         <ConfirmDialog
           title="Merge PR"
-          body={`Merge PR #${number} into ${base}?`}
+          body={`Merge PR #${number} into ${base} with ${method}?`}
           go="Merge PR"
           goVariant="primary"
           onGo={merge}

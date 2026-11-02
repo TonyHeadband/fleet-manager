@@ -208,7 +208,7 @@ describe("Passport", () => {
   });
 
   it("an_open_pr_disables_archive_with_its_reason", async () => {
-    const pr = { url: "https://git.example/core/pull/1", repo: "core", state: "open" as const, merged_at: null, ci: "unknown" as const, failing_checks: [], can_merge: false };
+    const pr = { url: "https://git.example/core/pull/1", repo: "core", state: "open" as const, merged_at: null, ci: "unknown" as const, failing_checks: [], can_merge: false, merge_method: null };
     const [list, over] = withProducts([fullTask("s1", "bravo", "stopped", "stopped", { prs: [pr] })], "p");
     await tasks("s1", list, over);
     expect(button("Archive…")).toBeDisabled();

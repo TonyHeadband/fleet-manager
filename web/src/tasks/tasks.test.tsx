@@ -131,7 +131,7 @@ describe("Tasks view", () => {
 
   it("merged_filter", async () => {
     const merged = fullTask("m1", "mike", "archived", "stopped", {
-      prs: [{ url: "https://git.example/core/pull/1", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false }],
+      prs: [{ url: "https://git.example/core/pull/1", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false, merge_method: null }],
     });
     merged.repos[0]!.changed = true;
     const [list, over] = withProducts([merged, fullTask("s1", "bravo", "stopped", "stopped")], "p");
