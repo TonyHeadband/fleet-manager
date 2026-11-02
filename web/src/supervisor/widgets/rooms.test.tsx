@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetError } from "../../api/client";
 import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
-import { FakeEventSource, agent, factory, fakeClient } from "../../test/fixtures";
+import { FakeEventSource, agent, factory, fakeClient, task } from "../../test/fixtures";
 import { ROOMS } from "./Rooms";
 
 beforeEach(() => FakeEventSource.reset());
@@ -51,6 +51,25 @@ const SETTLE = 700;
 const settle = () => act(() => new Promise((r) => setTimeout(r, SETTLE)));
 
 describe("Rooms widget", () => {
+  it("archiving_a_task_refetches_the_rooms_and_drops_the_room_the_daemon_no_longer_lists", async () => {
+    const client = clientWith();
+    const props = (tasks: ReturnType<typeof task>[]) => ({ persona: "me", agents: AGENTS, tasks, loaded: true, baseUrl: "", client, factory });
+    const running = [task("t1", "running", null, 0), task("t2", "running", null, 0)];
+    const { rerender } = render(ROOMS.render(props(running)));
+    await roomButton(/Login fix/);
+    expect(client.rooms).toHaveBeenCalledTimes(1);
+    // The same tasks again (a poll with nothing changed) asks for nothing.
+    rerender(ROOMS.render(props(running.map((t) => ({ ...t })))));
+    await settle();
+    expect(client.rooms).toHaveBeenCalledTimes(1);
+    // Same ids, one now archived: the daemon's list no longer has its room.
+    vi.mocked(client.rooms).mockResolvedValue([ROOM_LIST[1]!]);
+    rerender(ROOMS.render(props([running[0]!, task("t2", "archived", "stopped", 0)])));
+    await waitFor(() => expect(client.rooms).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Login fix/ })).toBeNull());
+    expect(await roomButton(/Core/)).toHaveAttribute("aria-current", "true");
+  });
+
   it("a_room_picked_in_the_list_is_the_one_the_address_names_so_a_later_toast_reopens_another", async () => {
     window.location.hash = "#supervisor?c=s1&room=r2";
     const before = window.history.length;

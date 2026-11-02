@@ -26,8 +26,8 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
     if (named !== null) setPicked(named);
   }, [named]);
 
-  // A task started is a room opened: ask again when the task list changes.
-  const started = tasks.map((t) => t.id).join(" ");
+  // A task started is a room opened, and a task archived may close one: ask again when a task appears or changes state.
+  const started = tasks.map((t) => `${t.id}:${t.state}`).join(" ");
   const reload = useCallback(() => {
     client.rooms(persona).then(setRooms, (e) => setError(message(e)));
   }, [client, persona]);
