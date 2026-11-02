@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Task } from "../api/generated/Task";
 import { Board } from "./Board";
 import { Card, type CardKind } from "./Card";
 import { groups } from "../board/groups";
@@ -44,6 +45,20 @@ describe("Board", () => {
     expect(within(screen.getByRole("region", { name: "Alpha lane" })).getByText("fix the tests")).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Beta lane" })).getByText("nothing right")).toBeInTheDocument();
     expect(screen.queryByText("Needs you")).not.toBeInTheDocument();
+  });
+
+  it("a_review_card_shows_where_its_work_is_from_its_task_record", () => {
+    // Review's own badge would only say "Review": the task's PR, from its record, says where it is.
+    const tasks = {
+      r: { id: "r", repos: [{ repo: "core", changed: true }], prs: [{ url: "https://github.com/o/r/pull/499", repo: "core", state: "open", merged_at: null }], gate_runs: [] },
+      m: { id: "m", repos: [{ repo: "core", changed: true }], prs: [{ url: "https://github.com/o/r/pull/12", repo: "core", state: "merged", merged_at: 1 }], gate_runs: [] },
+    } as unknown as Record<string, Task>;
+    const agents = [agent({ id: "r", status: "review", goal: "t-r" }), agent({ id: "m", status: "stopped", goal: "t-m" }), agent({ id: "w", status: "working", goal: "t-w" })];
+    render(<Board schema={schema} agents={agents} tasks={tasks} now={NOW} onRun={vi.fn()} onOpen={vi.fn()} />);
+    expect(within(screen.getByRole("region", { name: "Review" })).getByText("PR #499")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Stopped" })).getByText("Merged")).toHaveAttribute("data-tone", "done");
+    // No record and no changes: nothing on the right.
+    expect(within(screen.getByRole("region", { name: "Working" })).queryByText(/PR|Merged|Changes/)).toBeNull();
   });
 
   it("puts each agent in the column the schema maps its status to", () => {
@@ -157,17 +172,21 @@ describe("Card", () => {
     expect(within(card).getByText("+1")).toHaveAttribute("title", "core\nportal");
   });
 
-  it("has_changes_is_a_dot_not_a_badge", () => {
-    draw(agent({ status: "review", has_changes: true }));
-    expect(screen.getByRole("img", { name: "Has changes" })).toHaveAttribute("title", "Has changes");
-    expect(screen.queryByText("Has changes")).toBeNull();
+  it("the_badge_row_holds_the_state_on_the_left_and_the_stage_on_the_right", () => {
+    // In Review the state would only repeat the column, so the stage alone says where the task is.
+    render(<Card schema={schema} agent={agent({ status: "review", has_changes: true })} now={0} stage={{ text: "PR #499", tone: "active", title: "PR open: u" }} onRun={vi.fn()} onOpen={vi.fn()} />);
+    const row = document.querySelector('[data-row="state"]')!;
+    expect(within(row as HTMLElement).getByText("PR #499")).toHaveAttribute("title", "PR open: u");
+    expect(within(row as HTMLElement).getByText("PR #499")).toHaveAttribute("data-tone", "active");
+    // The old "has changes" square is gone: the stage says it in words.
+    expect(screen.queryByText("Changes")).toBeNull();
   });
 
   it("shows only the fields whose condition holds", () => {
     draw(agent({ status: "working", paused: false }));
     expect(screen.queryByTitle("Blocked")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Paused")).not.toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: "Has changes" })).toBeNull();
+    expect(screen.queryByText("Changes")).toBeNull();
   });
 
   it("the_activity_reads_beside_the_avatar_with_the_actions", () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Agent } from "../api/generated/Agent";
 import type { Persona } from "../api/generated/Persona";
+import type { Task } from "../api/generated/Task";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { columnOfGroup, groups as groupsOf, stuck, type FleetDisplay, type Group } from "../board/groups";
 import type { RunAction } from "./Card";
@@ -21,6 +22,8 @@ interface Props extends TaskActions {
   /** The product has more than one repo, so each card names its agent's. */
   repos?: boolean;
   prs?: Record<string, boolean>;
+  /** The task records, by id, for each card's stage badge. */
+  tasks?: Record<string, Task>;
   onRun: RunAction;
   onOpen: (agent: Agent) => void;
   /** A click on the board that lands on no card, row or control. */

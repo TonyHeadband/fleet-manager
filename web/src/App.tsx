@@ -339,6 +339,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (release !== releaseFilter) setReleaseFilter(release);
   }, [release, releaseFilter]);
   // With no product selected there is nothing to narrow by, and the whole board shows, as in Lite.
+  const taskRecords = useMemo(() => Object.fromEntries((tasks?.tasks ?? []).map((t) => [t.id, t])), [tasks]);
   const shown = shownAgents(workAgents, { product, release, repos: filter, personas: personaPicks, tasks: tasks?.tasks ?? [] });
   const tags = personaTags(shown, personaCounts);
   const open = snapshot.agents.find((a) => a.id === openId);
@@ -1027,6 +1028,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
           tags={tags}
           display={display}
           prs={fleet.prs}
+          tasks={taskRecords}
           personas={personaList}
           onStopTask={(task, fleet) => {
             const lead = leadOf(task);

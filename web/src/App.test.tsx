@@ -103,7 +103,7 @@ describe("App", () => {
     it("release_filter_backlog_hides_assigned_tasks", async () => {
       localStorage.setItem("fleet.product", "p1");
       const products = vi.fn().mockResolvedValue({ products: [product("p1", "Pie", { releases: [{ id: 1, product: "p1", version: "1.0", start: "", target: "", released_at: null }] })] });
-      const tasks = vi.fn().mockResolvedValue({ tasks: [{ id: "a", release: 1 }, { id: "b", release: null }], orphans: [], clones_bytes: null });
+      const tasks = vi.fn().mockResolvedValue({ tasks: [{ id: "a", release: 1, repos: [] }, { id: "b", release: null, repos: [] }], orphans: [], clones_bytes: null });
       render(<App client={fakeClient({ products, tasks })} eventSource={factory} nowSeconds={() => 1300} />);
       await screen.findByRole("region", { name: "Working" });
       snapshot([agent({ id: "a", goal: "in 1.0", product: "p1" }), agent({ id: "b", goal: "in backlog", product: "p1" })]);

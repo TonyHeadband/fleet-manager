@@ -1,9 +1,11 @@
 import type { Agent } from "../api/generated/Agent";
 import type { ColumnDef } from "../api/generated/ColumnDef";
 import type { Persona } from "../api/generated/Persona";
+import type { Task } from "../api/generated/Task";
 import type { UiSchema } from "../api/generated/UiSchema";
 import { title } from "../api/schema";
 import { fleetName, orchestrated, since, taskId, type FleetDisplay, type Group } from "../board/groups";
+import { workStage } from "../board/stage";
 import { Card, type RunAction } from "./Card";
 import { FleetRow } from "./FleetRow";
 
@@ -30,6 +32,8 @@ interface Props extends TaskActions {
   repos?: boolean;
   /** Whether each task, by id, has an open pull request. */
   prs?: Record<string, boolean>;
+  /** The task records, by id: a card's stage badge reads its task's PRs, gate runs and commits. */
+  tasks?: Record<string, Task>;
   /** Whether a lead's fleet shows; `isOpen` and `onFold` are keyed by the lead's id. */
   isOpen?: (g: Group) => boolean;
   onFold?: (leadId: string) => void;
@@ -42,7 +46,7 @@ interface Props extends TaskActions {
  * orchestrated task's fleet follows its card, indented: full cards (Show), one row each (Compact), or none (Hide).
  */
 export function Column(props: Props) {
-  const { def, schema, rail = false, repos = false, now, selected = null, tags = {}, display = "compact", personas = [], prs = {}, isOpen = () => true, onFold = nothing, onStopTask = nothing, onRestart = nothing, onRun, onOpen } = props;
+  const { def, schema, rail = false, repos = false, now, selected = null, tags = {}, display = "compact", personas = [], prs = {}, tasks = {}, isOpen = () => true, onFold = nothing, onStopTask = nothing, onRestart = nothing, onRun, onOpen } = props;
   const cards = [...props.groups].sort((a, b) => since(a) - since(b));
   return (
     <section className="column" aria-label={def.title} data-tone={def.tone} data-dim={def.dim || undefined} data-rail={rail || undefined}>
@@ -60,7 +64,8 @@ export function Column(props: Props) {
           {cards.map((g) => {
             const a = g.lead;
             const common = { schema, now, repos, onRun, onOpen };
-            if (!orchestrated(g)) return <Card key={a.id} {...common} agent={a} selected={a.id === selected} tag={tags[a.persona]} />;
+            const stage = workStage(a, tasks[taskId(a)]);
+            if (!orchestrated(g)) return <Card key={a.id} {...common} agent={a} selected={a.id === selected} tag={tags[a.persona]} stage={stage} />;
             const open = isOpen(g);
             // Until the fleet view is loaded, the lead's activity says the task has a PR open, as in Lite.
             const pr = prs[taskId(a)] ?? a.activity === "PR open";
@@ -72,6 +77,7 @@ export function Column(props: Props) {
                   selected={a.id === selected}
                   tag={tags[a.persona]}
                   kind={{ type: "lead", group: g, display, open, onFold: () => onFold(a.id), onStopTask, onRestart }}
+                  stage={stage}
                 />
                 {display !== "hide" && open && g.fleet.length > 0 && (
                   <div className="fleet">

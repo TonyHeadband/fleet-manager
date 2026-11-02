@@ -176,7 +176,13 @@ export function useFleet(
         setSnapshot((prev) => boardReducer(prev, e));
         const k = e.kind;
         if (k.type === "supervisor_event") taskEvent.current?.(k.event);
-        if (k.type === "agent_created" || k.type === "agent_removed" || (k.type === "status_changed" && k.status === "stopped"))
+        // A task's stage moves too: its gate and PR come as it reaches Review, a merge or a landing as a task event.
+        if (
+          k.type === "agent_created" ||
+          k.type === "agent_removed" ||
+          k.type === "supervisor_event" ||
+          (k.type === "status_changed" && (k.status === "stopped" || k.status === "review"))
+        )
           reloadTasks();
       },
       factory,

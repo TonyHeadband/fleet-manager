@@ -84,7 +84,6 @@
 .footer-text[data-dimmed="true"] { color: var(--text-low); }
 /* A status mark: an upright bar of one size wherever it stands, never round (FUI); the changes mark a small square. */
 .dot, .log-dot, .log-dot-space { flex: none; width: var(--layout-bar-w); height: var(--layout-bar-h); }
-.changes-dot { flex: none; width: var(--layout-changes-dot); height: var(--layout-changes-dot); }
 .dot { background: var(--text-low); }
 .dot[data-notice="error"] { background: var(--danger); }
 .dot[data-notice="warning"] { background: var(--tone-attention); }

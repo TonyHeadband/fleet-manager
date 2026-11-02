@@ -81,7 +81,6 @@
 .card-activity { font-size: var(--size-small); color: var(--text-low); }
 .card-row .duration, .card-row .mono, .card-row .badge { flex: none; }
 .card-left > .card-activity { flex: 0 1 auto; min-width: 0; }
-.changes-dot { background: var(--text); }
 .repo, .repo-more { font-family: var(--font-mono); font-size: var(--size-meta); color: var(--text-low); font-weight: var(--weight-mono); }
 .repo { min-width: var(--card-min-name); overflow: hidden; text-overflow: ellipsis; }
 .repo-more { flex: none; }

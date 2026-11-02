@@ -150,12 +150,11 @@ describe("shared shapes", () => {
   });
 
   it("status_marks_are_rectangles", () => {
-    // No round dots: each is an upright bar of the canvas's size, wherever it stands; the changes mark a small square.
+    // No round dots: each is an upright bar of the canvas's size, wherever it stands.
     const files = (readdirSync("src", { recursive: true }) as string[]).filter((f) => f.endsWith(".css"));
     for (const f of files) expect(readFileSync(`src/${f}`, "utf8"), f).not.toMatch(/border-radius: 50%|aspect-ratio|--dot:/);
     const shell = readFileSync("src/shell/shell.css", "utf8");
     expect(shell).toMatch(/\.dot, \.log-dot, \.log-dot-space \{[^}]*width: var\(--layout-bar-w\);[^}]*height: var\(--layout-bar-h\);/);
-    expect(shell).toMatch(/\.changes-dot \{[^}]*width: var\(--layout-changes-dot\);[^}]*height: var\(--layout-changes-dot\);/);
   });
 
   it("controls_speak_in_mono_caps", () => {

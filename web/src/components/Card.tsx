@@ -9,6 +9,7 @@ import { Mark } from "../ui/icons";
 import { PlusMinus } from "../ui/PlusMinus";
 import { EdgeMotion } from "./EdgeMotion";
 import { Avatar } from "../ui/Avatar";
+import type { Stage } from "../board/stage";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
@@ -42,6 +43,8 @@ interface Props {
   /** The product has more than one repo, so the card names the agent's. */
   repos?: boolean;
   kind?: CardKind;
+  /** Where a task's work is (a solo agent's or a lead's card), on the right of the badge row. */
+  stage?: Stage | null;
   onRun: RunAction;
   onOpen: (agent: Agent) => void;
 }
@@ -101,11 +104,11 @@ function FoldToggle({ n, open, onFold }: { n: number; open: boolean; onFold: () 
 /**
  * One agent's card, read at a glance, in three fixed rows (`stateLine` picks what they say). Beside the persona's
  * avatar (a portrait slot): the title and time, then the activity or what a badge is about, with the actions on
- * hover or selection. Under them, the card's full width: the badge, whole, the changes dot and, in a product of
- * several repos, the repo. A task's lead adds the fleet's tally row and the task's own controls; a fleet agent drawn in
+ * hover or selection. Under them, the card's full width, a row of badges: on the left the agent's state (and, in a
+ * product of several repos, the repo), on the right where the task's work is (its stage). A task's lead adds the fleet's tally row and the task's own controls; a fleet agent drawn in
  * full adds a dashed outline. The rest (goal, activity, size, branch, persona) is the detail panel's.
  */
-export function Card({ schema, agent, now, selected = false, tag, repos: showRepos = false, kind = { type: "solo" }, onRun, onOpen }: Props) {
+export function Card({ schema, agent, now, selected = false, tag, repos: showRepos = false, kind = { type: "solo" }, stage = null, onRun, onOpen }: Props) {
   const confirm = useConfirm();
   const lead = kind.type === "lead" ? kind : null;
   // A task card is coloured by the column its group sits in, so a stuck fleet agent reads as Needs you.
@@ -214,9 +217,11 @@ export function Card({ schema, agent, now, selected = false, tag, repos: showRep
               </>
             )}
           </span>
-          {inSlot("changes").map((f) => (
-            <span key={f.key} className="changes-dot" role="img" aria-label={f.label} title={f.label} />
-          ))}
+          {stage && (
+            <Badge label={stage.title} field="stage" tone={stage.tone}>
+              {stage.text}
+            </Badge>
+          )}
         </div>
         {lead && (
           <div className="card-row" data-row="tally">

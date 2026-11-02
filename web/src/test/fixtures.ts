@@ -183,7 +183,7 @@ export function product(id: string, name = id, over: Partial<Product> = {}): Pro
 
 /** A task holding `bytes` on disk. */
 export function task(id: string, state: TaskState, stop_cause: StopCause | null, bytes: number): Task {
-  return { id, state, stop_cause, footprint: { measured_at: 0, items: [], total: bytes } } as unknown as Task;
+  return { id, state, stop_cause, repos: [], footprint: { measured_at: 0, items: [], total: bytes } } as unknown as Task;
 }
 
 /** A restart that started a daemon this window now owns, at the address the fakes start on. */
