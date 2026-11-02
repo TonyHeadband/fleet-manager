@@ -2,8 +2,8 @@ mod common;
 
 use common::*;
 use fleet_api::{
-    Agent, AgentId, GithubAuth, NewPersona, PersonaUpdate, Status, StopCause, TaskState, ToolError,
-    ToolId,
+    Agent, AgentId, GithubAuth, NewPersona, Persona, PersonaUpdate, Status, StopCause, TaskState,
+    ToolError, ToolId,
 };
 use fleet_daemon::personas::{
     check_command, normalize_host, persona_env, persona_id, PersonaError, Personas,
@@ -1022,4 +1022,80 @@ fn a_migrated_token_never_replaces_one_that_is_there() {
     assert_eq!(read_token(&path).as_deref(), Some("set_by_user"));
     let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
     assert_eq!(leftovers.len(), 1, "temp files were left behind");
+}
+
+/// A persona with a hand-edited `nicknames.json` whose entry `a` is 40 characters long; returns its file.
+async fn persona_with_invalid_nickname(ps: &Personas) -> (Persona, std::path::PathBuf) {
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    let file = std::path::Path::new(&p.claude_dir)
+        .parent()
+        .unwrap()
+        .join("nicknames.json");
+    let long = "x".repeat(40);
+    std::fs::write(&file, format!(r#"{{"a": "{long}", "c": "  Padded  "}}"#)).unwrap();
+    (p, file)
+}
+
+#[tokio::test]
+async fn setting_a_nickname_ignores_other_invalid_entries() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let (p, file) = persona_with_invalid_nickname(&ps).await;
+    ps.set_nickname(&p.id, "b", Some(" Bee ".into()))
+        .await
+        .unwrap();
+    let stored: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(stored["a"], "x".repeat(40));
+    assert_eq!(stored["b"], "Bee");
+    assert_eq!(stored["c"], "  Padded  ");
+}
+
+#[tokio::test]
+async fn setting_an_invalid_nickname_names_the_target_entry() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let (p, file) = persona_with_invalid_nickname(&ps).await;
+    let before = std::fs::read(&file).unwrap();
+    for bad in ["y".repeat(33), "two\nlines".to_string()] {
+        let err = ps.set_nickname(&p.id, "b", Some(bad)).await.unwrap_err();
+        assert!(
+            matches!(&err, PersonaError::BadNickname(s) if s == "b"),
+            "{err:?}"
+        );
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[tokio::test]
+async fn clearing_a_nickname_ignores_other_invalid_entries() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let (p, file) = persona_with_invalid_nickname(&ps).await;
+    ps.set_nickname(&p.id, "c", Some("  ".into()))
+        .await
+        .unwrap();
+    ps.set_nickname(&p.id, "b", None).await.unwrap();
+    let stored: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored["a"], "x".repeat(40));
+}
+
+#[tokio::test]
+async fn setting_a_nickname_on_a_deleted_persona_leaves_no_folder() {
+    let fx = fixture_without_persona().await;
+    let ps = personas(&fx);
+    let p = ps.create(new_persona("Home")).await.unwrap();
+    let dir = std::path::Path::new(&p.claude_dir)
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    ps.delete(&p.id).await.unwrap();
+    let err = ps
+        .set_nickname(&p.id, "b", Some("Bee".into()))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PersonaError::NotFound(_)), "{err:?}");
+    assert!(!dir.exists());
 }

@@ -83,20 +83,28 @@ fn read_nicknames(dir: &Path) -> BTreeMap<String, String> {
     }
 }
 
-/// Trimmed, blank ones dropped; each is one line of at most `MAX_NICKNAME` characters.
+/// One nickname, trimmed: `None` when blank, an error naming `specialist` when it is not one line of at most
+/// `MAX_NICKNAME` characters.
+fn clean_nickname(specialist: &str, nick: &str) -> Result<Option<String>, PersonaError> {
+    let nick = nick.trim();
+    if nick.is_empty() {
+        return Ok(None);
+    }
+    if nick.contains(['\n', '\r']) || nick.chars().count() > MAX_NICKNAME {
+        return Err(PersonaError::BadNickname(specialist.to_string()));
+    }
+    Ok(Some(nick.to_string()))
+}
+
+/// Every nickname cleaned by [`clean_nickname`], blank ones dropped.
 fn clean_nicknames(
     names: BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>, PersonaError> {
     let mut out = BTreeMap::new();
     for (specialist, nick) in names {
-        let nick = nick.trim();
-        if nick.is_empty() {
-            continue;
+        if let Some(nick) = clean_nickname(&specialist, &nick)? {
+            out.insert(specialist, nick);
         }
-        if nick.contains(['\n', '\r']) || nick.chars().count() > MAX_NICKNAME {
-            return Err(PersonaError::BadNickname(specialist));
-        }
-        out.insert(specialist, nick.to_string());
     }
     Ok(out)
 }
@@ -659,6 +667,8 @@ impl Personas {
         }
         if let Some(n) = req.nicknames {
             let _guard = self.nickname_lock.lock().await;
+            // Under the lock `delete` also takes to remove the folder: a deleted persona stays deleted.
+            self.row(id).await?;
             write_nicknames(&self.personas_dir.join(&row.id), &clean_nicknames(n)?)?;
         }
         self.store.update_persona(&row).await?;
@@ -678,19 +688,26 @@ impl Personas {
         name: &str,
         nickname: Option<String>,
     ) -> Result<(), PersonaError> {
+        let nickname = nickname
+            .as_deref()
+            .map(|n| clean_nickname(name, n))
+            .transpose()?
+            .flatten();
+        // The lock comes before the row check, and `delete` removes the folder under it, so the write below cannot
+        // recreate a deleted persona's folder.
+        let _guard = self.nickname_lock.lock().await;
         self.row(id).await?;
         let dir = self.personas_dir.join(id);
-        let _guard = self.nickname_lock.lock().await;
         let mut names = read_nicknames(&dir);
-        match nickname.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        match nickname {
             Some(n) => {
-                names.insert(name.to_string(), n.to_string());
+                names.insert(name.to_string(), n);
             }
             None => {
                 names.remove(name);
             }
         }
-        write_nicknames(&dir, &clean_nicknames(names)?)
+        write_nicknames(&dir, &names)
     }
 
     pub async fn delete(&self, id: &str) -> Result<(), PersonaError> {
@@ -701,7 +718,12 @@ impl Personas {
         }
         self.checked.lock().unwrap().remove(id);
         let clones = self.remove_clones(id).await;
-        match std::fs::remove_dir_all(self.personas_dir.join(id)) {
+        // Under the nickname lock, so a nickname write in flight finishes before the folder goes.
+        let removed = {
+            let _guard = self.nickname_lock.lock().await;
+            std::fs::remove_dir_all(self.personas_dir.join(id))
+        };
+        match removed {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
             _ => clones,
         }

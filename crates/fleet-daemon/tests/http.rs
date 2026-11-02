@@ -1726,6 +1726,26 @@ async fn nickname_put_merges_and_empty_clears() {
 }
 
 #[tokio::test]
+async fn nickname_put_ignores_other_invalid_entries() {
+    let srv = start().await;
+    let file = persona_folder(&srv).join("nicknames.json");
+    let long = "x".repeat(40);
+    std::fs::write(&file, json!({"old": long}).to_string()).unwrap();
+    let stored = || -> Value { serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap() };
+    assert_eq!(
+        text_of(&srv, "PUT", &nick_path("rust"), "Ferris").await.0,
+        204
+    );
+    assert_eq!(stored(), json!({"old": long, "rust": "Ferris"}));
+    let (s, v) = text_of(&srv, "PUT", &nick_path("rust"), &"y".repeat(33)).await;
+    assert_eq!(s, 400, "{v}");
+    assert!(v.to_string().contains("rust"), "{v}");
+    assert!(!v.to_string().contains("old"), "{v}");
+    assert_eq!(text_of(&srv, "PUT", &nick_path("rust"), "").await.0, 204);
+    assert_eq!(stored(), json!({"old": long}));
+}
+
+#[tokio::test]
 async fn move_route_refuses_a_taken_name() {
     let srv = start().await;
     let mine = "---\nname: mine\nsummary: s\n---\nbody\n";
