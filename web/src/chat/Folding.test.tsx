@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { panel } from "../generated/layout";
 import { Folding } from "./Folding";
 
@@ -13,7 +13,26 @@ function linesEndAt(bottoms: number[]) {
   };
 }
 
+type Observed = ((entries: { contentRect: { width: number; height: number } }[]) => void) | null;
+let observed: Observed = null;
+
+beforeEach(() => {
+  observed = null;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(cb: Observed) {
+        observed = cb;
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    },
+  );
+});
+
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
 });
@@ -79,5 +98,24 @@ describe("Folding", () => {
       </Folding>,
     );
     expect(screen.getByRole("button", { name: "Read more" })).toBeInTheDocument();
+  });
+
+  it("a_height_change_with_the_same_width_and_text_is_measured_again_once", () => {
+    // A font or weight setting rewraps the text: the box's height changes, its width and text do not.
+    linesEndAt([18]);
+    const walk = vi.spyOn(document, "createTreeWalker");
+    render(
+      <Folding text="same">
+        <p>same</p>
+      </Folding>,
+    );
+    const size = (width: number, height: number) => act(() => observed?.([{ contentRect: { width, height } }]));
+    size(400, 100);
+    const after = walk.mock.calls.length;
+    size(400, 140);
+    expect(walk.mock.calls.length).toBeGreaterThan(after);
+    const again = walk.mock.calls.length;
+    size(400, 140);
+    expect(walk.mock.calls.length).toBe(again);
   });
 });
