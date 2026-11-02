@@ -1,6 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { StorageSummary } from "../../api/generated/StorageSummary";
+import type { Task } from "../../api/generated/Task";
 import type { FootprintItem } from "../../api/generated/FootprintItem";
 import { agent, fakeClient, fullTask } from "../../test/fixtures";
 import { AGENTS_BY_STATUS } from "./AgentsByStatus";
@@ -13,8 +16,19 @@ const withItems = (items: FootprintItem[]) => ({
   total: items.reduce((s, i) => s + i.bytes, 0),
 });
 
+const SUMMARY: StorageSummary = {
+  worktrees_bytes: 5000,
+  build_bytes: 1500,
+  repos_bytes: 2000,
+  transcripts_bytes: 300,
+  daemon_bytes: 400,
+  disk_free_bytes: 90_000,
+  disk_total_bytes: 500_000,
+};
+const joinedTables = () => screen.getAllByRole("table", { hidden: true }).map((t) => t.textContent ?? "").join(" ");
+
 /** The daemon, which these widgets do not read. */
-const live = { baseUrl: "", client: fakeClient() };
+const live = { baseUrl: "", client: fakeClient({ storage: vi.fn().mockResolvedValue(SUMMARY) }), onArchive: () => {} };
 
 const agents = [
   agent({ id: "1", persona: "me", status: "working" }),
@@ -78,19 +92,62 @@ describe("widgets", () => {
     expect(stat(true)).toContain("0");
   });
 
-  it("storage_sums_footprints_by_kind", () => {
+  it("storage_bar_shows_the_routes_live_use_against_the_disks_free_space", async () => {
+    const storage = vi.fn().mockResolvedValue(SUMMARY);
+    render(STORAGE.render({ persona: "me", agents: [], tasks: [], loaded: true, ...live, client: fakeClient({ storage }) }));
+    await waitFor(() => expect(joinedTables()).toMatch(/worktrees\s*5\.0 KB/));
+    const joined = joinedTables();
+    expect(joined).toMatch(/build output\s*1\.5 KB/);
+    expect(joined).toMatch(/repo copies\s*2\.0 KB/);
+    expect(joined).toMatch(/kept chats\s*300 B/);
+    expect(joined).toMatch(/daemon files\s*400 B/);
+    // The scale ends at what Fleet Manager holds (9.2 KB) plus the disk's free space (90 KB).
+    expect(screen.getAllByText("99.2 KB").length).toBeGreaterThan(0);
+    expect(storage).toHaveBeenCalledTimes(1);
+  });
+
+  it("storage_reads_the_route_again_when_the_tasks_change", async () => {
+    const storage = vi.fn().mockResolvedValue(SUMMARY);
+    const props = { persona: "me", agents: [], loaded: true, ...live, client: fakeClient({ storage }) };
+    const { rerender } = render(STORAGE.render({ ...props, tasks: [fullTask("a", "a", "running", null, { persona: "me" })] }));
+    await waitFor(() => expect(storage).toHaveBeenCalledTimes(1));
+    rerender(STORAGE.render({ ...props, tasks: [fullTask("a", "a", "stopped", "stopped", { persona: "me" })] }));
+    await waitFor(() => expect(storage).toHaveBeenCalledTimes(2));
+  });
+
+  it("storage_lists_the_biggest_unarchived_merged_or_stopped_tasks_largest_first", async () => {
+    const sized = (bytes: number) => ({ footprint: withItems([item("core worktree", bytes)]) });
+    const merged = { repos: [{ repo: "core", changed: true }], prs: [{ repo: "core", state: "merged" }] } as unknown as Partial<Task>;
     const tasks = [
-      fullTask("a", "a", "running", null, { persona: "me", footprint: withItems([item("core worktree", 3000), item("build output", 1000)]) }),
-      fullTask("b", "b", "stopped", "stopped", { persona: "me", footprint: withItems([item("api worktree", 2000), item("build output", 500)]) }),
-      fullTask("c", "c", "archived", "stopped", { persona: "me", footprint: withItems([item("core worktree", 9e9)]) }),
-      fullTask("d", "d", "running", null, { persona: "other", footprint: withItems([item("core worktree", 9e9)]) }),
-      fullTask("e", "e", "running", null, { persona: "me", footprint: null }),
+      fullTask("small", "small", "stopped", "finished", { persona: "me", ...sized(1_000) }),
+      fullTask("big", "big", "stopped", "crashed", { persona: "me", ...sized(9_000_000) }),
+      fullTask("merged", "merged", "running", null, { persona: "me", ...merged, ...sized(5_000_000) }),
+      fullTask("running", "running", "running", null, { persona: "me", ...sized(8e9) }),
+      fullTask("gone", "gone", "archived", "stopped", { persona: "me", ...sized(9e9) }),
+      fullTask("other", "other", "stopped", "stopped", { persona: "other", ...sized(9e9) }),
     ];
     render(STORAGE.render({ persona: "me", agents: [], tasks, loaded: true, ...live }));
-    const joined = screen.getAllByRole("table", { hidden: true }).map((t) => t.textContent ?? "").join(" ");
-    expect(joined).toMatch(/worktrees\s*5\.0 KB/);
-    expect(joined).toMatch(/build output\s*1\.5 KB/);
-    expect(joined).not.toMatch(/GB/);
+    const rows = within(screen.getByRole("list", { name: "Biggest tasks to clean up" })).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "bigCrashed9.0 MBArchive",
+      "mergedMerged5.0 MBArchive",
+      "smallFinished1.0 KBArchive",
+    ]);
+  });
+
+  it("storage_archive_button_hands_the_task_to_the_archive_dialog", async () => {
+    const onArchive = vi.fn();
+    const tasks = [fullTask("t1", "alpha", "stopped", "stopped", { persona: "me" })];
+    render(STORAGE.render({ persona: "me", agents: [], tasks, loaded: true, ...live, onArchive }));
+    await userEvent.click(screen.getByRole("button", { name: "Archive alpha" }));
+    expect(onArchive).toHaveBeenCalledWith({ kind: "task", id: "t1", name: "alpha" });
+  });
+
+  it("agents_by_status_has_no_talking_bar", () => {
+    render(AGENTS_BY_STATUS.render({ persona: "me", agents, tasks: [], loaded: true, ...live }));
+    const joined = joinedTables();
+    expect(joined).not.toMatch(/Talking/);
+    expect(joined).toMatch(/Queued/);
   });
 
   it("widgets_show_their_title_and_no_footer", () => {

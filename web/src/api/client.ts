@@ -10,6 +10,7 @@ import type { ProductOverride } from "./generated/ProductOverride";
 import type { ProductUpdate } from "./generated/ProductUpdate";
 import type { RepoInfo } from "./generated/RepoInfo";
 import type { RepoUpsert } from "./generated/RepoUpsert";
+import type { StorageSummary } from "./generated/StorageSummary";
 import type { Agent } from "./generated/Agent";
 import type { AgentConfig } from "./generated/AgentConfig";
 import type { AgentSettings } from "./generated/AgentSettings";
@@ -214,6 +215,8 @@ export class FleetClient {
   /** Changes only the fields set; the others are null. */
   updatePersona = (id: string, u: PersonaUpdate) => this.call<Persona>("PATCH", `/api/personas/${encodeURIComponent(id)}`, u);
   tasks = () => this.call<TaskList>("GET", "/api/tasks");
+  /** Fleet Manager's live disk use by kind and the free space of the tasks folder's volume. */
+  storage = () => this.call<StorageSummary>("GET", "/api/storage");
   /** Asks the daemon to measure the tasks' footprints again. */
   refreshTasks = () => this.call<void>("POST", "/api/tasks/refresh");
   archivePlan = (id: string) =>

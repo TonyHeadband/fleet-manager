@@ -10,6 +10,7 @@ import { ownerSpeaker, supervisorSpeaker } from "../chat/speakers";
 import { Composer } from "../components/Composer";
 import { ReplyBox } from "../components/ReplyBox";
 import { navigate, onSupervisorPage, supervisorHref, useSupervisorConversation, useSupervisorRoom } from "../shell/routes";
+import type { ArchiveTarget } from "../tasks/ArchiveDialog";
 import { ErrorLine } from "../ui/ErrorLine";
 import { ConversationSelector } from "./ConversationSelector";
 import { AGENTS_BY_STATUS } from "./widgets/AgentsByStatus";
@@ -18,7 +19,7 @@ import { ROOMS } from "./widgets/Rooms";
 import { STORAGE } from "./widgets/Storage";
 import "./supervisor.css";
 
-export type SupervisorClient = ChatClient & RoomsClient & Pick<FleetClient, "conversations" | "newConversation" | "sendToConversation">;
+export type SupervisorClient = ChatClient & RoomsClient & Pick<FleetClient, "conversations" | "newConversation" | "sendToConversation" | "storage">;
 
 interface Props {
   baseUrl: string;
@@ -33,6 +34,8 @@ interface Props {
   tasks: Task[];
   /** The fleet snapshot has arrived. */
   loaded: boolean;
+  /** Opens the app's archive dialog for a task. */
+  onArchive: (target: ArchiveTarget) => void;
   factory?: EventSourceFactory;
 }
 
@@ -44,7 +47,7 @@ export function SupervisorPage(props: Props) {
   return <Page key={props.persona ?? ""} {...props} />;
 }
 
-function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, factory }: Props) {
+function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, onArchive, factory }: Props) {
   const [list, setList] = useState<Conversation[] | null>(null);
   // "+ New" was pressed: the chat is empty until the first message makes the conversation.
   const [blank, setBlank] = useState(false);
@@ -133,7 +136,7 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
         {persona !== null &&
           [AGENTS_BY_STATUS, STORAGE, ROOMS].map((w) => (
             <div key={w.id} className="supervisor-cell" data-cell={w.id}>
-              {w.render({ persona, agents, tasks, loaded, baseUrl, client, factory })}
+              {w.render({ persona, agents, tasks, loaded, baseUrl, client, onArchive, factory })}
             </div>
           ))}
       </section>

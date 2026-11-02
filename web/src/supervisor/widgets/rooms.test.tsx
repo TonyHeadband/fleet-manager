@@ -38,7 +38,7 @@ function clientWith(posts: Record<string, Post[]> = { r1: [FROM_TASK, FROM_SUPER
 }
 
 const show = (client = clientWith()) => {
-  render(ROOMS.render({ persona: "me", agents: AGENTS, tasks: [], loaded: true, baseUrl: "", client, factory }));
+  render(ROOMS.render({ persona: "me", agents: AGENTS, tasks: [], loaded: true, baseUrl: "", client, onArchive: () => {}, factory }));
   return client;
 };
 const roomButton = (name: RegExp) => screen.findByRole("button", { name });
@@ -53,7 +53,7 @@ const settle = () => act(() => new Promise((r) => setTimeout(r, SETTLE)));
 describe("Rooms widget", () => {
   it("archiving_a_task_refetches_the_rooms_and_drops_the_room_the_daemon_no_longer_lists", async () => {
     const client = clientWith();
-    const props = (tasks: ReturnType<typeof task>[]) => ({ persona: "me", agents: AGENTS, tasks, loaded: true, baseUrl: "", client, factory });
+    const props = (tasks: ReturnType<typeof task>[]) => ({ persona: "me", agents: AGENTS, tasks, loaded: true, baseUrl: "", client, onArchive: () => {}, factory });
     const running = [task("t1", "running", null, 0), task("t2", "running", null, 0)];
     const { rerender } = render(ROOMS.render(props(running)));
     await roomButton(/Login fix/);

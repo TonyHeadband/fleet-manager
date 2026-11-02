@@ -4,3 +4,9 @@
 .widget-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--space-item); }
 .widget-stat { flex: none; }
 .widget-chart { flex: 1; min-width: 0; min-height: 0; }
+.storage-bar { flex: none; min-width: 0; }
+.storage-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; font-family: var(--font-mono); font-size: var(--size-meta); font-weight: var(--weight-mono); }
+.storage-row { display: flex; align-items: center; gap: var(--space-item); padding: var(--layout-list-row-y) 0; border-top: 1px solid var(--border); }
+.storage-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-high); }
+.storage-stage { flex: none; color: var(--text-low); }
+.storage-size { flex: none; color: var(--text); }
