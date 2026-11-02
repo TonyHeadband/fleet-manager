@@ -138,6 +138,9 @@ pub struct ServiceOptions {
     pub scan_gate: Option<Arc<RequestGate>>,
     /// How long one PR list of the merge watcher may take; tests shorten it.
     pub merge_check_timeout: Duration,
+    /// The longest a supervisor conversation's start or resume waits for its persona's clones to be refreshed;
+    /// tests shorten it.
+    pub clone_refresh_cap: Duration,
     /// Test seam: added to every claude process's environment. Always empty in the daemon.
     #[doc(hidden)]
     pub extra_env: Vec<(String, String)>,
@@ -171,6 +174,7 @@ impl ServiceOptions {
             fleet_gate: None,
             scan_gate: None,
             merge_check_timeout: crate::merges::MERGE_CHECK_TIMEOUT,
+            clone_refresh_cap: crate::repos::CLONE_REFRESH_CAP,
             extra_env: Vec::new(),
             // The daemon's own PATH as is, and the config's defaults; `main` builds the real one.
             tools: crate::tools::Tools::new(
@@ -2918,6 +2922,12 @@ impl AgentService {
             if !has_transcript(&persona, session) {
                 return Err("nothing to resume: the Claude session left no transcript".into());
             }
+        }
+        // A supervisor reads the persona's clones: they are current before it is back, as at its first start.
+        if a.kind == AgentKind::Supervisor {
+            self.repos
+                .refresh_persona_clones(&persona, self.opts.clone_refresh_cap)
+                .await;
         }
         let vars = agent_vars(&persona, a.kind, &origin_urls(&a.workspaces).await);
         let interrupted_work = !a.paused && matches!(a.status, Status::Working | Status::NeedsYou);

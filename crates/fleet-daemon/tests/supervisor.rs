@@ -9,7 +9,7 @@ use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::supervisor::{conversation_folder, folder, Supervisor};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 async fn start(fx: &Fx, text: &str) -> Agent {
@@ -616,4 +616,159 @@ async fn blank_text_is_400_and_unknown_id_is_404() {
     )
     .await;
     assert_eq!(status, 400);
+}
+
+/// A persona clone of a bare origin, as `Repos` keeps them. Returns the clone, the origin and a working repo that
+/// pushes to the origin.
+struct Product {
+    clone: PathBuf,
+    bare: PathBuf,
+    work: PathBuf,
+}
+
+fn product_clone(fx: &Fx) -> Product {
+    let tmp = fx._tmp.path();
+    let work = make_repo(&tmp.join("work"));
+    let bare = tmp.join("up.git");
+    git(
+        tmp,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            work.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    git(&work, &["remote", "add", "origin", &file_url(&bare)]);
+    let clone = fx.repos.clone_dir(PERSONA, PRODUCT, "up");
+    std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
+    git(
+        tmp,
+        &["clone", "-q", &file_url(&bare), clone.to_str().unwrap()],
+    );
+    Product { clone, bare, work }
+}
+
+/// Pushes a commit adding `new.txt` to the origin; returns its id.
+fn push_new_file(p: &Product) -> String {
+    std::fs::write(p.work.join("new.txt"), "new").unwrap();
+    git(&p.work, &["add", "."]);
+    git(&p.work, &["commit", "-q", "-m", "new"]);
+    git(&p.work, &["push", "-q", "origin", "main"]);
+    git(&p.bare, &["rev-parse", "main"])
+}
+
+fn head(p: &Product) -> String {
+    git(&p.clone, &["rev-parse", "HEAD"])
+}
+
+#[tokio::test]
+async fn a_conversation_start_fast_forwards_a_clone_that_is_behind() {
+    let fx = fixture().await;
+    let p = product_clone(&fx);
+    let tip = push_new_file(&p);
+    assert_ne!(head(&p), tip);
+    start(&fx, "hello").await;
+    assert_eq!(head(&p), tip);
+    assert_eq!(
+        std::fs::read_to_string(p.clone.join("new.txt")).unwrap(),
+        "new"
+    );
+}
+
+#[tokio::test]
+async fn a_clone_with_local_changes_is_left_as_is_and_the_conversation_starts() {
+    let fx = fixture().await;
+    let p = product_clone(&fx);
+    push_new_file(&p);
+    let before = head(&p);
+    std::fs::write(p.clone.join("README"), "edited").unwrap();
+    let a = start(&fx, "hello").await;
+    assert_ne!(a.status, Status::Stopped);
+    assert_eq!(head(&p), before);
+    assert_eq!(
+        std::fs::read_to_string(p.clone.join("README")).unwrap(),
+        "edited"
+    );
+    assert!(!p.clone.join("new.txt").exists());
+}
+
+#[tokio::test]
+async fn a_failed_fetch_does_not_block_the_start_and_leaves_the_clone() {
+    let fx = fixture().await;
+    let p = product_clone(&fx);
+    push_new_file(&p);
+    let before = head(&p);
+    git(
+        &p.clone,
+        &["remote", "set-url", "origin", "/nonexistent/up.git"],
+    );
+    let a = start(&fx, "hello").await;
+    assert_ne!(a.status, Status::Stopped);
+    assert_eq!(head(&p), before);
+}
+
+#[tokio::test]
+async fn a_clone_off_the_default_branch_is_left_as_is() {
+    let fx = fixture().await;
+    let p = product_clone(&fx);
+    push_new_file(&p);
+    git(&p.clone, &["checkout", "-q", "-b", "side"]);
+    let before = head(&p);
+    start(&fx, "hello").await;
+    assert_eq!(head(&p), before);
+    assert_eq!(git(&p.clone, &["branch", "--show-current"]), "side");
+}
+
+#[tokio::test]
+async fn a_message_that_resumes_a_conversation_fast_forwards_a_clone_that_is_behind() {
+    let fx = slow_start().await;
+    let p = product_clone(&fx);
+    let a = exited(&fx).await;
+    let tip = push_new_file(&p);
+    assert_ne!(head(&p), tip);
+    let srv = serve(fx).await;
+    assert_eq!(send(&srv, &a.id, "are we there yet?").await, 204);
+    wait_screen_in(&srv.fx.sessions, &a.session, |s| {
+        s.contains("entry<<are we there yet?>>")
+    })
+    .await;
+    assert_eq!(head(&p), tip);
+}
+
+#[tokio::test]
+async fn a_fetch_that_hangs_ends_at_the_cap_and_the_start_goes_ahead() {
+    let fx = fixture_options(|_| {}, |o| o.clone_refresh_cap = Duration::from_millis(800)).await;
+    let p = product_clone(&fx);
+    push_new_file(&p);
+    let before = head(&p);
+    // Accepts and never answers: git waits for the first bytes of the protocol.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let held = std::thread::spawn(move || {
+        let mut streams = Vec::new();
+        while let Ok((s, _)) = listener.accept() {
+            streams.push(s);
+        }
+    });
+    git(
+        &p.clone,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &format!("git://127.0.0.1:{port}/up.git"),
+        ],
+    );
+    let started = std::time::Instant::now();
+    let a = start(&fx, "hello").await;
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_ne!(a.status, Status::Stopped);
+    assert_eq!(head(&p), before);
+    drop(held);
 }

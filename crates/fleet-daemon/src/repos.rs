@@ -304,6 +304,9 @@ pub struct Repos {
     base_locks: Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
 }
 
+/// The longest a supervisor conversation's start or resume waits for all of its persona's clones to be refreshed.
+pub const CLONE_REFRESH_CAP: Duration = Duration::from_secs(10);
+
 /// How long `behind_origin` waits for the remote; past it there is no warning.
 const LS_REMOTE_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -803,23 +806,11 @@ impl Repos {
             .into_iter()
             .filter_map(|r| r.path)
             .collect();
-        let subdirs = |d: &Path| -> Vec<PathBuf> {
-            std::fs::read_dir(d)
-                .map(|rd| {
-                    rd.flatten()
-                        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-                        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
-                        .map(|e| e.path())
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let is_repo = |d: &Path| std::fs::symlink_metadata(d.join(".git")).is_ok();
         // A clone from before products (`repos/<persona>/<repo>`) is a repo, not a product folder: its own subfolders
         // are no bases.
         for persona in subdirs(&self.clones_dir()) {
-            for product in subdirs(&persona).into_iter().filter(|d| !is_repo(d)) {
-                bases.extend(subdirs(&product).into_iter().filter(|d| is_repo(d)));
+            for product in subdirs(&persona).filter(|d| !is_repo(d)) {
+                bases.extend(subdirs(&product).filter(|d| is_repo(d)));
             }
         }
         bases.sort();
@@ -909,8 +900,9 @@ impl Repos {
                 head
             }
             Start::OriginHead => {
-                if let Err(e) = git::fetch(&r.base, &persona.vars).await {
-                    warning = Some(format!("could not fetch {}: {e}", r.row.name));
+                match git::fetch(&r.base, &persona.vars).await {
+                    Ok(()) => self.fast_forward_logged(&r.base, &r.row.name).await,
+                    Err(e) => warning = Some(format!("could not fetch {}: {e}", r.row.name)),
                 }
                 match git::origin_head(&r.base).await? {
                     Some((commit, name)) => (commit, Some(name)),
@@ -920,6 +912,102 @@ impl Repos {
         };
         let wt = git::create(&r.base, prefix, slug, dest, &commit, from_branch).await?;
         Ok((wt, warning))
+    }
+
+    /// Brings every clone `persona` keeps (`repos/<persona>/<product>/<repo>`) up to its remote's default branch,
+    /// all at once, and returns when they are done or after `cap`, whichever comes first. A clone that cannot be
+    /// refreshed is left as it is and the reason logged; this never fails. The caller waits for it before launching
+    /// a supervisor, so what the supervisor reads is current.
+    pub async fn refresh_persona_clones(&self, persona: &PersonaEnv, cap: Duration) {
+        let clones = self.persona_clones(&persona.id);
+        if clones.is_empty() {
+            return;
+        }
+        let all = futures_util::future::join_all(clones.iter().map(|base| async move {
+            let name = clone_name(base);
+            let _base = self.lock_base(base).await;
+            match git::fetch(base, &persona.vars).await {
+                Ok(()) => self.fast_forward_logged(base, &name).await,
+                Err(e) => warn!(
+                    repo = %name,
+                    reason = %redact_text(&format!("cannot fetch: {e}")),
+                    "clone not refreshed"
+                ),
+            }
+        }));
+        // Dropping the unfinished futures ends the git calls they run, and everything those started.
+        if tokio::time::timeout(cap, all).await.is_err() {
+            warn!(
+                persona = %persona.id,
+                cap_secs = cap.as_secs_f32(),
+                "refreshing the persona's clones took too long; the unfinished ones are left as they are"
+            );
+        }
+    }
+
+    /// `fast_forward`, with a skip logged as a warning (the repo's name and the reason) rather than returned.
+    async fn fast_forward_logged(&self, base: &Path, name: &str) {
+        if let Err(reason) = self.fast_forward(base).await {
+            warn!(repo = %name, reason = %redact_text(&reason), "clone not fast-forwarded");
+        }
+    }
+
+    /// After a fetch, fast-forwards the clone's checkout to `origin/HEAD` (else, with that unset, to the remote
+    /// branch of the one it is on). `Err` is the reason it was left exactly as it is: local changes, a HEAD that is
+    /// detached or not on the default branch, or a history that cannot fast-forward. Worktrees' branches are never
+    /// touched. The caller holds `lock_base`.
+    async fn fast_forward(&self, base: &Path) -> Result<(), String> {
+        let why = |what: &'static str| move |e: GitError| format!("{what}: {e}");
+        if git::is_dirty(base)
+            .await
+            .map_err(why("cannot read its status"))?
+        {
+            return Err("it has local changes".into());
+        }
+        let Some(branch) = git::current_branch(base)
+            .await
+            .map_err(why("cannot read its branch"))?
+        else {
+            return Err("HEAD is detached".into());
+        };
+        let target = match git::origin_head(base)
+            .await
+            .map_err(why("cannot read origin/HEAD"))?
+        {
+            Some((_, name)) => {
+                let default = name.strip_prefix("origin/").unwrap_or(&name);
+                if default != branch {
+                    return Err(format!(
+                        "it is on {branch}, not the default branch {default}"
+                    ));
+                }
+                name
+            }
+            None => {
+                let name = format!("origin/{branch}");
+                let known = git::has_commit(base, &format!("refs/remotes/{name}"))
+                    .await
+                    .map_err(why("cannot read its refs"))?;
+                if !known {
+                    return Err(format!("origin has no {branch} and origin/HEAD is unset"));
+                }
+                name
+            }
+        };
+        let no_hooks = self.state_dir.join("no-hooks");
+        git::fast_forward(base, &no_hooks, &target)
+            .await
+            .map_err(|e| format!("cannot fast-forward to {target}: {e}"))
+    }
+
+    /// Every persona clone on disk for `persona`, as `all_bases` finds them.
+    fn persona_clones(&self, persona: &str) -> Vec<PathBuf> {
+        let mut clones = Vec::new();
+        for product in subdirs(&self.clones_dir().join(persona)).filter(|d| !is_repo(d)) {
+            clones.extend(subdirs(&product).filter(|d| is_repo(d)));
+        }
+        clones.sort();
+        clones
     }
 
     /// Creates a worktree at `dest` on `branch` from the tip of the local branch `from` of `base` (worktrees share
@@ -959,6 +1047,41 @@ impl Repos {
         }
         Ok(())
     }
+}
+
+/// The folders in `d` that a clone or a product may be: no hidden ones (`.tmp-*`).
+fn subdirs(d: &Path) -> impl Iterator<Item = PathBuf> {
+    std::fs::read_dir(d)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .map(|e| e.path())
+}
+
+fn is_repo(d: &Path) -> bool {
+    std::fs::symlink_metadata(d.join(".git")).is_ok()
+}
+
+fn clone_name(base: &Path) -> String {
+    base.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// `text` with every URL in it redacted, for a git error that may quote a remote.
+fn redact_text(text: &str) -> String {
+    text.split(' ')
+        .map(|w| {
+            if w.contains("://") {
+                redact_url(w)
+            } else {
+                w.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn split_branch(branch: &str) -> Result<(&str, &str), RepoError> {
