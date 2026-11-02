@@ -1789,3 +1789,90 @@ async fn an_unknown_or_path_like_agent_has_no_kept_chat() {
         }
     }
 }
+
+// Relies on Unix directory permission bits (0o555).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_retry_after_a_partial_removal_keeps_the_prompt() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = fixture().await;
+    let addr = serve(&fx).await;
+    let a = stopped(&fx, "retry keeps the prompt", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let before = history(addr, &a.id, "").await;
+    assert!(matches!(before.items[0].body, ChatBody::Prompt { .. }));
+    // The daemon's folder of the agent is removed after the task folder, whose PROMPT.md is gone by then.
+    let ro = fx.state_dir.join("agents").join(&a.id.0).join("ro");
+    std::fs::create_dir_all(&ro).unwrap();
+    std::fs::write(ro.join("f"), "x").unwrap();
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let restore = Writable(ro.clone());
+
+    let err = archive_now(&fx, &a.id).await.unwrap_err();
+
+    assert!(matches!(err, ServiceError::Removal(_)), "{err}");
+    assert!(
+        !PathBuf::from(&a.workdir).join(PROMPT_FILE).exists(),
+        "the first try removed the task's PROMPT.md"
+    );
+    assert!(kept_dir(&fx, &a.id, &a.id).join(PROMPT_FILE).is_file());
+
+    drop(restore);
+    archive_now(&fx, &a.id).await.unwrap();
+
+    assert!(kept_dir(&fx, &a.id, &a.id).join(PROMPT_FILE).is_file());
+    assert_eq!(history(addr, &a.id, "").await, before);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_kept_folder_that_is_a_symlink_stops_the_archive() {
+    for tmp_sibling in [false, true] {
+        let fx = fixture().await;
+        let a = stopped(&fx, "linked", &["core"]).await;
+        chatted(&fx, &a.id, "solo").await;
+        let root = fx.state_dir.join("transcripts");
+        std::fs::create_dir_all(&root).unwrap();
+        let elsewhere = fx._tmp.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("mine"), "x").unwrap();
+        let link = if tmp_sibling {
+            root.join(format!(".{}.tmp", a.id.0))
+        } else {
+            root.join(&a.id.0)
+        };
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let wt = PathBuf::from(&a.workspaces[0].worktree);
+
+        let err = archive_now(&fx, &a.id).await.unwrap_err();
+
+        assert!(matches!(err, ServiceError::Keep(_)), "{err}");
+        assert!(err.to_string().contains("symbolic link"), "{err}");
+        assert_eq!(entries(&elsewhere), ["mine"], "nothing written through it");
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        assert!(wt.is_dir(), "nothing was removed");
+        assert!(PathBuf::from(&a.workdir).join(PROMPT_FILE).is_file());
+        let p = fx.store.task(&a.id).await.unwrap().unwrap();
+        assert_eq!(p.state, TaskState::Stopped);
+        assert_eq!(p.log.last().unwrap().text, format!("archive failed: {err}"));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_relocated_transcripts_folder_is_followed() {
+    let fx = fixture().await;
+    let a = stopped(&fx, "relocated", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let moved = fx._tmp.path().join("moved-transcripts");
+    std::fs::create_dir_all(&moved).unwrap();
+    std::os::unix::fs::symlink(&moved, fx.state_dir.join("transcripts")).unwrap();
+
+    archive_now(&fx, &a.id).await.unwrap();
+
+    assert!(moved
+        .join(&a.id.0)
+        .join(&a.id.0)
+        .join("chat.json")
+        .is_file());
+}

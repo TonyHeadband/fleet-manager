@@ -63,8 +63,10 @@ pub fn bytes(sources: &[Source]) -> u64 {
 }
 
 /// Copies `sources` to `<root>/<task>/<agent>/`: into a temp folder first, then renamed into place, so the folder is
-/// there whole or not at all; one left by an earlier try is replaced. On any error the temp folder is removed and
-/// nothing else of `root` is changed. Blocking.
+/// there whole or not at all; one left by an earlier try is replaced. A file the source no longer has (an earlier
+/// try already deleted the PROMPT.md, or a transcript) but the earlier copy does is carried over, so a retry never
+/// loses what an earlier try kept. On any error the temp folder is removed and nothing else of `root` is changed.
+/// A kept folder or temp folder that is a symbolic link is refused, not replaced. Blocking.
 pub fn keep(root: &Path, task: &str, sources: &[Source]) -> std::io::Result<()> {
     let plain = |n: &str| {
         is_plain(n).then_some(()).ok_or_else(|| {
@@ -77,29 +79,64 @@ pub fn keep(root: &Path, task: &str, sources: &[Source]) -> std::io::Result<()> 
     plain(task)?;
     std::fs::create_dir_all(root)?;
     let tmp = root.join(format!(".{task}.tmp"));
+    let earlier = root.join(task);
+    for path in [&tmp, &earlier] {
+        refuse_link(path)?;
+    }
     crate::archive::remove_whole(&tmp)?;
     let copied = (|| {
         for s in sources {
             plain(&s.agent)?;
             let dir = tmp.join(&s.agent);
             std::fs::create_dir_all(&dir)?;
-            if let Some(prompt) = &s.prompt {
-                std::fs::copy(prompt, dir.join(PROMPT_FILE))?;
+            let before = earlier.join(&s.agent);
+            match &s.prompt {
+                Some(prompt) => {
+                    std::fs::copy(prompt, dir.join(PROMPT_FILE))?;
+                }
+                None => carry_over(&before, &dir, PROMPT_FILE)?,
             }
             for (session, path) in &s.transcripts {
                 plain(session)?;
                 std::fs::copy(path, dir.join(format!("{session}.jsonl")))?;
             }
+            for (session, _) in &s.chat.sessions {
+                let name = format!("{session}.jsonl");
+                if is_plain(session) && !dir.join(&name).exists() {
+                    carry_over(&before, &dir, &name)?;
+                }
+            }
             std::fs::write(dir.join(CHAT_FILE), chat_json(&s.chat)?)?;
         }
         // A leftover of an earlier try goes only now, so a failed copy changes nothing.
-        crate::archive::remove_whole(&root.join(task))?;
-        std::fs::rename(&tmp, root.join(task))
+        crate::archive::remove_whole(&earlier)?;
+        std::fs::rename(&tmp, &earlier)
     })();
     if copied.is_err() {
         let _ = crate::archive::remove_whole(&tmp);
     }
     copied
+}
+
+/// Fails when `path` is a symbolic link: nothing is replaced or deleted through one.
+fn refuse_link(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} is a symbolic link", path.display()),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Copies `name` from the agent's folder of an earlier try into `dir`, when that is a regular file there.
+fn carry_over(before: &Path, dir: &Path, name: &str) -> std::io::Result<()> {
+    let is_dir = std::fs::symlink_metadata(before).is_ok_and(|m| m.is_dir());
+    let old = before.join(name);
+    if is_dir && std::fs::symlink_metadata(&old).is_ok_and(|m| m.is_file()) {
+        std::fs::copy(&old, dir.join(name))?;
+    }
+    Ok(())
 }
 
 /// A kept chat: where its files are, and what `chat.json` says.
@@ -187,6 +224,29 @@ mod tests {
             std::fs::read_to_string(root.join("t/earlier")).unwrap(),
             "x"
         );
+    }
+
+    #[test]
+    fn a_file_the_source_lost_is_carried_over_from_the_earlier_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("transcripts");
+        let old = root.join("t/a");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join(PROMPT_FILE), "the prompt").unwrap();
+        std::fs::write(old.join("s1.jsonl"), "one").unwrap();
+        std::fs::write(old.join("s2.jsonl"), "old two").unwrap();
+        let fresh = tmp.path().join("s2.jsonl");
+        std::fs::write(&fresh, "new two").unwrap();
+        let mut src = source("a", None);
+        src.chat.sessions = vec![("s1".into(), 1), ("s2".into(), 2)];
+        src.transcripts = vec![("s2".into(), fresh)];
+
+        keep(&root, "t", &[src]).unwrap();
+
+        let read = |n: &str| std::fs::read_to_string(root.join("t/a").join(n)).unwrap();
+        assert_eq!(read(PROMPT_FILE), "the prompt");
+        assert_eq!(read("s1.jsonl"), "one");
+        assert_eq!(read("s2.jsonl"), "new two", "a source that exists wins");
     }
 
     #[test]
