@@ -77,13 +77,15 @@ export function stateBadge(fields: FieldDef[], agent: Agent): { field: FieldDef;
 const SUBJECT = /^wants (?:to run|repo) (.+)$/;
 
 /**
- * The card's one state line: the state badge, unless the column already says it (a plain "Stopped" in Stopped), and
- * the part of the activity nothing else on the card says. Needs you names what it waits on beside its reason; a
- * finished review and a stopped agent's last words add nothing to their column.
+ * The card's one state line: the state badge, unless something else on the card already says it (a plain "Stopped"
+ * in Stopped, or a merge stop, which the stage badge reads as Merged), and the part of the activity nothing else on
+ * the card says. Needs you names what it waits on beside its reason; a finished review and a stopped agent's last
+ * words add nothing to their column.
  */
 export function stateLine(schema: UiSchema, agent: Agent): { badge: ReturnType<typeof stateBadge>; text: string | null } {
   const found = stateBadge(schema.card_fields, agent);
-  const badge = found && found.text !== columnFor(schema, agent)?.title ? found : null;
+  const said = found?.text === columnFor(schema, agent)?.title || (found?.field.key === "stop_cause" && agent.stop_cause === "merged");
+  const badge = found && !said ? found : null;
   const activity = agent.activity || null;
   const text =
     agent.status === "needs_you"

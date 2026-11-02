@@ -108,4 +108,8 @@ describe("stateLine", () => {
     expect(line({ status: "stopped", stop_cause: "stopped", activity: "stopped by you" })).toEqual([null, null]);
     expect(line({ status: "stopped", stop_cause: "crashed", activity: "crashed while running Bash" })).toEqual(["Crashed", null]);
   });
+
+  it("stopped_by_a_merge_leaves_merged_to_the_stage_badge", () => {
+    expect(line({ status: "stopped", stop_cause: "merged", activity: "stopped: its PRs merged" })).toEqual([null, null]);
+  });
 });
