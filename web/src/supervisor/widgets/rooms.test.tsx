@@ -51,6 +51,31 @@ const SETTLE = 700;
 const settle = () => act(() => new Promise((r) => setTimeout(r, SETTLE)));
 
 describe("Rooms widget", () => {
+  it("a_room_picked_in_the_list_is_the_one_the_address_names_so_a_later_toast_reopens_another", async () => {
+    window.location.hash = "#supervisor?c=s1&room=r2";
+    const before = window.history.length;
+    show();
+    expect(await screen.findByRole("region", { name: "Core" })).toBeInTheDocument();
+    await userEvent.click(await roomButton(/Login fix/));
+    expect(await screen.findByRole("region", { name: "Login fix" })).toBeInTheDocument();
+    // Replaced, not pushed, and in step with the pick.
+    expect(window.location.hash).toBe("#supervisor?c=s1&room=r1");
+    expect(window.history.length).toBe(before);
+    // A toast for Core links to the same address as before the pick: it must open Core again.
+    act(() => {
+      window.location.hash = "#supervisor?c=s1&room=r2";
+    });
+    expect(await screen.findByRole("region", { name: "Core" })).toBeInTheDocument();
+    window.location.hash = "";
+  });
+
+  it("an_operation_room_opens_by_its_id", async () => {
+    window.location.hash = "#supervisor?c=s1&room=r1";
+    show();
+    expect(await screen.findByRole("region", { name: "Login fix" })).toBeInTheDocument();
+    window.location.hash = "";
+  });
+
   it("the_room_the_address_names_opens", async () => {
     window.location.hash = "#supervisor?c=s1&room=r2";
     show();

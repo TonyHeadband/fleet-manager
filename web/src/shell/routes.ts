@@ -39,6 +39,19 @@ export function supervisorHref(conversation?: string | null, room?: string | nul
   return s ? `#supervisor?${s}` : "#supervisor";
 }
 
+/** Makes `room` the one the address names, replacing the entry (no back-button step), so a later link to another room
+ * is a change of address even when it is the room the owner left. Only on the Supervisor page. */
+export function replaceSupervisorRoom(room: string): void {
+  const [view, query = ""] = window.location.hash.split("?");
+  if (view !== "#supervisor") return;
+  const q = new URLSearchParams(query);
+  if (q.get("room") === room) return;
+  q.set("room", room);
+  window.history.replaceState(window.history.state, "", `${view}?${q.toString()}`);
+  // replaceState fires nothing: tell the hash's readers.
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
 /** A product's room id, as the daemon names it (`rooms::product_room_id`). */
 export const productRoomId = (product: string) => `product:${product}`;
 
