@@ -104,6 +104,9 @@ describe("Archive dialog", () => {
     const css = readFileSync("src/tasks/tasks.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/\.dialog\.archive-dialog \{[^}]*max-height: calc\(100% - 2 \* var\(--space-row-x\)\);[^}]*display: flex;/);
     expect(css).toMatch(/\.archive-plan \{[^}]*min-height: 0; overflow-y: auto;/);
+    // The backdrop's row is the window's height, or the dialog's max-height has nothing to be measured against.
+    const shell = readFileSync("src/shell/shell.css", "utf8");
+    expect(shell).toMatch(/\.dialog-backdrop \{[^}]*grid-template-rows: minmax\(0, 1fr\);/);
   });
 
   it("a_plan_for_another_task_does_not_enable_archive", async () => {
