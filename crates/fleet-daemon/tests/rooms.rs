@@ -2962,3 +2962,45 @@ async fn the_owner_approves_a_breakdown_from_the_room() {
         (409, Some("breakdown v1 is stale: v3 is the latest"))
     );
 }
+
+/// A parked line whose send was raced by a turn stays parked: it is typed at the next run, hidden, once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_parked_post_survives_a_raced_send_and_stays_hidden() {
+    let fx = fixture().await;
+    rooms::start_delivery_watcher(fx.svc.clone());
+    rooms::product_room(&fx.store, PRODUCT).await.unwrap();
+    let sup = conversation(&fx).await;
+    let session = ready_conversation(&fx, &sup).await;
+    look_in(&fx, &sup, &product_room()).await;
+    fx.svc.stop(&sup).await.unwrap();
+    assert!(wait_until(|| async { !fx.sessions.alive(&session) }).await);
+    let a = direct_from(&fx, None).await;
+    posted_id(
+        &tool(
+            &fx.svc,
+            &a,
+            "room_post",
+            json!({ "kind": "message", "text": "rebase on main" }),
+        )
+        .await,
+    );
+    // The owner's message resumes it and is pending when the watcher's flush tries the parked line.
+    Supervisor::new(fx.svc.clone())
+        .message(&sup, "any news?")
+        .await
+        .unwrap();
+    reach(&fx, &sup, Status::Review).await;
+    let name = {
+        let t = fx.store.task(&a).await.unwrap().unwrap();
+        t.title.filter(|t| !t.is_empty()).unwrap_or(t.name)
+    };
+    let line = format!(
+        "{NOTICE} {PARKED_TAG} new message from {name} in {}; call room_read.",
+        product_room()
+    );
+    let entry = format!("entry<<{line}>>");
+    wait_screen_in(&fx.sessions, &session, |s| s.contains(&entry)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let pane = fx.sessions.screen_text(&session).unwrap();
+    assert_eq!(pane.matches(&entry).count(), 1, "{pane}");
+}

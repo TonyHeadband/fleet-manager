@@ -81,15 +81,27 @@ impl Notices {
             .unwrap_or_default()
     }
 
-    /// Puts back lines that could not be typed, ahead of any queued since.
-    fn restore(&self, agent: &AgentId, mut lines: Vec<String>) {
-        let mut q = self.queue.lock().expect("notices poisoned");
-        for l in q.remove(agent).unwrap_or_default() {
-            if !lines.contains(&l) {
-                lines.push(l);
+    /// Puts back lines that could not be typed, ahead of any queued since: queued ones to the queue, parked ones to
+    /// the parked list, so a parked line still resumes nothing.
+    fn restore(&self, agent: &AgentId, queued: Vec<String>, parked: Vec<String>) {
+        fn put(
+            map: &Mutex<HashMap<AgentId, Vec<String>>>,
+            agent: &AgentId,
+            mut lines: Vec<String>,
+        ) {
+            if lines.is_empty() {
+                return;
             }
+            let mut m = map.lock().expect("notices poisoned");
+            for l in m.remove(agent).unwrap_or_default() {
+                if !lines.contains(&l) {
+                    lines.push(l);
+                }
+            }
+            m.insert(agent.clone(), lines);
         }
-        q.insert(agent.clone(), lines);
+        put(&self.queue, agent, queued);
+        put(&self.parked, agent, parked);
     }
 
     /// Whether the agent's turn is still to show. A status that changed in a later second than the mark means the
@@ -258,14 +270,17 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
         if matches!(a.status, Status::Working | Status::NeedsYou) {
             return;
         }
-        let mut lines = svc.notices.take(id);
+        let queued = svc.notices.take(id);
         // Parked lines ride along with a run that happens anyway, never bring one about.
-        if a.status != Status::Stopped || !lines.is_empty() {
-            lines.extend(svc.notices.take_parked(id));
-        }
-        if lines.is_empty() {
+        let parked = if a.status != Status::Stopped || !queued.is_empty() {
+            svc.notices.take_parked(id)
+        } else {
+            Vec::new()
+        };
+        if queued.is_empty() && parked.is_empty() {
             return;
         }
+        let lines: Vec<String> = queued.iter().chain(&parked).cloned().collect();
         svc.notices.set_awaiting(id, Some(now));
         // Off the caller: a resume can take seconds, and the poster carries on. Under the turn lock it checks again
         // that no turn has started (the owner's message may have got there first); if one has, the lines go back.
@@ -279,7 +294,7 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
             }
             if !matches!(sent, Ok(true)) {
                 let _l = svc.notices.lock.lock().await;
-                svc.notices.restore(&id, lines);
+                svc.notices.restore(&id, queued, parked);
                 svc.notices.set_awaiting(&id, None);
             }
         });
@@ -298,7 +313,7 @@ async fn flush(svc: &Arc<AgentService>, id: &AgentId) {
     if svc.type_line(&a, &lines.join(" ")).await {
         svc.notices.set_awaiting(id, Some(now));
     } else {
-        svc.notices.restore(id, lines);
+        svc.notices.restore(id, lines, Vec::new());
     }
 }
 
@@ -392,4 +407,23 @@ pub fn start_delivery_watcher(svc: Arc<AgentService>) -> JoinHandle<()> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restoring_keeps_parked_lines_parked_and_queued_lines_queued() {
+        let n = Notices::default();
+        let a = AgentId("a".into());
+        n.push(&a, "queued".into());
+        n.park(&a, "parked".into());
+        let (queued, parked) = (n.take(&a), n.take_parked(&a));
+        // Another line comes in while the send is out.
+        n.push(&a, "newer".into());
+        n.restore(&a, queued, parked);
+        assert_eq!(n.take(&a), ["queued", "newer"]);
+        assert_eq!(n.take_parked(&a), ["parked"]);
+    }
 }
