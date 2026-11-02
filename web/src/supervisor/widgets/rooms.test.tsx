@@ -222,8 +222,8 @@ describe("Rooms widget", () => {
     expect(within(feed).getByText("Which port?").closest(".chat-ask")).not.toHaveAttribute("data-answered");
     expect(within(feed).getByText("Which host?").closest(".chat-ask")).toHaveAttribute("data-answered");
     const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
-    expect(css).toMatch(/\.chat-ask\[data-answered\] \{[^}]*border-color: var\(--text-high\);/);
-    expect(css).toMatch(/\.chat-ask\[data-answered\] \.chat-ask-caption \{[^}]*color: var\(--text-high\);/);
+    expect(css).toMatch(/\.chat-ask\[data-answered\] \{[^}]*border-color: var\(--text\);/);
+    expect(css).toMatch(/\.chat-ask\[data-answered\] \.chat-ask-caption \{[^}]*color: var\(--text\);/);
   });
 
   it("an_owner_ask_answers_inline", async () => {

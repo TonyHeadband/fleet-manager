@@ -63,8 +63,8 @@
 /* A prompt the agent waits on. */
 .chat-ask { display: flex; flex-direction: column; gap: var(--panel-gap-m); padding: var(--layout-list-row-x); border: 1px solid var(--fill); }
 .chat-ask p { margin: 0; }
-.chat-ask[data-answered] { border-color: var(--text-high); }
-.chat-ask[data-answered] .chat-ask-caption { color: var(--text-high); }
+.chat-ask[data-answered] { border-color: var(--text); }
+.chat-ask[data-answered] .chat-ask-caption { color: var(--text); }
 .chat-ask-caption { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--accent-text); font-weight: var(--weight-mono); }
 .chat-ask-call { display: flex; align-items: baseline; gap: var(--space-item); }
 .chat-ask-call pre,
