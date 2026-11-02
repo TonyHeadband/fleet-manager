@@ -36,8 +36,8 @@ use fleet_api::{
     CheckoutList, ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile,
     DefInfo, DefKind, EffectiveSettings, EventKind, FieldError, FleetView, FormDef,
     GrantRepoRequest, HiddenSpecialistsPut, InternalBranches, InternalFile, InternalFiles,
-    InternalHistory, InternalRemote, MemberRef, MoveDefinition, NewConversation, NewPersona,
-    NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
+    InternalHistory, InternalRemote, MemberRef, MergedPr, MoveDefinition, NewConversation,
+    NewPersona, NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
     PersonaUpdate, Post, PostKind, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
     ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, Room, SetTaskRelease, SetToken, Snapshot,
     SpawnRequest, SpawnResponse, Status, StopTaskResponse, StorageSummary, Task, TaskList,
@@ -193,6 +193,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/storage", get(storage))
         .route("/api/tasks/refresh", post(refresh_tasks))
         .route("/api/tasks/{id}/pr/refresh", post(refresh_task_prs))
+        .route("/api/tasks/{id}/merge", post(merge_task_pr))
         .route("/api/tasks/{id}/archive-plan", get(archive_plan))
         .route("/api/tasks/{id}/archive", post(archive_task))
         .route("/api/tasks/{id}/fleet", get(fleet_view))
@@ -1827,6 +1828,22 @@ async fn refresh_task_prs(
     Path(id): Path<String>,
 ) -> Result<Json<Task>, ApiError> {
     Ok(Json(st.svc.refresh_task_prs(&AgentId(id)).await?))
+}
+
+#[derive(serde::Deserialize)]
+struct MergeQuery {
+    repo: Option<String>,
+}
+
+/// Merges the task's open PR once its CI is green and GitHub says it can merge: see `AgentService::merge_pr`.
+async fn merge_task_pr(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<MergeQuery>,
+) -> Result<Json<MergedPr>, ApiError> {
+    Ok(Json(
+        st.svc.merge_pr(&AgentId(id), q.repo.as_deref()).await?,
+    ))
 }
 
 async fn mark_done(

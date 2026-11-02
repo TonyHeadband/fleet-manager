@@ -37,6 +37,8 @@ struct State_ {
     statuses: HashMap<(String, String, String), Value>,
     /// Keyed by (owner, repo, branch).
     required: HashMap<(String, String, String), Value>,
+    /// Keyed by (owner, repo): the repo's `allow_*_merge` flags.
+    repo_settings: HashMap<(String, String), Value>,
 }
 
 pub struct FakeForge {
@@ -121,6 +123,24 @@ impl FakeForge {
             .unwrap()
             .required
             .insert((owner.into(), repo.into(), branch.into()), body);
+    }
+
+    /// What `GET /repos/{o}/{r}` answers (`allow_rebase_merge`, `allow_squash_merge`, `allow_merge_commit`); without it,
+    /// a 404.
+    pub fn set_repo_settings(&self, owner: &str, repo: &str, body: Value) {
+        self.state
+            .lock()
+            .unwrap()
+            .repo_settings
+            .insert((owner.into(), repo.into()), body);
+    }
+
+    /// The merge requests (`PUT .../pulls/{n}/merge`) received so far.
+    pub fn merge_requests(&self) -> Vec<Recorded> {
+        self.requests()
+            .into_iter()
+            .filter(|r| r.method == "PUT" && r.path_and_query.ends_with("/merge"))
+            .collect()
     }
 
     /// The next request answers `{ "message": message }` with this status.
@@ -237,6 +257,25 @@ async fn handle(
         ("GET", ["repos", o, r, "branches", b, "protection", "required_status_checks"]) => {
             let key = (o.to_string(), r.to_string(), b.to_string());
             found(s.required.get(&key))
+        }
+        ("GET", ["repos", o, r]) => {
+            let key = (o.to_string(), r.to_string());
+            found(s.repo_settings.get(&key))
+        }
+        ("PUT", ["repos", o, r, "pulls", n, "merge"]) => {
+            // Like GitHub: the PR is closed with a `merged_at` from then on.
+            for p in s
+                .prs
+                .entry((o.to_string(), r.to_string()))
+                .or_default()
+                .iter_mut()
+                .filter(|p| p["number"].as_u64().map(|x| x.to_string()).as_deref() == Some(*n))
+            {
+                p["state"] = json!("closed");
+                p["merged_at"] = json!("2026-10-26T10:00:00Z");
+            }
+            axum::Json(json!({"merged": true, "message": "Pull Request successfully merged"}))
+                .into_response()
         }
         ("POST", ["repos", o, r, "pulls"]) => {
             s.next_number += 1;

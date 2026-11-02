@@ -1,10 +1,10 @@
 //! GitHub and GitHub Enterprise over REST.
 
 use super::{
-    parse_timestamp, Check, CheckOutcome, Forge, ForgeConfig, ForgeError, IssueInfo, NewPr,
-    PrChecks, PrInfo, RepoRef,
+    parse_timestamp, Check, CheckOutcome, Forge, ForgeConfig, ForgeError, IssueInfo, MergeMethods,
+    NewPr, PrChecks, PrInfo, RepoRef,
 };
-use fleet_api::PrState;
+use fleet_api::{MergeMethod, PrState};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -127,6 +127,9 @@ impl GitHub {
             "GET" => self.with_headers(self.agent.get(&url)).call(),
             "POST" => self
                 .with_headers(self.agent.post(&url))
+                .send_json(body.unwrap_or(Value::Null)),
+            "PUT" => self
+                .with_headers(self.agent.put(&url))
                 .send_json(body.unwrap_or(Value::Null)),
             "PATCH" => self
                 .with_headers(self.agent.patch(&url))
@@ -282,6 +285,29 @@ impl Forge for GitHub {
                 .unwrap_or("unknown")
                 .to_string(),
         })
+    }
+
+    fn merge_methods(&self, repo: &RepoRef) -> Result<MergeMethods, ForgeError> {
+        let reply = self.send("GET", &format!("/repos/{}/{}", repo.owner, repo.name), None)?;
+        // GitHub omits the flags from a reply it does not show the token's settings in; a method not said to be
+        // allowed is not used.
+        let allowed = |key: &str| reply[key].as_bool().unwrap_or(false);
+        Ok(MergeMethods {
+            rebase: allowed("allow_rebase_merge"),
+            squash: allowed("allow_squash_merge"),
+            merge: allowed("allow_merge_commit"),
+        })
+    }
+
+    fn merge_pr(&self, repo: &RepoRef, number: u64, method: MergeMethod) -> Result<(), ForgeError> {
+        let method = match method {
+            MergeMethod::Rebase => "rebase",
+            MergeMethod::Squash => "squash",
+            MergeMethod::Merge => "merge",
+        };
+        let path = format!("/repos/{}/{}/pulls/{number}/merge", repo.owner, repo.name);
+        self.send("PUT", &path, Some(json!({"merge_method": method})))
+            .map(|_| ())
     }
 
     fn create_pr(&self, repo: &RepoRef, pr: &NewPr) -> Result<PrInfo, ForgeError> {

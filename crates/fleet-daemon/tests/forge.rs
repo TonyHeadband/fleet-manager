@@ -424,3 +424,38 @@ fn pr_checks_fails_when_the_forge_refuses_any_read() {
         .unwrap_err();
     assert!(matches!(err, ForgeError::Refused { status: 404, .. }));
 }
+
+#[test]
+fn merge_methods_reads_the_repos_allow_flags() {
+    let fake = FakeForge::start();
+    fake.set_repo_settings(
+        "acme",
+        "core",
+        json!({"allow_rebase_merge": false, "allow_squash_merge": true, "allow_merge_commit": false}),
+    );
+    let got = client(&fake, Duration::from_secs(5))
+        .merge_methods(&repo())
+        .unwrap();
+    assert_eq!(got.pick(), Some(fleet_api::MergeMethod::Squash));
+    let sent = &fake.requests()[0];
+    assert_eq!(sent.path_and_query, "/repos/acme/core");
+    assert_eq!(sent.auth, "Bearer t0k");
+}
+
+#[test]
+fn merge_pr_puts_the_method_and_reports_a_refusal() {
+    let fake = FakeForge::start();
+    let forge = client(&fake, Duration::from_secs(5));
+    forge
+        .merge_pr(&repo(), 7, fleet_api::MergeMethod::Rebase)
+        .unwrap();
+    let sent = &fake.merge_requests()[0];
+    assert_eq!(sent.path_and_query, "/repos/acme/core/pulls/7/merge");
+    assert_eq!(sent.body, json!({"merge_method": "rebase"}));
+
+    fake.fail_next_on("PUT", "/merge", 405, "Pull Request is not mergeable");
+    let err = forge
+        .merge_pr(&repo(), 7, fleet_api::MergeMethod::Merge)
+        .unwrap_err();
+    assert!(matches!(err, ForgeError::Refused { status: 405, .. }));
+}

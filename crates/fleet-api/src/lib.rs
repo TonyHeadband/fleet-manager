@@ -64,9 +64,9 @@ pub use supervisor::{
     Conversation, ConversationMessage, NewConversation, TaskEvent, TaskEventKind, TaskMark,
 };
 pub use task::{
-    format_bytes, ArchivePlan, ArchiveReport, CiState, Footprint, FootprintItem, LogEntry, Orphan,
-    OrphanKind, PlanItem, PrState, StatusTimes, StorageSummary, Task, TaskList, TaskOutcome,
-    TaskPr, TaskState, PLAN_CHANGED,
+    format_bytes, ArchivePlan, ArchiveReport, CiState, Footprint, FootprintItem, LogEntry,
+    MergeMethod, MergedPr, Orphan, OrphanKind, PlanItem, PrState, StatusTimes, StorageSummary,
+    Task, TaskList, TaskOutcome, TaskPr, TaskState, PLAN_CHANGED,
 };
 pub use tool::{Os, ToolError, ToolFix, ToolId, ToolList, ToolStatus, VersionInfo};
 pub use ui::{
@@ -111,6 +111,7 @@ use utoipa::OpenApi;
         routes::set_task_release,
         routes::mark_done,
         routes::refresh_task_prs,
+        routes::merge_task_pr,
         routes::agent_diff,
         routes::add_repo,
         routes::grant_repo_request,
@@ -238,6 +239,8 @@ use utoipa::OpenApi;
         TaskPr,
         PrState,
         CiState,
+        MergeMethod,
+        MergedPr,
         TaskList,
         OrphanRequest,
         ArchiveRequest,

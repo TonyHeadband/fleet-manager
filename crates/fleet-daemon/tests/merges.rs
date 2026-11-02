@@ -1061,3 +1061,186 @@ async fn refreshing_a_task_reads_its_checks_now_and_returns_the_task() {
     let (status, _) = call(addr, "POST", "/api/tasks/nope/pr/refresh", json!({})).await;
     assert_eq!(status, 404);
 }
+
+/// An open PR #7 as `open_pr_with_windows` sets it, and the repo allowing exactly these merge methods.
+fn mergeable_pr(fx: &Fx, windows: &str, rebase: bool, squash: bool, merge: bool) {
+    open_pr_with_windows(fx, windows, json!(true), "clean");
+    fx.forge.set_repo_settings(
+        "acme",
+        "core",
+        json!({"allow_rebase_merge": rebase, "allow_squash_merge": squash, "allow_merge_commit": merge}),
+    );
+}
+
+async fn merge(addr: SocketAddr, id: &AgentId) -> (u16, Value) {
+    call(
+        addr,
+        "POST",
+        &format!("/api/tasks/{}/merge", id.0),
+        json!({}),
+    )
+    .await
+}
+
+/// The refusal left the PR unmerged and made no merge call.
+fn assert_not_merged(fx: &Fx) {
+    assert!(fx.forge.merge_requests().is_empty());
+}
+
+async fn refused_with(fx: Fx, why: &str) {
+    let id = AgentId("t1".into());
+    let (addr, fx) = serve(fx).await;
+    let (status, body) = merge(addr, &id).await;
+    assert_eq!(status, 409, "{body}");
+    let msg = body["error"].as_str().unwrap_or_default().to_string();
+    assert!(msg.contains(why), "{msg:?} should mention {why:?}");
+    assert_not_merged(&fx);
+    assert_ne!(
+        record(&fx, &id).await.prs.first().map(|p| p.state),
+        Some(PrState::Merged)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_while_ci_is_red_and_names_the_failing_checks() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "failure", true, true, true);
+    refused_with(fx, "windows").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_while_ci_is_pending() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "running", true, true, true);
+    refused_with(fx, "pending").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_when_ci_cannot_be_read() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    // The PR list works; its detail and checks 404.
+    reply_for(&fx, "core", &[rest_pr("core", 7, "OPEN")]);
+    fx.forge
+        .set_repo_settings("acme", "core", json!({"allow_rebase_merge": true}));
+    refused_with(fx, "unknown").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_when_github_says_it_cannot_merge() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", true, true, true);
+    open_pr_with_windows(&fx, "success", json!(false), "dirty");
+    refused_with(fx, "conflicts").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_when_the_pr_is_not_open() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", true, true, true);
+    reply_for(&fx, "core", &[rest_pr("core", 7, "CLOSED")]);
+    refused_with(fx, "not open").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_for_a_task_with_no_pr() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", true, true, true);
+    reply_for(&fx, "core", &[]);
+    refused_with(fx, "no PR").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_is_refused_when_the_repo_allows_no_method() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", false, false, false);
+    refused_with(fx, "no merge method").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_of_an_unknown_task_is_not_found() {
+    let fx = fixture().await;
+    let (addr, _fx) = serve(fx).await;
+    let (status, _) = call(addr, "POST", "/api/tasks/nope/merge", json!({})).await;
+    assert_eq!(status, 404);
+}
+
+async fn merged_with(rebase: bool, squash: bool, merge_commit: bool) -> (Value, Fx) {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", rebase, squash, merge_commit);
+    let (addr, fx) = serve(fx).await;
+    let (status, body) = merge(addr, &AgentId("t1".into())).await;
+    assert_eq!(status, 200, "{body}");
+    (body, fx)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rebase_is_used_when_the_repo_allows_it() {
+    let (body, fx) = merged_with(true, true, true).await;
+    assert_eq!(body["method"], "rebase");
+    assert_eq!(body["number"], 7);
+    let sent = fx.forge.merge_requests();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].path_and_query, "/repos/acme/core/pulls/7/merge");
+    assert_eq!(sent[0].body["merge_method"], "rebase");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn squash_is_used_when_rebase_is_not_allowed() {
+    let (body, fx) = merged_with(false, true, true).await;
+    assert_eq!(body["method"], "squash");
+    assert_eq!(fx.forge.merge_requests()[0].body["merge_method"], "squash");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_commit_is_used_when_it_is_the_only_method() {
+    let (body, fx) = merged_with(false, false, true).await;
+    assert_eq!(body["method"], "merge");
+    assert_eq!(fx.forge.merge_requests()[0].body["merge_method"], "merge");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_pr_becomes_merged_on_the_task_without_waiting_for_the_timer() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", true, false, false);
+    let (addr, fx) = serve(fx).await;
+    let before = fx.svc.merge_checks_run();
+
+    let (status, body) = merge(addr, &id).await;
+
+    assert_eq!(status, 200, "{body}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fx.svc.merge_checks_run() == before && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let t = record(&fx, &id).await;
+    assert_eq!(t.prs[0].state, PrState::Merged);
+    assert_eq!(task_outcome(&t), TaskOutcome::Merged);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refusal_from_github_is_reported_and_the_task_stays_open() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", true, false, false);
+    fx.forge
+        .fail_next_on("PUT", "/merge", 405, "Head branch was modified");
+    let (addr, fx) = serve(fx).await;
+
+    let (status, body) = merge(addr, &id).await;
+
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("Head branch was modified"));
+    assert_eq!(record(&fx, &id).await.prs[0].state, PrState::Open);
+}
