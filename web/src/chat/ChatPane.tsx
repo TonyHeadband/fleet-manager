@@ -212,12 +212,12 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
       // Prompts the owner did not type (a resume, an orchestrator's message) are a small line, not the owner's block.
       return body.from === "owner" && speaker ? (
         <Message className="chat-prompt" from="owner" speaker={speaker} at={item.at} head={head}>
-          <Folding>
+          <Folding text={body.text}>
             <Markdown text={body.text} />
           </Folding>
         </Message>
       ) : (
-        <Folding>
+        <Folding text={body.text}>
           <p className="chat-line" data-from="system">
             {body.text}
           </p>
@@ -227,13 +227,13 @@ export function Entry({ item, speaker, head = true }: { item: ChatItem; speaker?
       // Without a speaker the text still shows, unheaded: a message must never vanish for want of a name.
       return speaker ? (
         <Message className="chat-reply" speaker={speaker} at={item.at} head={head}>
-          <Folding>
+          <Folding text={body.text}>
             <Markdown text={body.text} />
           </Folding>
         </Message>
       ) : (
         <div className="chat-reply">
-          <Folding>
+          <Folding text={body.text}>
             <Markdown text={body.text} />
           </Folding>
         </div>

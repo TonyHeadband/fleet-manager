@@ -60,14 +60,14 @@ function Answer({ text }: { text: string }) {
   if (!text) return <p className="chat-ask-answered">Answered</p>;
   if (!text.includes("\n"))
     return (
-      <Folding>
+      <Folding text={`Answered · ${text}`}>
         <p className="chat-ask-answered">Answered · {text}</p>
       </Folding>
     );
   return (
     <>
       <p className="chat-ask-answered">Answered</p>
-      <Folding>
+      <Folding text={text}>
         <Markdown text={text} />
       </Folding>
     </>

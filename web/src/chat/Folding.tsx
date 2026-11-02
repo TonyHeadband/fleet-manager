@@ -39,23 +39,26 @@ function measure(el: HTMLElement): { limit: number; tall: boolean } {
 
 /**
  * A message's text, folded past eight whole lines of measured height: cut clean on a line boundary, with a Read more /
- * Show less button under it. A short message shows no button.
+ * Show less button under it. A short message shows no button. `text` is the message's source text, what the children
+ * render: the message is measured again only when it or the panel width changes.
  */
-export function Folding({ children }: { children: ReactNode }) {
-  const [text, size] = useSize<HTMLDivElement>();
+export function Folding({ text, children }: { text: string; children: ReactNode }) {
+  const [textRef, size] = useSize<HTMLDivElement>();
   const box = useRef<HTMLDivElement>(null);
   const [limit, setLimit] = useState<number>(panel.foldMax);
   const [tall, setTall] = useState(false);
   const [open, setOpen] = useState(false);
-  // Measured at the full height (a folded box is clipped, its scrollHeight is not), again when the text changes and
-  // when the panel is resized (the Diff and Fullscreen widen it, so the text wraps onto fewer lines).
+  // Measured at the full height (a folded box is clipped, its scrollHeight is not), again when the message's text
+  // changes and when the panel is resized (the Diff and Fullscreen widen it, so the text wraps onto fewer lines).
+  // Not on every render: `children` is a new element each time the parent renders, and a long chat would measure
+  // every message for each new line. `text` stands for the children, so it is the dependency.
   useLayoutEffect(() => {
-    const el = text.current;
+    const el = textRef.current;
     if (!el) return;
     const m = measure(el);
     setLimit(m.limit);
     setTall(m.tall);
-  }, [children, size.width, text]);
+  }, [text, size.width, textRef]);
   const toggle = () => {
     setOpen(!open);
     // Folding back shortens the feed: keep the message in view rather than let the scroll land elsewhere.
@@ -64,7 +67,7 @@ export function Folding({ children }: { children: ReactNode }) {
   const folded = tall && !open;
   return (
     <div ref={box} className="chat-fold">
-      <div ref={text} className="chat-fold-text" data-folded={folded ? "" : undefined} style={{ "--fold-limit": `${limit}px` } as CSSProperties}>
+      <div ref={textRef} className="chat-fold-text" data-folded={folded ? "" : undefined} style={{ "--fold-limit": `${limit}px` } as CSSProperties}>
         {children}
       </div>
       {tall && (
