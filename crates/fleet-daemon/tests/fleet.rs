@@ -2393,6 +2393,7 @@ async fn gate_pass_pushes_and_opens_pr() {
             ci: fleet_api::CiState::Unknown,
             failing_checks: vec![],
             can_merge: false,
+            merge_method: None,
         }]
     );
     let lead = agent(&fx, &a.id).await;

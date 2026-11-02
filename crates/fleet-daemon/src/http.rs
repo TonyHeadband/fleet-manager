@@ -1841,8 +1841,9 @@ async fn merge_task_pr(
     Path(id): Path<String>,
     Query(q): Query<MergeQuery>,
 ) -> Result<Json<MergedPr>, ApiError> {
+    // Detached: a client hanging up must not skip the check request and the log after the merge went through.
     Ok(Json(
-        st.svc.merge_pr(&AgentId(id), q.repo.as_deref()).await?,
+        detached(async move { st.svc.merge_pr(&AgentId(id), q.repo.as_deref()).await }).await??,
     ))
 }
 

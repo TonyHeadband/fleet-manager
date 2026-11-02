@@ -179,6 +179,7 @@ mod tests {
             ci: crate::CiState::Unknown,
             failing_checks: vec![],
             can_merge: false,
+            merge_method: None,
         }
     }
 

@@ -2168,6 +2168,7 @@ impl AgentService {
                         ci: fleet_api::CiState::Unknown,
                         failing_checks: vec![],
                         can_merge: false,
+                        merge_method: None,
                     });
                 }
             })

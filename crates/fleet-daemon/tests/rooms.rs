@@ -70,6 +70,7 @@ fn pr(state: PrState) -> Vec<TaskPr> {
         ci: fleet_api::CiState::Unknown,
         failing_checks: vec![],
         can_merge: false,
+        merge_method: None,
     }]
 }
 

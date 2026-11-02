@@ -825,6 +825,7 @@ fn pr(repo: &str, state: fleet_api::PrState) -> fleet_api::TaskPr {
         ci: fleet_api::CiState::Unknown,
         failing_checks: vec![],
         can_merge: false,
+        merge_method: None,
     }
 }
 

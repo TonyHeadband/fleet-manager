@@ -38,6 +38,7 @@ fn task_pr(repo: &str, p: PrInfo) -> TaskPr {
         ci: CiState::Unknown,
         failing_checks: vec![],
         can_merge: false,
+        merge_method: None,
     }
 }
 
@@ -66,7 +67,12 @@ fn merge_candidate(t: &Task, repo: Option<&str>) -> Result<TaskPr, String> {
         .collect();
     let pr = match open[..] {
         [] => {
-            let p = of_repo[0];
+            // Several PRs of one branch may be closed or merged; the latest (highest number) is the one to name.
+            let p = of_repo
+                .iter()
+                .copied()
+                .max_by_key(|p| pr_number(&p.url))
+                .unwrap_or(of_repo[0]);
             let state = match p.state {
                 PrState::Merged => "already merged",
                 _ => "closed",
@@ -302,6 +308,14 @@ impl MergeChecker {
                                 Ok(checks) => {
                                     (pr.ci, pr.failing_checks) = checks.ci();
                                     pr.can_merge = checks.can_merge();
+                                    // Only a PR that could merge now needs its method told.
+                                    if pr.ci == CiState::Green && pr.can_merge {
+                                        pr.merge_method = calls
+                                            .call("merge_methods", |f, r| f.merge_methods(r))
+                                            .await
+                                            .ok()
+                                            .and_then(|m| m.pick());
+                                    }
                                 }
                                 Err(e) => {
                                     warn!(task = %t.id.0, repo = %repo, pr = number, error = %e, "cannot read the PR's checks");
@@ -692,12 +706,8 @@ impl AgentService {
         id: &AgentId,
         repo: Option<&str>,
     ) -> Result<MergedPr, ServiceError> {
-        // Reads every PR of the task from GitHub now and stores them.
-        let t = self.refresh_task_prs(id).await?;
-        let pr = merge_candidate(&t, repo).map_err(ServiceError::Refused)?;
-        let number = pr_number(&pr.url).ok_or_else(|| {
-            ServiceError::Refused(format!("cannot tell the number of {}", pr.url))
-        })?;
+        let (pr, number) = self.mergeable_pr(id, repo).await?;
+        let t = self.store.task(id).await?.ok_or(ServiceError::NotFound)?;
         let checker = self.merge_checker();
         let calls = checker
             .pr_calls(&t, &pr.repo)
@@ -708,18 +718,41 @@ impl AgentService {
             .call("merge_methods", |f, r| f.merge_methods(r))
             .await
             .map_err(|e| ServiceError::Refused(said(&e)))?;
-        let method = methods.pick().ok_or_else(|| {
-            ServiceError::Refused(format!(
+        let candidates = methods.candidates();
+        if candidates.is_empty() {
+            return Err(ServiceError::Refused(format!(
                 "PR #{number} cannot be merged: {} allows no merge method (rebase, squash or merge commit)",
                 pr.repo
-            ))
-        })?;
-        calls
-            .call("merge_pr", move |f, r| f.merge_pr(r, number, method))
-            .await
-            .map_err(|e| {
-                ServiceError::Refused(format!("PR #{number} was not merged: {}", said(&e)))
-            })?;
+            )));
+        }
+        // GitHub answers 405 for a method the repo does not allow (the flags are hidden from a token that is not
+        // an admin); the next one is tried.
+        let mut merged = None;
+        let mut last = None;
+        for method in candidates {
+            match calls
+                .call("merge_pr", move |f, r| f.merge_pr(r, number, method))
+                .await
+            {
+                Ok(()) => {
+                    merged = Some(method);
+                    break;
+                }
+                Err(e @ forge::ForgeError::Refused { status: 405, .. }) => last = Some(e),
+                Err(e) => {
+                    return Err(ServiceError::Refused(format!(
+                        "PR #{number} was not merged: {}",
+                        said(&e)
+                    )))
+                }
+            }
+        }
+        let Some(method) = merged else {
+            let why = last.map_or_else(String::new, |e| said(&e));
+            return Err(ServiceError::Refused(format!(
+                "PR #{number} was not merged: {why}"
+            )));
+        };
         self.request_merge_check(Some(id.clone()));
         self.log_task(
             id,

@@ -134,6 +134,7 @@ async fn merged_pr_marks_task_done() {
                 ci: fleet_api::CiState::Unknown,
                 failing_checks: vec![],
                 can_merge: false,
+                merge_method: None,
             },
             TaskPr {
                 url: "https://ghe.example.com/acme/core/pull/7".into(),
@@ -143,6 +144,7 @@ async fn merged_pr_marks_task_done() {
                 ci: fleet_api::CiState::Unknown,
                 failing_checks: vec![],
                 can_merge: false,
+                merge_method: None,
             },
         ]
     );
@@ -209,6 +211,7 @@ async fn gh_failure_changes_nothing() {
         ci: fleet_api::CiState::Unknown,
         failing_checks: vec![],
         can_merge: false,
+        merge_method: None,
     };
     let seen = open.clone();
     fx.store
@@ -454,6 +457,7 @@ fn pr(repo: &str, n: u32, state: PrState, merged_at: Option<i64>) -> TaskPr {
         ci: fleet_api::CiState::Unknown,
         failing_checks: vec![],
         can_merge: false,
+        merge_method: None,
     }
 }
 
@@ -1243,4 +1247,71 @@ async fn a_refusal_from_github_is_reported_and_the_task_stays_open() {
         .unwrap()
         .contains("Head branch was modified"));
     assert_eq!(record(&fx, &id).await.prs[0].state, PrState::Open);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repo_that_hides_its_merge_flags_is_tried_method_by_method() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    open_pr_with_windows(&fx, "success", json!(true), "clean");
+    // A token that is not an admin sees no allow_* flags.
+    fx.forge.set_repo_settings("acme", "core", json!({}));
+    fx.forge
+        .fail_next_on("PUT", "/merge", 405, "Rebase merges are not allowed");
+    let (addr, fx) = serve(fx).await;
+
+    let (status, body) = merge(addr, &id).await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["method"], "squash");
+    let sent: Vec<_> = fx
+        .forge
+        .merge_requests()
+        .iter()
+        .map(|r| r.body["merge_method"].clone())
+        .collect();
+    assert_eq!(sent, vec![json!("rebase"), json!("squash")]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refreshing_a_mergeable_pr_names_the_method_a_merge_would_use() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", false, true, true);
+    let (addr, fx) = serve(fx).await;
+
+    let (status, body) = call(
+        addr,
+        "POST",
+        &format!("/api/tasks/{}/pr/refresh", id.0),
+        json!({}),
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["prs"][0]["merge_method"], "squash");
+    assert!(fx.forge.merge_requests().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pr_that_cannot_merge_names_no_method() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "failure", true, true, true);
+    fx.svc.check_merges().await;
+    assert_eq!(record(&fx, &id).await.prs[0].merge_method, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_with_no_open_pr_names_the_latest_pr() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    mergeable_pr(&fx, "success", true, true, true);
+    // Listed oldest first, and the newest last.
+    reply_for(
+        &fx,
+        "core",
+        &[rest_pr("core", 9, "CLOSED"), rest_pr("core", 3, "CLOSED")],
+    );
+    refused_with(fx, "pull/9 is not open").await;
 }
