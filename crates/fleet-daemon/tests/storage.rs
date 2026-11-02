@@ -93,14 +93,26 @@ async fn an_archived_task_is_not_counted() {
     assert_eq!((s.worktrees_bytes, s.build_bytes), (100, 0), "{live:?}");
 }
 
-#[tokio::test]
-async fn the_tasks_folder_is_not_daemon_files() {
-    let fx = fixture().await;
-    put(fx.state_dir.join("repos/core/pack"), 40);
-    put(fx.state_dir.join("transcripts/t/c"), 30);
-    let before = fx.svc.storage().await.daemon_bytes;
-    put(fx.tasks_root.join("task/f"), 100_000);
-    assert_eq!(fx.svc.storage().await.daemon_bytes, before);
+#[test]
+fn the_tasks_folder_is_not_daemon_files() {
+    // A tasks folder inside the state folder, walked directly: `storage` would reuse its cached walk, and the
+    // fixture's tasks folder lies outside the state folder.
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tmp.path().join("state");
+    let tasks_root = state.join("tasks");
+    put(state.join("repos/core/pack"), 40);
+    put(state.join("transcripts/t/c"), 30);
+    put(state.join("fleet.db"), 20);
+    put(tasks_root.join("task/f"), 100_000);
+    let k = fleet_daemon::storage::state_kinds(&state, &tasks_root);
+    assert_eq!(
+        k,
+        fleet_daemon::storage::StateKinds {
+            repos: 40,
+            transcripts: 30,
+            daemon: 20
+        }
+    );
 }
 
 #[tokio::test]
