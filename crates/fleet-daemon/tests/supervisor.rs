@@ -737,40 +737,53 @@ async fn a_message_that_resumes_a_conversation_fast_forwards_a_clone_that_is_beh
     assert_eq!(head(&p), tip);
 }
 
+/// Points the clone's origin at a listener that accepts and never answers (the persona allows
+/// only https and file, so git really waits); returns the count of connections it accepted.
+fn silent_https_remote(clone: &std::path::Path) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = accepted.clone();
+    std::thread::spawn(move || {
+        let mut streams = Vec::new();
+        while let Ok((s, _)) = listener.accept() {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            streams.push(s);
+        }
+    });
+    git(
+        clone,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &format!("https://127.0.0.1:{port}/up.git"),
+        ],
+    );
+    accepted
+}
+
 #[tokio::test]
 async fn a_fetch_that_hangs_ends_at_the_cap_and_the_start_goes_ahead() {
     let fx = fixture_options(|_| {}, |o| o.clone_refresh_cap = Duration::from_millis(800)).await;
     let p = product_clone(&fx);
     push_new_file(&p);
     let before = head(&p);
-    // Accepts and never answers: git waits for the first bytes of the protocol.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let held = std::thread::spawn(move || {
-        let mut streams = Vec::new();
-        while let Ok((s, _)) = listener.accept() {
-            streams.push(s);
-        }
-    });
-    git(
-        &p.clone,
-        &[
-            "remote",
-            "set-url",
-            "origin",
-            &format!("git://127.0.0.1:{port}/up.git"),
-        ],
-    );
+    let accepted = silent_https_remote(&p.clone);
     let started = std::time::Instant::now();
     let a = start(&fx, "hello").await;
+    let took = started.elapsed();
     assert!(
-        started.elapsed() < Duration::from_secs(8),
-        "{:?}",
-        started.elapsed()
+        accepted.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+        "the fetch never reached the listener"
     );
+    assert!(
+        took >= Duration::from_millis(800),
+        "the cap never mattered: {took:?}"
+    );
+    assert!(took < Duration::from_secs(8), "{took:?}");
     assert_ne!(a.status, Status::Stopped);
     assert_eq!(head(&p), before);
-    drop(held);
 }
 
 #[tokio::test]
@@ -802,27 +815,7 @@ async fn a_daemon_resume_refreshes_a_personas_clones_once_however_many_conversat
             .path();
         std::fs::write(dir.join(format!("{session}.jsonl")), "{}\n").unwrap();
     }
-    // Accepts and never answers (the persona allows only https and file); counts the connections.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let seen = accepted.clone();
-    let _held = std::thread::spawn(move || {
-        let mut streams = Vec::new();
-        while let Ok((s, _)) = listener.accept() {
-            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            streams.push(s);
-        }
-    });
-    git(
-        &p.clone,
-        &[
-            "remote",
-            "set-url",
-            "origin",
-            &format!("https://127.0.0.1:{port}/up.git"),
-        ],
-    );
+    let accepted = silent_https_remote(&p.clone);
     let (svc, sessions) = restart(&fx).await;
     let started = std::time::Instant::now();
     svc.resume_interrupted().await.unwrap();
