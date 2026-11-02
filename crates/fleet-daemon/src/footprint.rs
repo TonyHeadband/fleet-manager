@@ -1,5 +1,4 @@
 //! How much disk a task's folder uses. Blocking walks: callers run them off the async threads.
-use crate::agents::PROMPT_FILE;
 use crate::fleet::env;
 use crate::fleet::ops::{INTERNAL_DIR, SNAPSHOTS_DIR};
 use fleet_api::{Footprint, FootprintItem};
@@ -76,8 +75,28 @@ pub fn build_item(task: &Path, path: &Path, protected: &[&Path]) -> Option<Footp
     })
 }
 
+/// The real `target` and `node_modules` folders at the root of each specialist's step worktree,
+/// `<task>/fleet/<n>-<slug>/<repo>/`. A link is not one: it would not be followed.
+fn step_build_dirs(task: &Path) -> Vec<PathBuf> {
+    let dirs = |p: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect()
+    };
+    dirs(&task.join("fleet"))
+        .iter()
+        .flat_map(|step| dirs(step))
+        .flat_map(|repo| BUILD_DIRS.map(|d| repo.join(d)))
+        .filter(|d| std::fs::symlink_metadata(d).is_ok_and(|m| m.is_dir()))
+        .collect()
+}
+
 /// Splits a task folder's weight into its worktrees (with their build output), the task's shared build folders
-/// (`build`), the daemon's own files and whatever else sits in the folder. A worktree that is gone has no item.
+/// (`build`), the daemon's own files and whatever else sits in the folder (its CLAUDE.md and PROMPT.md included). A worktree that is gone has no item.
 pub fn measure(
     workdir: &Path,
     worktrees: &[(String, PathBuf)],
@@ -98,7 +117,24 @@ pub fn measure(
         }
     }
 
-    let mut daemon = dir_bytes(daemon_files);
+    // A specialist's step worktree (`<task>/fleet/<n>-<slug>/<repo>/`) is not among `worktrees`, but its build
+    // output is still build output: each folder is an item of its own, left out of "other files".
+    let steps: Vec<PathBuf> = step_build_dirs(workdir)
+        .into_iter()
+        .filter(|b| !weighed.iter().any(|w| b.starts_with(w)))
+        .collect();
+    for b in &steps {
+        let bytes = dir_bytes(b);
+        items.push(FootprintItem {
+            label: "build output".into(),
+            path: s(b),
+            bytes,
+            build_bytes: Some(bytes),
+        });
+    }
+    weighed.extend(steps.iter().map(PathBuf::as_path));
+
+    let daemon = dir_bytes(daemon_files);
     let mut other = 0;
     // The task's notes checkout and its specialists' snapshots weigh in as one item, whatever is in them.
     let mut internal = 0;
@@ -111,9 +147,9 @@ pub fn measure(
                 continue;
             }
             let name = e.file_name();
-            if name == "CLAUDE.md" || name == PROMPT_FILE {
-                daemon += dir_bytes(&p);
-            } else if name == INTERNAL_DIR || name == SNAPSHOTS_DIR {
+            // The task folder's own CLAUDE.md and PROMPT.md are weighed with the rest of the folder: the daemon's
+            // files item is the state folder's `agents/<id>`, which the storage summary counts there.
+            if name == INTERNAL_DIR || name == SNAPSHOTS_DIR {
                 internal += dir_bytes(&p);
             } else {
                 other += dir_bytes_except(&p, &weighed);

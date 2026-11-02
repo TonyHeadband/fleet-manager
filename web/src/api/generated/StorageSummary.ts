@@ -8,13 +8,14 @@
  */
 export type StorageSummary = { 
 /**
- * Live (not archived) tasks' worktrees and the rest of their folders (the notes checkout, stray files),
- * without build output. From each task's last footprint, so a task not yet measured counts 0.
+ * Live (not archived) tasks' worktrees and the rest of their folders (the notes checkout, stray files, the
+ * folder's own CLAUDE.md and PROMPT.md), without build output. From each task's last footprint, so a task not yet measured counts 0.
  */
 worktrees_bytes: number, 
 /**
- * Regenerable build output of live tasks: `target` and `node_modules` at the root of their worktrees and
- * their shared build folders. From each task's last footprint.
+ * Regenerable build output of live tasks: `target` and `node_modules` at the root of their worktrees,
+ * including their specialists' step worktrees, and their shared build folders. From each task's last
+ * footprint.
  */
 build_bytes: number, 
 /**

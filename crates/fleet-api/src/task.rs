@@ -71,12 +71,13 @@ pub struct Footprint {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
 pub struct StorageSummary {
-    /// Live (not archived) tasks' worktrees and the rest of their folders (the notes checkout, stray files),
-    /// without build output. From each task's last footprint, so a task not yet measured counts 0.
+    /// Live (not archived) tasks' worktrees and the rest of their folders (the notes checkout, stray files, the
+    /// folder's own CLAUDE.md and PROMPT.md), without build output. From each task's last footprint, so a task not yet measured counts 0.
     #[ts(type = "number")]
     pub worktrees_bytes: u64,
-    /// Regenerable build output of live tasks: `target` and `node_modules` at the root of their worktrees and
-    /// their shared build folders. From each task's last footprint.
+    /// Regenerable build output of live tasks: `target` and `node_modules` at the root of their worktrees,
+    /// including their specialists' step worktrees, and their shared build folders. From each task's last
+    /// footprint.
     #[ts(type = "number")]
     pub build_bytes: u64,
     /// The daemon's copies of the repos: `<state>/repos/`.
