@@ -297,6 +297,121 @@ async fn a_new_task_from_the_same_conversation_reopens_the_archived_room() {
         .contains(&MemberRef::Agent(second)));
 }
 
+/// The task's record is archived, as the archive step leaves it, and the rooms follow.
+async fn archive(fx: &Fx, id: &AgentId, at: i64) {
+    fx.store
+        .update_task(id, |t| t.state = TaskState::Archived)
+        .await
+        .unwrap();
+    rooms::sync(&fx.store, at).await.unwrap();
+}
+
+async fn shelf(fx: &Fx) -> Vec<Room> {
+    rooms::list_for(&fx.store, PERSONA).await.unwrap()
+}
+
+fn text_post(room: &str, text: &str) -> Post {
+    Post {
+        id: 0,
+        room: room.into(),
+        sender: MemberRef::Daemon,
+        sender_name: String::new(),
+        to: None,
+        kind: PostKind::Announcement,
+        reply_to: None,
+        text: text.into(),
+        at: 1,
+        answered_at: None,
+        breakdown_version: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_room_whose_only_task_is_archived_is_not_listed() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let task = orchestrator(&fx, Some(&sup)).await;
+    assert_eq!(shelf(&fx).await.len(), 1);
+
+    archive(&fx, &task, 20).await;
+    assert!(shelf(&fx).await.is_empty());
+    // Hidden, not deleted.
+    assert_eq!(room_of(&fx, RoomKind::Operation).await.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_room_with_an_archived_and_a_stopped_task_stays_listed_grey() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let one = orchestrator(&fx, Some(&sup)).await;
+    let two = orchestrator(&fx, Some(&sup)).await;
+    set_prs(&fx, &two, PrState::Merged).await;
+    archive(&fx, &one, 20).await;
+
+    let rooms = shelf(&fx).await;
+    assert_eq!(rooms.len(), 1);
+    assert_eq!(rooms[0].archived_at, Some(20));
+
+    // Once the last one is archived too, the room goes.
+    archive(&fx, &two, 30).await;
+    assert!(shelf(&fx).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_product_room_with_posts_is_never_hidden() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let task = orchestrator(&fx, Some(&sup)).await;
+    let product = rooms::product_room(&fx.store, PRODUCT).await.unwrap();
+    fx.store
+        .add_post(&text_post(&product, "hello"))
+        .await
+        .unwrap();
+    archive(&fx, &task, 20).await;
+
+    let kinds: Vec<_> = shelf(&fx).await.into_iter().map(|r| r.kind).collect();
+    assert_eq!(kinds, vec![RoomKind::Product]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hidden_rooms_posts_stay_readable() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let task = orchestrator(&fx, Some(&sup)).await;
+    let room = op_room(&sup);
+    fx.store.add_post(&text_post(&room, "kept")).await.unwrap();
+    archive(&fx, &task, 20).await;
+    assert!(shelf(&fx).await.is_empty());
+
+    let posts = fx.store.room_posts(&room, None, 10).await.unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].text, "kept");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hidden_room_is_listed_again_when_its_conversation_starts_a_task() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let first = orchestrator(&fx, Some(&sup)).await;
+    archive(&fx, &first, 20).await;
+    assert!(shelf(&fx).await.is_empty());
+
+    orchestrator(&fx, Some(&sup)).await;
+    let rooms = shelf(&fx).await;
+    assert_eq!(rooms.len(), 1);
+    assert_eq!(rooms[0].archived_at, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_room_with_no_task_records_is_not_hidden() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    rooms::operation_room(&fx.store, &sup, PERSONA)
+        .await
+        .unwrap();
+    assert_eq!(shelf(&fx).await.len(), 1);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn joining_and_leaving_are_repeatable() {
     let fx = fixture().await;
