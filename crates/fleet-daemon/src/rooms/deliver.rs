@@ -3,7 +3,8 @@
 //! A notice is never typed into a running turn, and a held tool call counts as one. An orchestrator hears of a post
 //! from `wait_for_fleet` (its task's inbox) and from one line typed when it is at its input box; a supervisor
 //! conversation from a message, which resumes it if it has exited, though only its operation room does that: a
-//! product room post for an exited one is parked. A parked line, tagged `PARKED_TAG` so the chat does not show it,
+//! product room post for an exited one is parked. Every room notice typed into a supervisor is tagged `PARKED_TAG`,
+//! so its chat does not show it (the owner has the post in the room and as a toast). A parked line
 //! waits in its own queue and is typed when the conversation next runs (the owner's message, or another notice,
 //! resumes it) and reaches Review; the owner has the post in the room and as a toast. An agent that cannot take the
 //! line now keeps it in its pending queue until it next reaches Review, when everything queued is typed as one line.
@@ -14,7 +15,7 @@
 use super::posts::kind_word;
 use crate::agents::{one_line, AgentService, ServiceError, PARKED_TAG};
 use crate::store::{RoomRow, StoreError};
-use crate::supervisor::{route_with, Supervisor};
+use crate::supervisor::{route_in, Supervisor};
 use fleet_api::{
     Agent, AgentId, AgentKind, EventKind, FleetEvent, FleetEventKind, MemberRef, Post, PostKind,
     RoomKind, Status, TaskEventKind,
@@ -204,7 +205,7 @@ pub(crate) async fn notify(
     member: &AgentId,
     text: &str,
 ) -> Result<(), ServiceError> {
-    let line = format!("{FROM} {text}");
+    let mut line = format!("{FROM} {text}");
     let live = match svc.store.task(member).await? {
         Some(t) if t.kind == AgentKind::Orchestrator => {
             let ev = FleetEvent {
@@ -219,7 +220,11 @@ pub(crate) async fn notify(
         }
         Some(_) => return Ok(()),
         None => match svc.find(member).await {
-            Ok(a) if a.kind == AgentKind::Supervisor => a.id,
+            // The owner has the post in the room and as a toast; the supervisor's chat keeps the conversation.
+            Ok(a) if a.kind == AgentKind::Supervisor => {
+                line = format!("{FROM} {PARKED_TAG} {text}");
+                a.id
+            }
             _ => return Ok(()),
         },
     };
@@ -319,7 +324,15 @@ async fn surface(
     };
     let title = super::title(&svc.store, room).await?;
     let text = format!("{} in {title}: {text}", post.sender_name);
-    route_with(&svc.store, svc.options().clock.now(), sender, kind, text).await
+    route_in(
+        &svc.store,
+        svc.options().clock.now(),
+        sender,
+        kind,
+        text,
+        Some(room.id.clone()),
+    )
+    .await
 }
 
 /// Puts each ask open for `REPOST_AFTER` to the owner once more, as a message; the post records it. Breakdown asks

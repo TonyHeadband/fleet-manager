@@ -145,11 +145,17 @@ impl Builder {
         let command = trimmed.starts_with("<command-")
             || trimmed.starts_with("<local-command")
             || bare_command;
-        // A parked product-room post is for the supervisor alone: the owner has it in the room and as a toast.
-        let parked = trimmed.starts_with(NOTICE_PREFIX) && trimmed.contains(PARKED_TAG);
-        if trimmed.is_empty() || command || parked {
+        if trimmed.is_empty() || command {
             return None;
         }
+        // A room-post notice is for the supervisor alone: the owner has the post in the room and as a toast. Notices
+        // may be typed as one line, so each is judged by its own tag; the others stay.
+        let kept = shown_notices(trimmed);
+        let text = match &kept {
+            Some(None) => return None,
+            Some(Some(rest)) => rest.as_str(),
+            None => text,
+        };
         let (text, from) = if text == PROMPT_POINTER {
             (
                 self.prompt_text.clone().unwrap_or_else(|| text.to_string()),
@@ -246,6 +252,23 @@ fn display_name(raw: &str) -> String {
         .and_then(|rest| rest.split_once("__"))
         .map_or(raw, |(_, tool)| tool)
         .to_string()
+}
+
+/// What a line of daemon notices shows once the room notices (each tagged `PARKED_TAG`) are dropped: None when none is
+/// tagged (the line is shown as it is), Some(None) when all are, else the rest.
+fn shown_notices(line: &str) -> Option<Option<String>> {
+    let rest = line.strip_prefix(NOTICE_PREFIX)?;
+    let notices: Vec<&str> = rest.split(NOTICE_PREFIX).map(str::trim).collect();
+    let hidden = |n: &&str| n.starts_with(PARKED_TAG);
+    if !notices.iter().any(hidden) {
+        return None;
+    }
+    let shown: Vec<String> = notices
+        .iter()
+        .filter(|n| !hidden(n))
+        .map(|n| format!("{NOTICE_PREFIX}{n}"))
+        .collect();
+    Some((!shown.is_empty()).then(|| shown.join(" ")))
 }
 
 #[cfg(test)]
@@ -373,6 +396,28 @@ mod tests {
         let parked =
             format!("{NOTICE_PREFIX}{PARKED_TAG} new message from t in product:x; call room_read.");
         assert!(b.line(&user(json!(parked))).is_empty());
+    }
+
+    #[test]
+    fn a_flushed_line_shows_exactly_its_untagged_notices() {
+        let mut b = Builder::new(None, PromptFrom::Owner);
+        let shown = "repo api is now available at /w/api (branch fleet/x).";
+        let hidden = format!("{PARKED_TAG} new message from t in product:x; call room_read.");
+        let line = format!("{NOTICE_PREFIX}{hidden} {NOTICE_PREFIX}{shown}");
+        let items = b.line(&user(json!(line)));
+        let texts: Vec<&str> = items
+            .iter()
+            .map(|i| match &i.body {
+                ChatBody::Prompt { text, .. } => text.as_str(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, vec![format!("{NOTICE_PREFIX}{shown}")]);
+        // Order does not matter, and two hidden ones leave nothing.
+        let line = format!("{NOTICE_PREFIX}{shown} {NOTICE_PREFIX}{hidden}");
+        assert_eq!(b.line(&user(json!(line))).len(), 1);
+        let line = format!("{NOTICE_PREFIX}{hidden} {NOTICE_PREFIX}{hidden}x");
+        assert!(b.line(&user(json!(line))).is_empty());
     }
 
     #[test]

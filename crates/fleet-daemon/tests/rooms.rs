@@ -1172,11 +1172,63 @@ async fn a_supervisor_in_no_room_is_told_so() {
 
 // Waking the recipient, and surfacing posts to the owner.
 
-/// The notice a recipient of a `kind` post from the task `from` in `room` is typed.
+/// The notice a supervisor conversation is typed for a `kind` post from the task `from` in `room`: tagged, so the
+/// owner's chat does not show it.
 async fn notice(fx: &Fx, kind: &str, from: &AgentId, room: &str) -> String {
     let t = fx.store.task(from).await.unwrap().unwrap();
     let name = t.title.filter(|t| !t.is_empty()).unwrap_or(t.name);
-    format!("{NOTICE} new {kind} from {name} in {room}; call room_read.")
+    format!("{NOTICE} {PARKED_TAG} new {kind} from {name} in {room}; call room_read.")
+}
+
+/// The task events broadcast while `f` runs, in order.
+async fn broadcast_during<F: std::future::Future<Output = ()>>(fx: &Fx, f: F) -> Vec<TaskEvent> {
+    let mut rx = fx.store.subscribe();
+    f.await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut got = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let EventKind::SupervisorEvent { event } = ev.kind {
+            got.push(event);
+        }
+    }
+    got
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_toast_names_the_room_the_post_was_made_in() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let a = direct(&fx, &sup).await;
+    let got = broadcast_during(&fx, async {
+        posted_id(
+            &tool(
+                &fx.svc,
+                &a,
+                "room_post",
+                json!({ "kind": "message", "text": "from the product", "to": "owner", "room": product_room() }),
+            )
+            .await,
+        );
+        posted_id(
+            &tool(
+                &fx.svc,
+                &a,
+                "room_post",
+                json!({ "kind": "message", "text": "from the operation", "to": "owner", "room": op_room(&sup) }),
+            )
+            .await,
+        );
+    })
+    .await;
+    let room_of = |needle: &str| {
+        got.iter()
+            .find(|e| e.text.contains(needle))
+            .unwrap_or_else(|| panic!("{needle}: {got:?}"))
+            .room
+            .clone()
+    };
+    assert_eq!(room_of("from the product"), Some(product_room()));
+    assert_eq!(room_of("from the operation"), Some(op_room(&sup)));
 }
 
 async fn events_of(fx: &Fx, conversation: &AgentId, kind: TaskEventKind) -> Vec<TaskEvent> {
