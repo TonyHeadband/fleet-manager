@@ -12,7 +12,7 @@
 
 /* A line: what the owner did not type, a marker, the end of the session. */
 .chat-line { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-low); font-weight: var(--weight-mono); }
-.chat-line[data-from="system"] { font-size: var(--size-code); line-height: 1.5; letter-spacing: normal; text-transform: none; }
+.chat-line[data-from="system"] { font-size: var(--size-code); line-height: var(--layout-chat-line); letter-spacing: normal; text-transform: none; }
 .chat-line[data-marker="compacted"] { text-align: center; }
 .chat-line[data-marker="new_session"],
 .chat-line[data-marker="session_ended"] { padding-top: var(--panel-gap-m); border-top: 1px solid var(--border); }
@@ -26,7 +26,7 @@
 .chat-fold-toggle { margin-top: var(--panel-gap-s); }
 
 /* Claude's rich text. */
-.markdown { line-height: 1.5; }
+.markdown { line-height: var(--layout-chat-line); }
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
 .markdown :is(p, ul, ol, pre, blockquote, h1, h2, h3, h4, h5, h6) { margin: 0 0 var(--panel-gap-m); }
@@ -55,7 +55,7 @@
 .chat-calls > * + * { border-top: 1px solid var(--border); }
 .chat-call { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-item); padding: var(--layout-list-row-y) var(--layout-list-row-x); font-family: var(--font-mono); font-size: var(--size-code); font-weight: var(--weight-mono); }
 .chat-call-tool { flex: none; min-width: 6ch; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--tone-active); font-weight: var(--weight-mono); }
-.chat-call-target { flex: 1 1 0; min-width: 12ch; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.chat-call-target { flex: 1 1 0; min-width: var(--layout-call-target-min); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .chat-call-result { flex: 0 1 auto; min-width: 0; max-width: 100%; color: var(--text-low); }
 .chat-call[data-status="done"] .chat-call-result { color: var(--tone-done); }
 .chat-call[data-status="failed"] .chat-call-result { color: var(--danger); }
