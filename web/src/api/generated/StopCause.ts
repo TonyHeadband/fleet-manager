@@ -4,4 +4,4 @@
  * Why an agent is `Stopped`: the owner stopped it, claude exited by itself, the session vanished, or a restart could
  * not resume it.
  */
-export type StopCause = "stopped" | "exited" | "crashed" | "finished" | "interrupted";
+export type StopCause = "stopped" | "exited" | "crashed" | "finished" | "interrupted" | "merged";

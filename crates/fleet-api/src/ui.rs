@@ -269,6 +269,7 @@ pub fn default_ui_schema() -> UiSchema {
                     ("crashed", "Crashed"),
                     ("finished", "Finished"),
                     ("interrupted", "Interrupted"),
+                    ("merged", "Merged"),
                 ]),
                 value_tones: [
                     ("stopped", Tone::Caution),
@@ -276,6 +277,7 @@ pub fn default_ui_schema() -> UiSchema {
                     ("crashed", Tone::Danger),
                     ("finished", Tone::Active),
                     ("interrupted", Tone::Caution),
+                    ("merged", Tone::Active),
                 ]
                 .into_iter()
                 .map(|(k, t)| (k.to_string(), t))
