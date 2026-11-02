@@ -389,6 +389,43 @@ async fn a_hidden_rooms_posts_stay_readable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_room_with_an_archived_and_a_stopped_by_hand_task_stays_listed() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let one = orchestrator(&fx, Some(&sup)).await;
+    let two = orchestrator(&fx, Some(&sup)).await;
+    fx.store
+        .update_task(&two, |t| t.state = TaskState::Stopped)
+        .await
+        .unwrap();
+    archive(&fx, &one, 20).await;
+
+    let rooms = shelf(&fx).await;
+    assert_eq!(rooms.len(), 1);
+    // A stop alone does not end the task, so the room is not grey either.
+    assert_eq!(rooms[0].archived_at, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_owner_still_reads_and_posts_in_a_hidden_room_by_its_id() {
+    let fx = fixture().await;
+    let sup = conversation(&fx).await;
+    let task = orchestrator(&fx, Some(&sup)).await;
+    let room = op_room(&sup);
+    archive(&fx, &task, 20).await;
+    assert!(shelf(&fx).await.is_empty());
+
+    fx.svc
+        .owner_post(&room, PostKind::Message, None, "still here")
+        .await
+        .unwrap();
+    let posts = fx.svc.owner_read(&room, None, 10).await.unwrap();
+    assert!(posts.iter().any(|p| p.text == "still here"), "{posts:?}");
+    // Posting does not bring it back.
+    assert!(shelf(&fx).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_hidden_room_is_listed_again_when_its_conversation_starts_a_task() {
     let fx = fixture().await;
     let sup = conversation(&fx).await;
