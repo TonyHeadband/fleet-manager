@@ -1,3 +1,4 @@
+import type { MergedPr } from "./generated/MergedPr";
 import type { ActionDef } from "./generated/ActionDef";
 import type { EffectiveSettings } from "./generated/EffectiveSettings";
 import type { InternalBranches } from "./generated/InternalBranches";
@@ -229,6 +230,17 @@ export class FleetClient {
     this.call<ArchiveReport>("POST", "/api/orphans/archive", { id, items: plan.items }, LONG_TIMEOUT_MS);
   /** Marks a task with no GitHub repo done; the daemon refuses one with a repo. */
   markDone = (task: string) => this.call<Task>("POST", `/api/tasks/${encodeURIComponent(task)}/done`);
+  /** Reads the task's PRs and their checks from GitHub now; answers with the task as stored. */
+  refreshTaskPrs = (task: string) =>
+    this.call<Task>("POST", `/api/tasks/${encodeURIComponent(task)}/pr/refresh`, undefined, CHECK_TIMEOUT_MS);
+  /** Merges the task's open PR (the one in `repo` when it has several); the daemon refuses unless CI is green and GitHub allows it. */
+  mergePr = (task: string, repo?: string) =>
+    this.call<MergedPr>(
+      "POST",
+      `/api/tasks/${encodeURIComponent(task)}/merge${repo ? `?repo=${encodeURIComponent(repo)}` : ""}`,
+      undefined,
+      CHECK_TIMEOUT_MS,
+    );
   /** Moves a task into a release of its product, or to the backlog with `null`. */
   setTaskRelease = (task: string, release: number | null) =>
     this.call<Task>("PUT", `/api/tasks/${encodeURIComponent(task)}/release`, { release });
