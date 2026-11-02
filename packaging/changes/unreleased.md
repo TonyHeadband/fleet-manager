@@ -18,6 +18,6 @@
 - **Chats never scroll sideways.** Long tool errors, call output and code wrap or scroll inside their own box, and long unbroken words wrap.
 - **The supervisor reads current code.** When a supervisor conversation starts or resumes, and when a task starts, Fleet Manager fast-forwards its own copies of your product repos to the latest default branch. The supervisor checks that before it reasons about a product's code, and if a copy is still behind it tells you and asks before going on.
 - **Archive keeps the chats.** Archiving a task now keeps its agents' chat transcripts (a few MB) in Fleet Manager's own folder, and the archive dialog lists them as staying, so a task's conversations survive the cleanup.
+- **Storage shows what you can clean up.** The Supervisor page's Storage widget now shows Fleet Manager's live disk use by kind (worktrees, build output, repo copies, kept chats, its own files) against the disk's free space, lists the biggest merged or stopped tasks with an **Archive** button, and shows in the desktop app too. Archived tasks no longer count.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.
-- **Storage shows what you can clean up.** The Supervisor page's Storage widget now shows Fleet Manager's live disk use by kind (worktrees, build output, repo copies, kept chats, its own files) against the disk's free space, lists the biggest merged or stopped tasks with an **Archive** button, and shows in the desktop app too. Archived tasks no longer count.
