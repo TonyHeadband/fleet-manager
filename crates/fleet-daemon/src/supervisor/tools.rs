@@ -9,7 +9,14 @@ use serde_json::Value;
 use std::time::Duration;
 use tracing::info;
 
-pub const NAMES: [&str; 4] = ["fleet_overview", "file_issue", "write_doc", "start_task"];
+pub const NAMES: [&str; 6] = [
+    "fleet_overview",
+    "file_issue",
+    "write_doc",
+    "start_task",
+    "merge_pr",
+    "archive_task",
+];
 
 const PATH_REFUSAL: &str = "path must be specs/<name>.md or plans/<name>.md";
 const FORGE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -41,6 +48,8 @@ pub async fn call(svc: &AgentService, id: &AgentId, name: &str, args: &Value) ->
         "file_issue" => file_issue(svc, id, &persona, args).await,
         "write_doc" => write_doc(svc, args).await,
         "start_task" => start_task(svc, id, &persona, args).await,
+        "merge_pr" => crate::rooms::actions::ask_merge(svc, id, &persona, args).await,
+        "archive_task" => crate::rooms::actions::ask_archive(svc, id, &persona, args).await,
         _ => Err(format!("unknown tool: {name}")),
     };
     info!(tool = name, conversation = %id.0, persona = %persona, ok = reply.is_ok(), "supervisor tool call");
@@ -57,7 +66,7 @@ pub async fn call(svc: &AgentService, id: &AgentId, name: &str, args: &Value) ->
     }
 }
 
-fn str_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
+pub(crate) fn str_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("`{key}` is required, a string"))

@@ -180,7 +180,7 @@ pub fn tools(kind: AgentKind) -> Value {
     Value::Array(list)
 }
 
-fn supervisor_tools() -> [Value; 4] {
+fn supervisor_tools() -> [Value; 6] {
     let repo_list = json!({ "type": "array", "items": { "type": "string" } });
     [
         tool(
@@ -224,6 +224,24 @@ fn supervisor_tools() -> [Value; 4] {
                 "plan": { "type": "string", "description": "A plans/<name>.md path in the internal repo the task follows." },
             }),
             &["product", "repos", "prompt"],
+        ),
+        tool(
+            "merge_pr",
+            "Ask the owner to merge a task's green PR. Posts the ask in the room and returns at once; the daemon merges \
+                only if the owner answers yes, and checks CI again then. Anything else does not merge.",
+            json!({
+                "task": { "type": "string", "description": "The task's id, as in the board." },
+                "repo": { "type": "string", "description": "Which repo's PR, when the task has several open." },
+            }),
+            &["task"],
+        ),
+        tool(
+            "archive_task",
+            "Ask the owner to archive a stopped or merged task, which frees its worktrees. Posts the ask in the room \
+                and returns at once; the daemon archives only if the owner answers yes and nothing would be lost then. \
+                Refused for a running task or one with uncommitted work.",
+            json!({ "task": { "type": "string", "description": "The task's id, as in the board." } }),
+            &["task"],
         ),
     ]
 }
@@ -285,7 +303,7 @@ fn offers(kind: AgentKind, name: &str) -> bool {
         .is_some_and(|l| l.iter().any(|t| t["name"] == name))
 }
 
-const ALL_TOOLS: [&str; 17] = [
+const ALL_TOOLS: [&str; 19] = [
     "list_repos",
     "set_title",
     "request_repo",
@@ -299,6 +317,8 @@ const ALL_TOOLS: [&str; 17] = [
     "file_issue",
     "write_doc",
     "start_task",
+    "merge_pr",
+    "archive_task",
     "room_post",
     "room_read",
     "room_ask",

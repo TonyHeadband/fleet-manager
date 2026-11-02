@@ -19,5 +19,6 @@
 - **The supervisor reads current code.** When a supervisor conversation starts or resumes, and when a task starts, Fleet Manager fast-forwards its own copies of your product repos to the latest default branch. The supervisor checks that before it reasons about a product's code, and if a copy is still behind it tells you and asks before going on.
 - **Archive keeps the chats.** Archiving a task now keeps its agents' chat transcripts (a few MB) in Fleet Manager's own folder, and the archive dialog lists them as staying, so a task's conversations survive the cleanup.
 - **Storage shows what you can clean up.** The Supervisor page's Storage widget now shows Fleet Manager's live disk use by kind (worktrees, build output, repo copies, kept chats, its own files) against the disk's free space, and lists the biggest merged or stopped tasks with an **Archive** button. Archived tasks no longer count.
+- **Merge from the app.** A task's side panel has a Merge button next to its pull request: green once its checks pass and GitHub says it can merge, red with the failing checks listed when CI fails. It merges with rebase, else squash, else merge. The supervisor can also merge a green PR and archive a merged or stopped task, but only after you answer yes to its ask in the room.
 
 Upgrading changes the database: a v0.2 build cannot open it afterwards.

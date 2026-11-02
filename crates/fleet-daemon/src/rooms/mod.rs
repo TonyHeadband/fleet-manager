@@ -12,6 +12,7 @@
 //! An operation room is archived (grey) when its tasks have ended, and drops out of the owner's list (`list_for`)
 //! once every task that came from its conversation is archived. Nothing is deleted: the room, its members and its
 //! posts stay, and a new task from the conversation reopens it and lists it again.
+pub mod actions;
 pub mod announce;
 pub mod asks;
 pub mod deliver;

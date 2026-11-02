@@ -93,13 +93,16 @@ pub(crate) fn kind_word(k: PostKind) -> &'static str {
     }
 }
 
-fn refuse(text: impl Into<String>) -> ServiceError {
+pub(super) fn refuse(text: impl Into<String>) -> ServiceError {
     ServiceError::Refused(text.into())
 }
 
 impl AgentService {
     /// The agent, and the member it is in rooms as.
-    async fn member_of(&self, caller: &AgentId) -> Result<(Agent, MemberRef), ServiceError> {
+    pub(super) async fn member_of(
+        &self,
+        caller: &AgentId,
+    ) -> Result<(Agent, MemberRef), ServiceError> {
         let a = self.find(caller).await?;
         let id = match a.kind {
             AgentKind::Supervisor => a.id.clone(),
@@ -112,7 +115,7 @@ impl AgentService {
     /// its product room. An orchestrator may use only the rooms it is in. A supervisor may use every room of its
     /// persona, each product room and its conversations' operation rooms, and joins one the first time it does, so
     /// its reads are tracked there too.
-    async fn room_of(
+    pub(super) async fn room_of(
         &self,
         who: &Agent,
         me: &MemberRef,
@@ -221,7 +224,11 @@ impl AgentService {
     }
 
     /// Names, stores, broadcasts and logs the post; returns it with its id.
-    async fn store_post(&self, room: &RoomRow, mut p: Post) -> Result<Post, ServiceError> {
+    pub(super) async fn store_post(
+        &self,
+        room: &RoomRow,
+        mut p: Post,
+    ) -> Result<Post, ServiceError> {
         p.sender_name = self.name_of(room, &p.sender).await?;
         let ev = self.store.add_post(&p).await?;
         if let fleet_api::EventKind::RoomPost { post } = ev.kind {
@@ -241,7 +248,7 @@ impl AgentService {
         Ok(p)
     }
 
-    fn new_post(
+    pub(super) fn new_post(
         &self,
         room: &RoomRow,
         sender: MemberRef,
@@ -463,6 +470,10 @@ impl AgentService {
             .room(&q.room)
             .await?
             .ok_or_else(|| refuse(format!("no room {}", q.room)))?;
+        let action = self.pending_action_of(ask).await?;
+        if action.is_some() && !super::actions::may_decide(by) {
+            return Err(refuse(super::actions::ACTION_OWNER_DECIDES));
+        }
         if let Some(v) = q.breakdown_version {
             return self.decide_breakdown_ask(by, &q, v, Some(text)).await;
         }
@@ -484,7 +495,10 @@ impl AgentService {
             self.asks.resolve(ask, text)
         };
         log_post(&answer);
-        if !held {
+        // An ask that carries an action is settled here, once: `answer_ask` let only the first answer through.
+        if let Some(action) = action {
+            self.settle_action(&q, &action, &answer).await;
+        } else if !held {
             self.notice_answer(&q, &answer).await;
         }
         Ok(true)
