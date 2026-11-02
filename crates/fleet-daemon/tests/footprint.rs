@@ -53,8 +53,11 @@ fn measure_splits_build_output_and_daemon_files() {
         }
     );
     assert_eq!(f.items[1].label, "daemon files");
-    assert_eq!(f.items[1].bytes, 12);
-    assert_eq!(f.items.len(), 2);
+    assert_eq!(f.items[1].bytes, 7);
+    // The task folder's own CLAUDE.md is the task folder's weight, not the state folder's.
+    assert_eq!(f.items[2].label, "other files");
+    assert_eq!(f.items[2].bytes, 5);
+    assert_eq!(f.items.len(), 3);
     assert_eq!((f.total, f.measured_at), (1022, 42));
 }
 
@@ -81,8 +84,8 @@ fn measure_lists_other_files_in_the_task_folder() {
         labels,
         [
             ("core worktree", 10),
-            ("daemon files", 4),
-            ("other files", 30)
+            ("daemon files", 0),
+            ("other files", 34)
         ]
     );
     assert_eq!(f.items[0].build_bytes, None);
@@ -348,4 +351,51 @@ fn build_output_inside_a_worktree_is_not_weighed_twice() {
     );
     assert!(f.items.iter().all(|i| i.label != "build output"), "{f:?}");
     assert_eq!(f.total, 500);
+}
+
+#[test]
+fn step_worktree_build_output_is_build_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(wd.join("fleet/1-x/core/src/b.rs"), 20);
+    put(wd.join("fleet/1-x/core/target/debug/y"), 1000);
+    put(wd.join("fleet/1-x/core/node_modules/z"), 300);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[],
+        1,
+    );
+    let build: u64 = f
+        .items
+        .iter()
+        .filter(|i| i.label == "build output")
+        .map(|i| i.build_bytes.unwrap())
+        .sum();
+    assert_eq!(build, 1300, "{f:?}");
+    let other = f.items.iter().find(|i| i.label == "other files").unwrap();
+    assert_eq!(other.bytes, 20);
+    assert_eq!(f.total, 1330);
+}
+
+#[test]
+fn claude_md_and_prompt_md_in_the_task_folder_are_not_daemon_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(wd.join("CLAUDE.md"), 5);
+    put(wd.join("PROMPT.md"), 4);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[],
+        1,
+    );
+    let daemon = f.items.iter().find(|i| i.label == "daemon files").unwrap();
+    assert_eq!(daemon.bytes, 0);
+    let other = f.items.iter().find(|i| i.label == "other files").unwrap();
+    assert_eq!(other.bytes, 9);
 }
