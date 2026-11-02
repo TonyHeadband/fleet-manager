@@ -1,6 +1,6 @@
 //! How much disk a task's folder uses. Blocking walks: callers run them off the async threads.
 use crate::fleet::env;
-use crate::fleet::ops::{INTERNAL_DIR, SNAPSHOTS_DIR};
+use crate::fleet::ops::{FLEET_DIR, INTERNAL_DIR, SNAPSHOTS_DIR};
 use fleet_api::{Footprint, FootprintItem};
 use std::path::{Path, PathBuf};
 
@@ -76,9 +76,13 @@ pub fn build_item(task: &Path, path: &Path, protected: &[&Path]) -> Option<Footp
 }
 
 /// The real `target` and `node_modules` folders at the root of each specialist's step worktree,
-/// `<task>/fleet/<n>-<slug>/<repo>/`. A link is not one: it would not be followed.
+/// `<task>/fleet/<n>-<slug>/<repo>/`. A link is not one, at any of those levels: it would not be followed.
 fn step_build_dirs(task: &Path) -> Vec<PathBuf> {
     let dirs = |p: &Path| -> Vec<PathBuf> {
+        // `read_dir` would follow a link, so only a real folder is looked into.
+        if !std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir()) {
+            return vec![];
+        }
         std::fs::read_dir(p)
             .into_iter()
             .flatten()
@@ -87,7 +91,7 @@ fn step_build_dirs(task: &Path) -> Vec<PathBuf> {
             .map(|e| e.path())
             .collect()
     };
-    dirs(&task.join("fleet"))
+    dirs(&task.join(FLEET_DIR))
         .iter()
         .flat_map(|step| dirs(step))
         .flat_map(|repo| BUILD_DIRS.map(|d| repo.join(d)))
@@ -124,7 +128,8 @@ pub fn measure(
         .filter(|b| !weighed.iter().any(|w| b.starts_with(w)))
         .collect();
     for b in &steps {
-        let bytes = dir_bytes(b);
+        // Without a shared build folder that lies inside it, which has its own item.
+        let bytes = dir_bytes_except(b, &weighed);
         items.push(FootprintItem {
             label: "build output".into(),
             path: s(b),

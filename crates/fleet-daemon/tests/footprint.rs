@@ -399,3 +399,39 @@ fn claude_md_and_prompt_md_in_the_task_folder_are_not_daemon_files() {
     let other = f.items.iter().find(|i| i.label == "other files").unwrap();
     assert_eq!(other.bytes, 9);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_linked_fleet_folder_is_not_followed_for_step_build_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(tmp.path().join("elsewhere/1-x/core/target/y"), 5000);
+    std::os::unix::fs::symlink(tmp.path().join("elsewhere"), wd.join("fleet")).unwrap();
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[],
+        1,
+    );
+    assert!(f.items.iter().all(|i| i.label != "build output"), "{f:?}");
+    assert_eq!(f.total, 10);
+}
+
+#[test]
+fn a_shared_build_folder_inside_a_step_target_is_weighed_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wd = tmp.path().join("proj");
+    put(wd.join("core/a"), 10);
+    put(wd.join("fleet/1-x/core/target/debug/y"), 100);
+    put(wd.join("fleet/1-x/core/target/shared/z"), 5000);
+    let f = measure(
+        &wd,
+        &[("core".into(), wd.join("core"))],
+        &tmp.path().join("none"),
+        &[wd.join("fleet/1-x/core/target/shared")],
+        1,
+    );
+    assert_eq!(f.total, 5110, "{f:?}");
+}
