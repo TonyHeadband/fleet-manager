@@ -40,7 +40,7 @@ function measure(el: HTMLElement): { limit: number; tall: boolean } {
 /**
  * A message's text, folded past eight whole lines of measured height: cut clean on a line boundary, with a Read more /
  * Show less button under it. A short message shows no button. `text` is the message's source text, what the children
- * render: the message is measured again only when it or the panel width changes.
+ * render: the message is measured again only when it, the panel width or its text box's height changes.
  */
 export function Folding({ text, children }: { text: string; children: ReactNode }) {
   const [textRef, size] = useSize<HTMLDivElement>();
@@ -49,7 +49,10 @@ export function Folding({ text, children }: { text: string; children: ReactNode 
   const [tall, setTall] = useState(false);
   const [open, setOpen] = useState(false);
   // Measured at the full height (a folded box is clipped, its scrollHeight is not), again when the message's text
-  // changes and when the panel is resized (the Diff and Fullscreen widen it, so the text wraps onto fewer lines).
+  // changes, when the panel is resized (the Diff and Fullscreen widen it, so the text wraps onto fewer lines) and
+  // when the text box's height changes: the font and mono weight settings rewrap a message without changing its
+  // width or text. It cannot loop: a folded box's height is the fold limit, so measuring again finds the same limit
+  // and sets no new state; opening the fold changes the height once more and measures once.
   // Not on every render: `children` is a new element each time the parent renders, and a long chat would measure
   // every message for each new line. `text` stands for the children, so it is the dependency.
   useLayoutEffect(() => {
@@ -58,7 +61,7 @@ export function Folding({ text, children }: { text: string; children: ReactNode 
     const m = measure(el);
     setLimit(m.limit);
     setTall(m.tall);
-  }, [text, size.width, textRef]);
+  }, [text, size.width, size.height, textRef]);
   const toggle = () => {
     setOpen(!open);
     // Folding back shortens the feed: keep the message in view rather than let the scroll land elsewhere.
