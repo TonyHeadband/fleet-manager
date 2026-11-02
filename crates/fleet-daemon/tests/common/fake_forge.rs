@@ -30,6 +30,13 @@ struct State_ {
     delay: Option<Duration>,
     next_number: u64,
     refused: Vec<String>,
+    /// Keyed by (owner, repo, number).
+    pr_details: HashMap<(String, String, String), Value>,
+    /// Keyed by (owner, repo, sha).
+    check_runs: HashMap<(String, String, String), Value>,
+    statuses: HashMap<(String, String, String), Value>,
+    /// Keyed by (owner, repo, branch).
+    required: HashMap<(String, String, String), Value>,
 }
 
 pub struct FakeForge {
@@ -78,6 +85,42 @@ impl FakeForge {
             .unwrap()
             .prs
             .insert((owner.into(), repo.into()), prs);
+    }
+
+    /// What `GET /repos/{o}/{r}/pulls/{number}` answers; without it, a 404.
+    pub fn set_pr_detail(&self, owner: &str, repo: &str, number: u64, detail: Value) {
+        self.state
+            .lock()
+            .unwrap()
+            .pr_details
+            .insert((owner.into(), repo.into(), number.to_string()), detail);
+    }
+
+    /// What `GET /repos/{o}/{r}/commits/{sha}/check-runs` answers (`{"check_runs": [...]}`); without it, a 404.
+    pub fn set_check_runs(&self, owner: &str, repo: &str, sha: &str, body: Value) {
+        self.state
+            .lock()
+            .unwrap()
+            .check_runs
+            .insert((owner.into(), repo.into(), sha.into()), body);
+    }
+
+    /// What `GET /repos/{o}/{r}/commits/{sha}/status` answers (`{"statuses": [...]}`); without it, a 404.
+    pub fn set_statuses(&self, owner: &str, repo: &str, sha: &str, body: Value) {
+        self.state
+            .lock()
+            .unwrap()
+            .statuses
+            .insert((owner.into(), repo.into(), sha.into()), body);
+    }
+
+    /// What the base branch's `required_status_checks` answers; without it, GitHub's 404 of an unprotected branch.
+    pub fn set_required_checks(&self, owner: &str, repo: &str, branch: &str, body: Value) {
+        self.state
+            .lock()
+            .unwrap()
+            .required
+            .insert((owner.into(), repo.into(), branch.into()), body);
     }
 
     /// The next request answers `{ "message": message }` with this status.
@@ -179,6 +222,22 @@ async fn handle(
                 .collect();
             axum::Json(prs).into_response()
         }
+        ("GET", ["repos", o, r, "pulls", n]) => {
+            let key = (o.to_string(), r.to_string(), n.to_string());
+            found(s.pr_details.get(&key))
+        }
+        ("GET", ["repos", o, r, "commits", sha, "check-runs"]) => {
+            let key = (o.to_string(), r.to_string(), sha.to_string());
+            found(s.check_runs.get(&key))
+        }
+        ("GET", ["repos", o, r, "commits", sha, "status"]) => {
+            let key = (o.to_string(), r.to_string(), sha.to_string());
+            found(s.statuses.get(&key))
+        }
+        ("GET", ["repos", o, r, "branches", b, "protection", "required_status_checks"]) => {
+            let key = (o.to_string(), r.to_string(), b.to_string());
+            found(s.required.get(&key))
+        }
         ("POST", ["repos", o, r, "pulls"]) => {
             s.next_number += 1;
             let n = s.next_number;
@@ -204,6 +263,17 @@ async fn handle(
             (StatusCode::CREATED, axum::Json(issue)).into_response()
         }
         _ => (
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({"message": "Not Found"})),
+        )
+            .into_response(),
+    }
+}
+
+fn found(v: Option<&Value>) -> Response {
+    match v {
+        Some(v) => axum::Json(v.clone()).into_response(),
+        None => (
             StatusCode::NOT_FOUND,
             axum::Json(json!({"message": "Not Found"})),
         )

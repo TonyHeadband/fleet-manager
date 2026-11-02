@@ -5,7 +5,7 @@ mod github;
 pub mod log;
 pub mod token;
 
-use fleet_api::{parse_date, PrState};
+use fleet_api::{parse_date, CiState, PrState};
 use std::fmt;
 
 pub use github::{api_base, github};
@@ -50,6 +50,84 @@ pub struct PrInfo {
     pub state: PrState,
     /// Unix seconds.
     pub merged_at: Option<i64>,
+}
+
+/// How one check (a check run or a commit status) stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckOutcome {
+    /// Success, and also skipped and neutral.
+    Pass,
+    /// Failure, cancelled, timed out, action required, error...
+    Fail,
+    /// Queued, running, or pending.
+    Pending,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Check {
+    pub name: String,
+    pub outcome: CheckOutcome,
+}
+
+/// What GitHub says of an open PR's checks and mergeability.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrChecks {
+    /// Check runs and commit statuses on the PR's head commit.
+    pub checks: Vec<Check>,
+    /// The names the base branch requires; empty when it requires none.
+    pub required: Vec<String>,
+    /// GitHub's `mergeable`; None while it is still computing.
+    pub mergeable: Option<bool>,
+    pub mergeable_state: String,
+}
+
+impl PrChecks {
+    /// Whether GitHub says the PR can merge now: mergeable, and not held back by its state (`blocked` by a
+    /// required check or review, `behind` its base, a `draft`). A failing non-required check (`unstable`) does not
+    /// hold it back; the CI state tells about that.
+    pub fn can_merge(&self) -> bool {
+        self.mergeable == Some(true)
+            && !matches!(
+                self.mergeable_state.as_str(),
+                "dirty" | "blocked" | "behind" | "draft"
+            )
+    }
+
+    pub fn ci(&self) -> (CiState, Vec<String>) {
+        derive_ci(&self.checks, &self.required)
+    }
+}
+
+/// The CI state and the failing check names. The counted checks are the required ones, or every check when the
+/// branch requires none. Red if a counted check failed; else pending while one is running or a required one has not
+/// reported; else green (so a PR without any check is green).
+pub fn derive_ci(checks: &[Check], required: &[String]) -> (CiState, Vec<String>) {
+    let counted = |c: &&Check| required.is_empty() || required.contains(&c.name);
+    let mut failing: Vec<String> = Vec::new();
+    for c in checks
+        .iter()
+        .filter(counted)
+        .filter(|c| c.outcome == CheckOutcome::Fail)
+    {
+        if !failing.contains(&c.name) {
+            failing.push(c.name.clone());
+        }
+    }
+    if !failing.is_empty() {
+        return (CiState::Red, failing);
+    }
+    let running = checks
+        .iter()
+        .filter(counted)
+        .any(|c| c.outcome == CheckOutcome::Pending);
+    let missing = required
+        .iter()
+        .any(|r| !checks.iter().any(|c| c.name == *r));
+    if running || missing {
+        (CiState::Pending, failing)
+    } else {
+        (CiState::Green, failing)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +177,8 @@ pub trait Forge: Send + Sync {
     fn open_pr_of(&self, repo: &RepoRef, branch: &str) -> Result<Option<PrInfo>, ForgeError>;
     /// Every PR, in any state, whose head is `branch`.
     fn prs_of(&self, repo: &RepoRef, branch: &str) -> Result<Vec<PrInfo>, ForgeError>;
+    /// The checks and mergeability of the PR `number`, as of its head commit now.
+    fn pr_checks(&self, repo: &RepoRef, number: u64) -> Result<PrChecks, ForgeError>;
     fn create_pr(&self, repo: &RepoRef, pr: &NewPr) -> Result<PrInfo, ForgeError>;
     fn update_pr_text(
         &self,
@@ -189,5 +269,92 @@ mod tests {
         assert_eq!(parse_timestamp("1970-01-01T00:00:00.5Z"), Some(0));
         assert_eq!(parse_timestamp("2026-10-26 10:00:00"), None);
         assert_eq!(parse_timestamp("2026-10-26T25:00:00Z"), None);
+    }
+
+    fn check(name: &str, outcome: CheckOutcome) -> Check {
+        Check {
+            name: name.into(),
+            outcome,
+        }
+    }
+
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn with_no_required_checks_every_check_must_pass() {
+        use CheckOutcome::*;
+        let all_pass = [check("linux", Pass), check("windows", Pass)];
+        assert_eq!(derive_ci(&all_pass, &[]), (CiState::Green, vec![]));
+        let one_fails = [check("linux", Pass), check("windows", Fail)];
+        assert_eq!(
+            derive_ci(&one_fails, &[]),
+            (CiState::Red, names(&["windows"]))
+        );
+    }
+
+    #[test]
+    fn with_required_checks_only_those_count() {
+        use CheckOutcome::*;
+        let checks = [check("linux", Pass), check("windows", Fail)];
+        assert_eq!(
+            derive_ci(&checks, &names(&["linux"])),
+            (CiState::Green, vec![])
+        );
+        assert_eq!(
+            derive_ci(&checks, &names(&["linux", "windows"])),
+            (CiState::Red, names(&["windows"]))
+        );
+    }
+
+    #[test]
+    fn a_running_check_is_pending_unless_another_failed() {
+        use CheckOutcome::*;
+        let running = [check("linux", Pass), check("windows", Pending)];
+        assert_eq!(derive_ci(&running, &[]), (CiState::Pending, vec![]));
+        let failed_too = [check("linux", Fail), check("windows", Pending)];
+        assert_eq!(
+            derive_ci(&failed_too, &[]),
+            (CiState::Red, names(&["linux"]))
+        );
+    }
+
+    #[test]
+    fn a_required_check_that_has_not_reported_is_pending() {
+        use CheckOutcome::*;
+        let checks = [check("linux", Pass)];
+        assert_eq!(
+            derive_ci(&checks, &names(&["linux", "audit"])),
+            (CiState::Pending, vec![])
+        );
+    }
+
+    #[test]
+    fn a_check_failing_twice_is_named_once() {
+        use CheckOutcome::*;
+        let checks = [check("ci", Fail), check("ci", Fail)];
+        assert_eq!(derive_ci(&checks, &[]), (CiState::Red, names(&["ci"])));
+    }
+
+    #[test]
+    fn a_pr_with_no_checks_and_no_required_ones_is_green() {
+        assert_eq!(derive_ci(&[], &[]), (CiState::Green, vec![]));
+    }
+
+    #[test]
+    fn github_can_merge_a_clean_or_unstable_pr_only() {
+        let pr = |mergeable, state: &str| PrChecks {
+            checks: vec![],
+            required: vec![],
+            mergeable,
+            mergeable_state: state.into(),
+        };
+        assert!(pr(Some(true), "clean").can_merge());
+        assert!(pr(Some(true), "unstable").can_merge());
+        assert!(!pr(Some(true), "blocked").can_merge());
+        assert!(!pr(Some(true), "behind").can_merge());
+        assert!(!pr(Some(false), "dirty").can_merge());
+        assert!(!pr(None, "unknown").can_merge());
     }
 }

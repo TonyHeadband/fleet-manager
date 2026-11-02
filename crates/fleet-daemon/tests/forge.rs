@@ -1,9 +1,11 @@
 mod common;
 
 use common::fake_forge::FakeForge;
-use fleet_api::{AgentId, PrState};
+use fleet_api::{AgentId, CiState, PrState};
 use fleet_daemon::forge::log::{recorded, CallCtx};
-use fleet_daemon::forge::{api_base, github, Forge, ForgeConfig, ForgeError, NewPr, RepoRef};
+use fleet_daemon::forge::{
+    api_base, github, Check, CheckOutcome, Forge, ForgeConfig, ForgeError, NewPr, RepoRef,
+};
 use fleet_daemon::store::Store;
 use serde_json::json;
 use std::time::Duration;
@@ -266,4 +268,159 @@ async fn a_failed_call_records_the_reason_not_the_token() {
     let detail = rows[0].detail.as_deref().unwrap();
     assert!(detail.contains("refused"), "{detail}");
     assert!(!detail.contains("t0k"), "{detail}");
+}
+
+const SHA: &str = "abc123";
+
+fn detail(mergeable: serde_json::Value, state: &str) -> serde_json::Value {
+    json!({
+        "number": 7, "state": "open", "html_url": "https://github.com/acme/core/pull/7",
+        "merged_at": null, "mergeable": mergeable, "mergeable_state": state,
+        "head": {"sha": SHA}, "base": {"ref": "main"},
+    })
+}
+
+fn run(name: &str, status: &str, conclusion: serde_json::Value) -> serde_json::Value {
+    json!({"name": name, "status": status, "conclusion": conclusion})
+}
+
+fn checks_fixture(fake: &FakeForge) {
+    fake.set_pr_detail("acme", "core", 7, detail(json!(true), "unstable"));
+    fake.set_check_runs(
+        "acme",
+        "core",
+        SHA,
+        json!({"total_count": 6, "check_runs": [
+            run("linux", "completed", json!("success")),
+            run("windows", "completed", json!("failure")),
+            run("lint", "completed", json!("skipped")),
+            run("docs", "completed", json!("neutral")),
+            run("e2e", "in_progress", json!(null)),
+            run("deploy", "completed", json!("action_required")),
+        ]}),
+    );
+    fake.set_statuses(
+        "acme",
+        "core",
+        SHA,
+        json!({"state": "failure", "statuses": [
+            {"context": "ci/legacy", "state": "success"},
+            {"context": "ci/slow", "state": "pending"},
+            {"context": "ci/broken", "state": "error"},
+            {"context": "ci/failed", "state": "failure"},
+        ]}),
+    );
+}
+
+#[test]
+fn pr_checks_reads_runs_and_statuses_of_the_head_commit() {
+    let fake = FakeForge::start();
+    checks_fixture(&fake);
+    let got = client(&fake, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap();
+    let c = |n: &str, outcome| Check {
+        name: n.into(),
+        outcome,
+    };
+    use CheckOutcome::*;
+    assert_eq!(
+        got.checks,
+        vec![
+            c("linux", Pass),
+            c("windows", Fail),
+            c("lint", Pass),
+            c("docs", Pass),
+            c("e2e", Pending),
+            c("deploy", Fail),
+            c("ci/legacy", Pass),
+            c("ci/slow", Pending),
+            c("ci/broken", Fail),
+            c("ci/failed", Fail),
+        ]
+    );
+    assert_eq!(got.required, Vec::<String>::new());
+    assert_eq!(got.mergeable, Some(true));
+    assert_eq!(got.mergeable_state, "unstable");
+    assert!(got.can_merge());
+    let paths: Vec<String> = fake
+        .requests()
+        .into_iter()
+        .map(|r| r.path_and_query)
+        .collect();
+    assert!(paths.contains(&format!(
+        "/repos/acme/core/commits/{SHA}/check-runs?per_page=100&page=1"
+    )));
+    assert!(paths.contains(&format!(
+        "/repos/acme/core/commits/{SHA}/status?per_page=100&page=1"
+    )));
+}
+
+#[test]
+fn pr_checks_reads_the_required_checks_of_the_base_branch() {
+    let fake = FakeForge::start();
+    checks_fixture(&fake);
+    fake.set_required_checks(
+        "acme",
+        "core",
+        "main",
+        json!({"strict": false, "contexts": ["linux"], "checks": [
+            {"context": "linux", "app_id": 1}, {"context": "ci/legacy", "app_id": null},
+        ]}),
+    );
+    let got = client(&fake, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap();
+    assert_eq!(got.required, vec!["linux", "ci/legacy"]);
+    assert_eq!(got.ci(), (CiState::Green, vec![]));
+}
+
+#[test]
+fn pr_checks_without_required_checks_goes_red_on_any_failure() {
+    let fake = FakeForge::start();
+    checks_fixture(&fake);
+    let got = client(&fake, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap();
+    assert_eq!(
+        got.ci(),
+        (
+            CiState::Red,
+            vec![
+                "windows".to_string(),
+                "deploy".into(),
+                "ci/broken".into(),
+                "ci/failed".into()
+            ]
+        )
+    );
+}
+
+#[test]
+fn pr_checks_with_mergeable_still_computing_cannot_merge() {
+    let fake = FakeForge::start();
+    checks_fixture(&fake);
+    fake.set_pr_detail("acme", "core", 7, detail(json!(null), "unknown"));
+    let got = client(&fake, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap();
+    assert_eq!(got.mergeable, None);
+    assert!(!got.can_merge());
+}
+
+#[test]
+fn pr_checks_fails_when_the_forge_refuses_any_read() {
+    let fake = FakeForge::start();
+    checks_fixture(&fake);
+    fake.fail_next_on("GET", "/check-runs", 500, "boom");
+    let err = client(&fake, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap_err();
+    assert!(matches!(err, ForgeError::Refused { status: 500, .. }));
+    // No PR detail: nothing to read the head commit from.
+    let none = FakeForge::start();
+    let err = client(&none, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap_err();
+    assert!(matches!(err, ForgeError::Refused { status: 404, .. }));
 }

@@ -2165,6 +2165,9 @@ impl AgentService {
                         repo: w.repo.clone(),
                         state: PrState::Open,
                         merged_at: None,
+                        ci: fleet_api::CiState::Unknown,
+                        failing_checks: vec![],
+                        can_merge: false,
                     });
                 }
             })

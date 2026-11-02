@@ -1,6 +1,9 @@
 //! GitHub and GitHub Enterprise over REST.
 
-use super::{parse_timestamp, Forge, ForgeConfig, ForgeError, IssueInfo, NewPr, PrInfo, RepoRef};
+use super::{
+    parse_timestamp, Check, CheckOutcome, Forge, ForgeConfig, ForgeError, IssueInfo, NewPr,
+    PrChecks, PrInfo, RepoRef,
+};
 use fleet_api::PrState;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -76,6 +79,33 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
+/// A check run: anything not completed is pending; skipped and neutral pass like success.
+fn run_outcome(status: &str, conclusion: Option<&str>) -> CheckOutcome {
+    if status != "completed" {
+        return CheckOutcome::Pending;
+    }
+    match conclusion {
+        Some("success" | "skipped" | "neutral") => CheckOutcome::Pass,
+        _ => CheckOutcome::Fail,
+    }
+}
+
+fn status_outcome(state: &str) -> CheckOutcome {
+    match state {
+        "success" => CheckOutcome::Pass,
+        "pending" => CheckOutcome::Pending,
+        _ => CheckOutcome::Fail,
+    }
+}
+
+/// Results per page asked of the checks endpoints, and the most pages read of one: a PR with more is cut off.
+const CHECKS_PER_PAGE: usize = 100;
+const CHECKS_MAX_PAGES: usize = 10;
+
+fn unreadable(what: &str) -> ForgeError {
+    ForgeError::Transport(format!("unreadable reply: {what}"))
+}
+
 fn transport(e: ureq::Error) -> ForgeError {
     match e {
         ureq::Error::Timeout(_) => ForgeError::TimedOut,
@@ -136,6 +166,52 @@ impl GitHub {
             .map_err(|e| ForgeError::Transport(format!("unreadable reply: {e}")))?;
         Ok(raw.into_iter().map(RawPr::into_info).collect())
     }
+
+    /// Every item of `field` in the pages of `path`, which must end in a query string.
+    fn pages(&self, path: &str, field: &str) -> Result<Vec<Value>, ForgeError> {
+        let mut all = Vec::new();
+        for page in 1..=CHECKS_MAX_PAGES {
+            let reply = self.send(
+                "GET",
+                &format!("{path}?per_page={CHECKS_PER_PAGE}&page={page}"),
+                None,
+            )?;
+            let items = reply[field].as_array().ok_or_else(|| unreadable(field))?;
+            all.extend(items.iter().cloned());
+            if items.len() < CHECKS_PER_PAGE {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    /// The contexts the branch requires; none when it is not protected (GitHub answers 404).
+    fn required_checks(&self, repo: &RepoRef, branch: &str) -> Result<Vec<String>, ForgeError> {
+        let path = format!(
+            "/repos/{}/{}/branches/{}/protection/required_status_checks",
+            repo.owner,
+            repo.name,
+            percent_encode(branch)
+        );
+        let reply = match self.send("GET", &path, None) {
+            Ok(r) => r,
+            Err(ForgeError::Refused { status: 404, .. }) => return Ok(vec![]),
+            Err(e) => return Err(e),
+        };
+        let mut names: Vec<String> = Vec::new();
+        let listed = reply["contexts"].as_array().into_iter().flatten();
+        let checks = reply["checks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| &c["context"]);
+        for name in listed.chain(checks).filter_map(Value::as_str) {
+            if !names.iter().any(|n| n == name) {
+                names.push(name.to_string());
+            }
+        }
+        Ok(names)
+    }
 }
 
 impl Forge for GitHub {
@@ -153,6 +229,59 @@ impl Forge for GitHub {
 
     fn prs_of(&self, repo: &RepoRef, branch: &str) -> Result<Vec<PrInfo>, ForgeError> {
         self.pulls(repo, branch, "all")
+    }
+
+    fn pr_checks(&self, repo: &RepoRef, number: u64) -> Result<PrChecks, ForgeError> {
+        let (owner, name) = (&repo.owner, &repo.name);
+        let pr = self.send(
+            "GET",
+            &format!("/repos/{owner}/{name}/pulls/{number}"),
+            None,
+        )?;
+        let sha = pr["head"]["sha"]
+            .as_str()
+            .ok_or_else(|| unreadable("no head commit"))?;
+        let base = pr["base"]["ref"]
+            .as_str()
+            .ok_or_else(|| unreadable("no base branch"))?;
+        let mut checks = Vec::new();
+        let runs = self.pages(
+            &format!("/repos/{owner}/{name}/commits/{sha}/check-runs"),
+            "check_runs",
+        )?;
+        for r in runs {
+            let name = r["name"]
+                .as_str()
+                .ok_or_else(|| unreadable("a check run has no name"))?;
+            let status = r["status"].as_str().unwrap_or("queued");
+            checks.push(Check {
+                name: name.to_string(),
+                outcome: run_outcome(status, r["conclusion"].as_str()),
+            });
+        }
+        let statuses = self.pages(
+            &format!("/repos/{owner}/{name}/commits/{sha}/status"),
+            "statuses",
+        )?;
+        for st in statuses {
+            let context = st["context"]
+                .as_str()
+                .ok_or_else(|| unreadable("a status has no context"))?;
+            let state = st["state"].as_str().unwrap_or("error");
+            checks.push(Check {
+                name: context.to_string(),
+                outcome: status_outcome(state),
+            });
+        }
+        Ok(PrChecks {
+            checks,
+            required: self.required_checks(repo, base)?,
+            mergeable: pr["mergeable"].as_bool(),
+            mergeable_state: pr["mergeable_state"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string(),
+        })
     }
 
     fn create_pr(&self, repo: &RepoRef, pr: &NewPr) -> Result<PrInfo, ForgeError> {

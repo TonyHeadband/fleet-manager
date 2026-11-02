@@ -492,6 +492,9 @@ async fn backfill_deletes_ghosts_and_keeps_real_records() {
         repo: "agent-core".into(),
         state: PrState::Merged,
         merged_at: Some(3),
+        ci: fleet_api::CiState::Unknown,
+        failing_checks: vec![],
+        can_merge: false,
     });
     let mut genuine = ghost_of(&lead, "old", "/w/old");
     genuine.state = TaskState::Stopped;

@@ -2390,6 +2390,9 @@ async fn gate_pass_pushes_and_opens_pr() {
             repo: p.repos[0].repo.clone(),
             state: fleet_api::PrState::Open,
             merged_at: None,
+            ci: fleet_api::CiState::Unknown,
+            failing_checks: vec![],
+            can_merge: false,
         }]
     );
     let lead = agent(&fx, &a.id).await;

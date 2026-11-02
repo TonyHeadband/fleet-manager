@@ -67,6 +67,9 @@ fn pr(state: PrState) -> Vec<TaskPr> {
         repo: "core".into(),
         state,
         merged_at: None,
+        ci: fleet_api::CiState::Unknown,
+        failing_checks: vec![],
+        can_merge: false,
     }]
 }
 

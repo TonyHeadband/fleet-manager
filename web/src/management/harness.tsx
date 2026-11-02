@@ -77,7 +77,7 @@ export function mergedTask(id: string, product: string, release: number | null):
   const t = fullTask(id, id, "archived", "stopped", {
     product,
     release,
-    prs: [{ url: "u", repo: "core", state: "merged", merged_at: null }],
+    prs: [{ url: "u", repo: "core", state: "merged", merged_at: null, ci: "unknown", failing_checks: [], can_merge: false }],
   });
   t.repos[0]!.changed = true;
   return t;

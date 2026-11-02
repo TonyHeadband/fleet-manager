@@ -40,7 +40,7 @@ fn pr_lists(fx: &Fx) -> Vec<Recorded> {
     fx.forge
         .requests()
         .into_iter()
-        .filter(|r| r.method == "GET" && r.path_and_query.contains("/pulls"))
+        .filter(|r| r.method == "GET" && r.path_and_query.contains("/pulls?"))
         .collect()
 }
 
@@ -131,12 +131,18 @@ async fn merged_pr_marks_task_done() {
                 repo: "core".into(),
                 state: PrState::Closed,
                 merged_at: None,
+                ci: fleet_api::CiState::Unknown,
+                failing_checks: vec![],
+                can_merge: false,
             },
             TaskPr {
                 url: "https://ghe.example.com/acme/core/pull/7".into(),
                 repo: "core".into(),
                 state: PrState::Merged,
                 merged_at: Some(merged_at),
+                ci: fleet_api::CiState::Unknown,
+                failing_checks: vec![],
+                can_merge: false,
             },
         ]
     );
@@ -200,6 +206,9 @@ async fn gh_failure_changes_nothing() {
         repo: "core".into(),
         state: PrState::Open,
         merged_at: None,
+        ci: fleet_api::CiState::Unknown,
+        failing_checks: vec![],
+        can_merge: false,
     };
     let seen = open.clone();
     fx.store
@@ -442,6 +451,9 @@ fn pr(repo: &str, n: u32, state: PrState, merged_at: Option<i64>) -> TaskPr {
         repo: repo.into(),
         state,
         merged_at,
+        ci: fleet_api::CiState::Unknown,
+        failing_checks: vec![],
+        can_merge: false,
     }
 }
 
@@ -934,4 +946,118 @@ async fn pr_merged_becomes_an_event_once() {
         "PR merged · https://ghe.example.com/acme/core/pull/7"
     );
     assert_eq!(got[0].task, id);
+}
+
+/// An open PR #7 on acme/core whose head `sha1` has one passing and one `windows` check with this conclusion.
+fn open_pr_with_windows(fx: &Fx, windows: &str, mergeable: Value, state: &str) {
+    reply_for(fx, "core", &[rest_pr("core", 7, "OPEN")]);
+    fx.forge.set_pr_detail(
+        "acme",
+        "core",
+        7,
+        json!({"mergeable": mergeable, "mergeable_state": state,
+               "head": {"sha": "sha1"}, "base": {"ref": "main"}}),
+    );
+    let windows = if windows == "running" {
+        json!({"name": "windows", "status": "in_progress", "conclusion": null})
+    } else {
+        json!({"name": "windows", "status": "completed", "conclusion": windows})
+    };
+    fx.forge.set_check_runs(
+        "acme",
+        "core",
+        "sha1",
+        json!({"check_runs": [
+            {"name": "linux", "status": "completed", "conclusion": "success"}, windows,
+        ]}),
+    );
+    fx.forge
+        .set_statuses("acme", "core", "sha1", json!({"statuses": []}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_watcher_stores_ci_state_and_mergeability_on_an_open_pr() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    open_pr_with_windows(&fx, "failure", json!(true), "unstable");
+
+    fx.svc.check_merges().await;
+
+    let t = record(&fx, &id).await;
+    assert_eq!(t.prs.len(), 1);
+    assert_eq!(t.prs[0].state, PrState::Open);
+    assert_eq!(t.prs[0].ci, fleet_api::CiState::Red);
+    assert_eq!(t.prs[0].failing_checks, vec!["windows".to_string()]);
+    assert!(t.prs[0].can_merge);
+
+    // The next pass sees the check green and a blocked merge.
+    open_pr_with_windows(&fx, "success", json!(true), "blocked");
+    fx.svc.check_merges().await;
+    let t = record(&fx, &id).await;
+    assert_eq!(t.prs[0].ci, fleet_api::CiState::Green);
+    assert!(t.prs[0].failing_checks.is_empty());
+    assert!(!t.prs[0].can_merge);
+
+    open_pr_with_windows(&fx, "running", json!(true), "clean");
+    fx.svc.check_merges().await;
+    assert_eq!(
+        record(&fx, &id).await.prs[0].ci,
+        fleet_api::CiState::Pending
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unreadable_checks_leave_the_pr_listed_with_unknown_ci() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    // The PR list works; its detail and checks 404.
+    reply_for(&fx, "core", &[rest_pr("core", 7, "OPEN")]);
+
+    fx.svc.check_merges().await;
+
+    let t = record(&fx, &id).await;
+    assert_eq!(t.prs.len(), 1);
+    assert_eq!(t.prs[0].state, PrState::Open);
+    assert_eq!(t.prs[0].ci, fleet_api::CiState::Unknown);
+    assert!(!t.prs[0].can_merge);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_pr_is_not_asked_for_its_checks() {
+    let fx = fixture().await;
+    github_task(&fx, "t1").await;
+    reply_merged(&fx);
+
+    fx.svc.check_merges().await;
+
+    assert!(fx
+        .forge
+        .requests()
+        .iter()
+        .all(|r| !r.path_and_query.contains("/check-runs")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refreshing_a_task_reads_its_checks_now_and_returns_the_task() {
+    let fx = fixture().await;
+    let id = github_task(&fx, "t1").await;
+    open_pr_with_windows(&fx, "failure", json!(true), "clean");
+    let (addr, fx) = serve(fx).await;
+
+    let (status, body) = call(
+        addr,
+        "POST",
+        &format!("/api/tasks/{}/pr/refresh", id.0),
+        json!({}),
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["prs"][0]["ci"], "red");
+    assert_eq!(body["prs"][0]["failing_checks"], json!(["windows"]));
+    assert_eq!(body["prs"][0]["can_merge"], true);
+    assert_eq!(record(&fx, &id).await.prs[0].ci, fleet_api::CiState::Red);
+
+    let (status, _) = call(addr, "POST", "/api/tasks/nope/pr/refresh", json!({})).await;
+    assert_eq!(status, 404);
 }

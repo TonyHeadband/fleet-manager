@@ -9,8 +9,8 @@ use crate::repos::Repos;
 use crate::store::Store;
 use crate::supervisor;
 use fleet_api::{
-    task_id, task_outcome, AgentId, AgentKind, EventKind, PrState, Status, Task, TaskEventKind,
-    TaskOutcome, TaskPr, TaskState,
+    task_id, task_outcome, AgentId, AgentKind, CiState, EventKind, PrState, Status, Task,
+    TaskEventKind, TaskOutcome, TaskPr, TaskState,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -35,6 +35,9 @@ fn task_pr(repo: &str, p: PrInfo) -> TaskPr {
         repo: repo.to_string(),
         state: p.state,
         merged_at: p.merged_at,
+        ci: CiState::Unknown,
+        failing_checks: vec![],
+        can_merge: false,
     }
 }
 
@@ -217,7 +220,29 @@ impl MergeChecker {
             let branch = ask.branch.clone();
             match calls.call("prs_of", move |f, r| f.prs_of(r, &branch)).await {
                 Ok(found) => {
-                    let found: Vec<TaskPr> = found.into_iter().map(|p| task_pr(repo, p)).collect();
+                    let mut with_ci = Vec::new();
+                    for p in found {
+                        let (number, open) = (p.number, p.state == PrState::Open);
+                        let mut pr = task_pr(repo, p);
+                        // Only an open PR has checks worth reading. A failed read leaves the CI unknown, never
+                        // the PR list unwritten.
+                        if open {
+                            match calls
+                                .call("pr_checks", move |f, r| f.pr_checks(r, number))
+                                .await
+                            {
+                                Ok(checks) => {
+                                    (pr.ci, pr.failing_checks) = checks.ci();
+                                    pr.can_merge = checks.can_merge();
+                                }
+                                Err(e) => {
+                                    warn!(task = %t.id.0, repo = %repo, pr = number, error = %e, "cannot read the PR's checks");
+                                }
+                            }
+                        }
+                        with_ci.push(pr);
+                    }
+                    let found = with_ci;
                     let changed = match counted {
                         Count::Changed(c) => c,
                         // The branch or its start is gone from every checkout (a merged branch deleted by hand).
@@ -531,6 +556,24 @@ impl AgentService {
                 }
             }
         });
+    }
+
+    /// Reads the task's PRs and their checks from GitHub now, for a client that has just opened the task, and
+    /// returns the task as stored.
+    pub async fn refresh_task_prs(&self, id: &AgentId) -> Result<Task, ServiceError> {
+        if self.store.task(id).await?.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        let checker = self.merge_checker();
+        // A PR recorded while GitHub was asked makes a check stale; ask again, a few times at most.
+        for _ in 0..3 {
+            match checker.check_one(id).await {
+                Checked::Stale => continue,
+                Checked::Done => break,
+                Checked::Failed(reason) => return Err(ServiceError::Refused(reason)),
+            }
+        }
+        self.store.task(id).await?.ok_or(ServiceError::NotFound)
     }
 
     /// Marks a task with no GitHub repo done. A task with one is done only when its PR merges.

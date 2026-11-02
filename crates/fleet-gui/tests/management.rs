@@ -1024,6 +1024,9 @@ fn merged(id: &str, product: &str, release: Option<i64>) -> Task {
         repo: "core".into(),
         state: PrState::Merged,
         merged_at: None,
+        ci: fleet_api::CiState::Unknown,
+        failing_checks: vec![],
+        can_merge: false,
     }];
     t
 }
