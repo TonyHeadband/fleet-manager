@@ -2,7 +2,9 @@
    replies plain across the width, each run of tool calls one outlined section, a prompt the agent waits on in the
    accent outline. Its open motion is motion.css's. */
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.chat-feed { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; gap: var(--panel-band-gap); overflow-wrap: anywhere; }
+.chat-feed { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overflow-anchor: none; display: flex; flex-direction: column; gap: var(--panel-band-gap); overflow-wrap: anywhere; }
+/* No scroll anchoring: the feed keeps its own place (ChatPane holds the reader when earlier messages go in above,
+   Feed holds the end as messages settle), and the browser's own correction would read as the reader leaving the end. */
 /* A short chat sits at the bottom, by the reply box, and still scrolls whole once it grows. */
 .chat-feed > :first-child { margin-top: auto; }
 .chat-feed > * { flex: none; min-width: 0; }

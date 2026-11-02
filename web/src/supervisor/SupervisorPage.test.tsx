@@ -98,6 +98,19 @@ describe("Supervisor page", () => {
     expect(chatOf("c2")).toHaveLength(0);
   });
 
+  it("leaving_the_page_with_a_room_open_does_not_bounce_back", async () => {
+    // The page outlives its address while the next view enters: it must not name itself again over #kanban.
+    window.location.hash = "#supervisor?room=product%3Acore";
+    render(page());
+    await waitFor(() => expect(window.location.hash).toBe("#supervisor?c=c2&room=product%3Acore"));
+    act(() => {
+      window.location.hash = "#kanban";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(window.location.hash).toBe("#kanban");
+  });
+
   it("new_then_send_creates_a_conversation", async () => {
     const client = clientWith();
     render(page(client));

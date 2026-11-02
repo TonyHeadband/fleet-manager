@@ -10,23 +10,31 @@ const FOLD_LINES = 8;
  * Where a message folds, in px from its top: eight of the element's own lines (`panel.foldMax` is that for the
  * chat's body text, and stands in when the line height cannot be read), then snapped up to the bottom of the last
  * whole line within it, so paragraph margins never leave the cut through a line.
+ *
+ * Tall means a line of text ends past those eight. The box's own height is no measure: a paragraph's margin makes even
+ * a one-line message taller than its text, and every message would offer Read more.
  */
-function foldLimit(el: HTMLElement): number {
+function measure(el: HTMLElement): { limit: number; tall: boolean } {
   const lineHeight = parseFloat(window.getComputedStyle(el.firstElementChild ?? el).lineHeight);
   const budget = Number.isFinite(lineHeight) ? lineHeight * FOLD_LINES : panel.foldMax;
   const top = el.getBoundingClientRect().top;
   let snapped = 0;
+  let lines = false;
+  let past = false;
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     range.selectNodeContents(node);
     if (typeof range.getClientRects !== "function") break;
     for (const r of Array.from(range.getClientRects())) {
+      lines = true;
       const bottom = r.bottom - top;
-      if (bottom <= budget + 0.5 && bottom > snapped) snapped = bottom;
+      if (bottom > budget + 0.5) past = true;
+      else if (bottom > snapped) snapped = bottom;
     }
   }
-  return snapped > 0 ? snapped : budget;
+  // Without line boxes to read (no layout), the height is all there is.
+  return { limit: snapped > 0 ? snapped : budget, tall: lines ? past : el.scrollHeight > budget };
 }
 
 /**
@@ -44,9 +52,9 @@ export function Folding({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const el = text.current;
     if (!el) return;
-    const at = foldLimit(el);
-    setLimit(at);
-    setTall(el.scrollHeight > at);
+    const m = measure(el);
+    setLimit(m.limit);
+    setTall(m.tall);
   }, [children, size.width, text]);
   const toggle = () => {
     setOpen(!open);

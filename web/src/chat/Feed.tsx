@@ -15,6 +15,11 @@ export function Feed({ feedRef, label, onScroll, children }: { feedRef: RefObjec
   const [cues, setCues] = useState<Cues>({ above: false, below: false });
   const [scrolling, setScrolling] = useState(false);
   const hide = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Read at the end, the reader stays there when the feed or a message in it changes size without a scroll (a panel
+  // settling as it opens, messages rewrapping and folding once measured): the latest message would slip out of sight.
+  // A click in the feed lets go (Read more on the last message grows it, and its start must stay in view); scrolling
+  // back to the end takes hold again.
+  const atEnd = useRef(true);
 
   const measure = () => {
     const el = feedRef.current;
@@ -29,10 +34,23 @@ export function Feed({ feedRef, label, onScroll, children }: { feedRef: RefObjec
     const el = feedRef.current;
     if (!el) return;
     measure();
-    const mo = new MutationObserver(measure);
+    const ro =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            if (atEnd.current) el.scrollTop = el.scrollHeight;
+            measure();
+          });
+    const watch = () => {
+      ro?.observe(el);
+      for (const child of Array.from(el.children)) ro?.observe(child);
+    };
+    watch();
+    const mo = new MutationObserver(() => {
+      watch();
+      measure();
+    });
     mo.observe(el, { childList: true, subtree: true, characterData: true });
-    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    ro?.observe(el);
     return () => {
       mo.disconnect();
       ro?.disconnect();
@@ -50,7 +68,10 @@ export function Feed({ feedRef, label, onScroll, children }: { feedRef: RefObjec
         aria-label={label}
         className="chat-feed"
         data-scrolling={scrolling || undefined}
+        onPointerDown={() => (atEnd.current = false)}
         onScroll={(e) => {
+          const el = e.currentTarget;
+          atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_EDGE;
           measure();
           setScrolling(true);
           clearTimeout(hide.current);

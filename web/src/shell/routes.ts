@@ -39,15 +39,21 @@ export function supervisorHref(conversation?: string | null, room?: string | nul
   return s ? `#supervisor?${s}` : "#supervisor";
 }
 
+/**
+ * Whether the address names the Supervisor page now. Read live, never from a hook's state: a link changes the address
+ * before its hashchange event lands, and a render in between would otherwise write the page's own address back over
+ * the one being left for.
+ */
+export const onSupervisorPage = () => window.location.hash.split("?")[0] === "#supervisor";
+
 /** Makes `room` the one the address names, replacing the entry (no back-button step), so a later link to another room
  * is a change of address even when it is the room the owner left. Only on the Supervisor page. */
 export function replaceSupervisorRoom(room: string): void {
-  const [view, query = ""] = window.location.hash.split("?");
-  if (view !== "#supervisor") return;
-  const q = new URLSearchParams(query);
+  if (!onSupervisorPage()) return;
+  const q = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
   if (q.get("room") === room) return;
   q.set("room", room);
-  window.history.replaceState(window.history.state, "", `${view}?${q.toString()}`);
+  window.history.replaceState(window.history.state, "", `#supervisor?${q.toString()}`);
   // replaceState fires nothing: tell the hash's readers.
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 }

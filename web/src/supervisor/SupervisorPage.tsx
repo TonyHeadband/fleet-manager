@@ -9,7 +9,7 @@ import { ChatPane, type ChatClient } from "../chat/ChatPane";
 import { ownerSpeaker, supervisorSpeaker } from "../chat/speakers";
 import { Composer } from "../components/Composer";
 import { ReplyBox } from "../components/ReplyBox";
-import { navigate, supervisorHref, useSupervisorConversation, useSupervisorRoom } from "../shell/routes";
+import { navigate, onSupervisorPage, supervisorHref, useSupervisorConversation, useSupervisorRoom } from "../shell/routes";
 import { ErrorLine } from "../ui/ErrorLine";
 import { ConversationSelector } from "./ConversationSelector";
 import { AGENTS_BY_STATUS } from "./widgets/AgentsByStatus";
@@ -68,13 +68,13 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
   const current = blank ? null : (known ?? conversations[0]?.id ?? null);
   // An address left by another persona (or a deleted conversation) is let go once the list is known.
   useEffect(() => {
-    if (list !== null && named !== null && known === null) navigate(supervisorHref(null, room), true);
+    if (onSupervisorPage() && list !== null && named !== null && known === null) navigate(supervisorHref(null, room), true);
   }, [list, named, known, room]);
 
   // The latest conversation, shown for an address without one, is named in it so the rest of the app can tell what is
   // on screen.
   useEffect(() => {
-    if (!blank && named === null && current !== null) navigate(supervisorHref(current, room), true);
+    if (onSupervisorPage() && !blank && named === null && current !== null) navigate(supervisorHref(current, room), true);
   }, [blank, named, current, room]);
 
   const pick = (id: string) => {

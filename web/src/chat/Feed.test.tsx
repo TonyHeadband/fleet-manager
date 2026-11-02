@@ -24,7 +24,32 @@ function scrollTo(feed: HTMLElement, top: number) {
 const feedOf = (c: HTMLElement) => c.querySelector<HTMLElement>(".chat-feed")!;
 const cue = (c: HTMLElement, edge: string) => c.querySelector(`.chat-cue[data-edge="${edge}"]`)!;
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+/** jsdom has no layout: a ResizeObserver the test fires by hand, as a message settling or the panel resizing would. */
+function stubResize() {
+  const fire: (() => void)[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(cb: () => void) {
+        fire.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  return () => act(() => fire.forEach((f) => f()));
+}
+
+/** The feed's content grows to `height` with no scroll, as a message rewrapping or folding does. */
+function grow(feed: HTMLElement, height: number) {
+  Object.defineProperty(feed, "scrollHeight", { configurable: true, value: height });
+}
 
 describe("Feed", () => {
   it("cues_show_more_above_and_below_and_go_at_each_end", () => {
@@ -60,6 +85,38 @@ describe("Feed", () => {
     expect(onScroll).toHaveBeenCalledWith(feed);
     act(() => vi.advanceTimersByTime(1000));
     expect(feed).not.toHaveAttribute("data-scrolling");
+  });
+
+  it("a_reader_at_the_end_stays_there_as_messages_settle", () => {
+    const resized = stubResize();
+    const { container } = render(<Harness />);
+    const feed = feedOf(container);
+    scrollTo(feed, 800);
+    grow(feed, 1300);
+    resized();
+    expect(feed.scrollTop).toBe(1300);
+  });
+
+  it("a_reader_scrolled_up_or_clicking_in_the_feed_is_left_where_they_are", () => {
+    const resized = stubResize();
+    const { container } = render(<Harness />);
+    const feed = feedOf(container);
+    scrollTo(feed, 400);
+    grow(feed, 1300);
+    resized();
+    expect(feed.scrollTop).toBe(400);
+    // At the end, Read more on the last message grows it: its start stays where the reader clicked.
+    scrollTo(feed, 1100);
+    fireEvent.pointerDown(feed);
+    grow(feed, 1600);
+    resized();
+    expect(feed.scrollTop).toBe(1100);
+  });
+
+  it("the_feed_has_no_scroll_anchoring", () => {
+    // The browser's correction as messages settle would read as the reader leaving the end.
+    const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.chat-feed \{[^}]*overflow-anchor: none;/);
   });
 
   it("the_css_hides_the_idle_scrollbar_and_never_draws_cues_over_text", () => {
