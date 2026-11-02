@@ -205,6 +205,28 @@ pub struct TaskPr {
     pub can_merge: bool,
 }
 
+/// How GitHub merges a PR into its base.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum MergeMethod {
+    Rebase,
+    Squash,
+    /// A merge commit.
+    Merge,
+}
+
+/// What a merge did: which PR, and how it was merged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct MergedPr {
+    pub url: String,
+    pub repo: String,
+    #[ts(type = "number")]
+    pub number: u64,
+    pub method: MergeMethod,
+}
+
 /// Where a task stands for its release's count; see `progress::task_outcome`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TaskOutcome {

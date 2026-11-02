@@ -9,7 +9,7 @@ use crate::repos::Repos;
 use crate::store::Store;
 use crate::supervisor;
 use fleet_api::{
-    task_id, task_outcome, AgentId, AgentKind, CiState, EventKind, PrState, Status, Task,
+    task_id, task_outcome, AgentId, AgentKind, CiState, EventKind, MergedPr, PrState, Status, Task,
     TaskEventKind, TaskOutcome, TaskPr, TaskState,
 };
 use std::collections::{HashMap, HashSet};
@@ -39,6 +39,74 @@ fn task_pr(repo: &str, p: PrInfo) -> TaskPr {
         failing_checks: vec![],
         can_merge: false,
     }
+}
+
+/// The number at the end of a PR's URL (`.../pull/7`).
+fn pr_number(url: &str) -> Option<u64> {
+    url.trim_end_matches('/').rsplit('/').next()?.parse().ok()
+}
+
+/// The open PR a merge is for, or why there is none or the rules do not let it merge.
+fn merge_candidate(t: &Task, repo: Option<&str>) -> Result<TaskPr, String> {
+    let of_repo: Vec<&TaskPr> = t
+        .prs
+        .iter()
+        .filter(|p| repo.is_none_or(|r| p.repo == r))
+        .collect();
+    if of_repo.is_empty() {
+        return Err(match repo {
+            Some(r) => format!("this task has no PR in {r}"),
+            None => "this task has no PR".into(),
+        });
+    }
+    let open: Vec<&TaskPr> = of_repo
+        .iter()
+        .copied()
+        .filter(|p| p.state == PrState::Open)
+        .collect();
+    let pr = match open[..] {
+        [] => {
+            let p = of_repo[0];
+            let state = match p.state {
+                PrState::Merged => "already merged",
+                _ => "closed",
+            };
+            return Err(format!("{} is not open: it is {state}", p.url));
+        }
+        [p] => p,
+        _ => {
+            return Err(format!(
+                "this task has {} open PRs; say which repo's to merge",
+                open.len()
+            ))
+        }
+    };
+    let number = pr_number(&pr.url).map_or_else(|| pr.url.clone(), |n| format!("#{n}"));
+    match pr.ci {
+        CiState::Green => {}
+        CiState::Red => {
+            return Err(format!(
+                "PR {number} cannot be merged: CI is red ({} failed)",
+                pr.failing_checks.join(", ")
+            ))
+        }
+        CiState::Pending => {
+            return Err(format!(
+                "PR {number} cannot be merged yet: CI is still pending"
+            ))
+        }
+        CiState::Unknown => {
+            return Err(format!(
+                "PR {number} cannot be merged: its CI state is unknown (GitHub's checks could not be read)"
+            ))
+        }
+    }
+    if !pr.can_merge {
+        return Err(format!(
+            "PR {number} cannot be merged: GitHub says it is not mergeable (conflicts with its base, a review or required check missing, or the branch is behind)"
+        ));
+    }
+    Ok(pr.clone())
 }
 
 /// A task the watcher still asks about: not archived, not done.
@@ -357,6 +425,30 @@ impl MergeChecker {
         Checked::Done
     }
 
+    /// The task's calls on the GitHub repo its repo `name` is at, or why there are none.
+    pub(crate) async fn pr_calls(&self, t: &Task, name: &str) -> Result<PrCalls<'_>, String> {
+        let row = self
+            .store
+            .repo(&t.product, name)
+            .await
+            .map_err(|e| format!("cannot read repo {name}: {e}"))?;
+        let url = row.and_then(|r| r.url);
+        let repo = url
+            .as_deref()
+            .and_then(RepoRef::from_url)
+            .ok_or_else(|| format!("the URL of {name} names no GitHub owner and repo"))?;
+        Ok(PrCalls {
+            store: &self.store,
+            ctx: CallCtx {
+                persona: t.persona.clone(),
+                task: Some(t.id.clone()),
+                agent: None,
+            },
+            forge: self.forge_of(&t.persona).await?,
+            repo,
+        })
+    }
+
     /// The persona's client on its own host, or why it has none: a missing token is a logged-out GitHub.
     async fn forge_of(&self, persona: &str) -> Result<Arc<dyn Forge>, String> {
         let token = self
@@ -574,6 +666,57 @@ impl AgentService {
             }
         }
         self.store.task(id).await?.ok_or(ServiceError::NotFound)
+    }
+
+    /// Merges the task's open PR (the one in `repo` when it has several) if GitHub says its CI is green and it can
+    /// merge, with the first method its repo allows: rebase, else squash, else merge. The PR's checks are read
+    /// again first, never taken from the stored copy. Afterwards the merge watcher is asked about the task, so
+    /// its stage turns to Merged without waiting for the timer.
+    pub async fn merge_pr(
+        &self,
+        id: &AgentId,
+        repo: Option<&str>,
+    ) -> Result<MergedPr, ServiceError> {
+        // Reads every PR of the task from GitHub now and stores them.
+        let t = self.refresh_task_prs(id).await?;
+        let pr = merge_candidate(&t, repo).map_err(ServiceError::Refused)?;
+        let number = pr_number(&pr.url).ok_or_else(|| {
+            ServiceError::Refused(format!("cannot tell the number of {}", pr.url))
+        })?;
+        let checker = self.merge_checker();
+        let calls = checker
+            .pr_calls(&t, &pr.repo)
+            .await
+            .map_err(ServiceError::Refused)?;
+        // The stored state was read a moment ago; the merge itself is what GitHub then refuses if it changed.
+        let methods = calls
+            .call("merge_methods", |f, r| f.merge_methods(r))
+            .await
+            .map_err(|e| ServiceError::Refused(said(&e)))?;
+        let method = methods.pick().ok_or_else(|| {
+            ServiceError::Refused(format!(
+                "PR #{number} cannot be merged: {} allows no merge method (rebase, squash or merge commit)",
+                pr.repo
+            ))
+        })?;
+        calls
+            .call("merge_pr", move |f, r| f.merge_pr(r, number, method))
+            .await
+            .map_err(|e| {
+                ServiceError::Refused(format!("PR #{number} was not merged: {}", said(&e)))
+            })?;
+        self.request_merge_check(Some(id.clone()));
+        self.log_task(
+            id,
+            format!("merged PR #{number} in {} with {method:?}", pr.repo),
+        )
+        .await;
+        Ok(MergedPr {
+            url: pr.url,
+            repo: pr.repo,
+            number,
+            method,
+        })
     }
 
     /// Marks a task with no GitHub repo done. A task with one is done only when its PR merges.

@@ -5,7 +5,7 @@ mod github;
 pub mod log;
 pub mod token;
 
-use fleet_api::{parse_date, CiState, PrState};
+use fleet_api::{parse_date, CiState, MergeMethod, PrState};
 use std::fmt;
 
 pub use github::{api_base, github};
@@ -130,6 +130,29 @@ pub fn derive_ci(checks: &[Check], required: &[String]) -> (CiState, Vec<String>
     }
 }
 
+/// Which merge methods a repo allows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MergeMethods {
+    pub rebase: bool,
+    pub squash: bool,
+    pub merge: bool,
+}
+
+impl MergeMethods {
+    /// Rebase, else squash, else a merge commit; None when the repo allows none.
+    pub fn pick(&self) -> Option<MergeMethod> {
+        if self.rebase {
+            Some(MergeMethod::Rebase)
+        } else if self.squash {
+            Some(MergeMethod::Squash)
+        } else if self.merge {
+            Some(MergeMethod::Merge)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssueInfo {
     pub url: String,
@@ -179,6 +202,11 @@ pub trait Forge: Send + Sync {
     fn prs_of(&self, repo: &RepoRef, branch: &str) -> Result<Vec<PrInfo>, ForgeError>;
     /// The checks and mergeability of the PR `number`, as of its head commit now.
     fn pr_checks(&self, repo: &RepoRef, number: u64) -> Result<PrChecks, ForgeError>;
+    /// The merge methods the repo allows.
+    fn merge_methods(&self, repo: &RepoRef) -> Result<MergeMethods, ForgeError>;
+    /// Merges the PR `number` with `method`. GitHub refuses (`Refused`) a PR that cannot merge, or a method the repo
+    /// does not allow.
+    fn merge_pr(&self, repo: &RepoRef, number: u64, method: MergeMethod) -> Result<(), ForgeError>;
     fn create_pr(&self, repo: &RepoRef, pr: &NewPr) -> Result<PrInfo, ForgeError>;
     fn update_pr_text(
         &self,
@@ -340,6 +368,19 @@ mod tests {
     #[test]
     fn a_pr_with_no_checks_and_no_required_ones_is_green() {
         assert_eq!(derive_ci(&[], &[]), (CiState::Green, vec![]));
+    }
+
+    #[test]
+    fn the_merge_method_is_rebase_else_squash_else_merge() {
+        let allow = |rebase, squash, merge| MergeMethods {
+            rebase,
+            squash,
+            merge,
+        };
+        assert_eq!(allow(true, true, true).pick(), Some(MergeMethod::Rebase));
+        assert_eq!(allow(false, true, true).pick(), Some(MergeMethod::Squash));
+        assert_eq!(allow(false, false, true).pick(), Some(MergeMethod::Merge));
+        assert_eq!(allow(false, false, false).pick(), None);
     }
 
     #[test]

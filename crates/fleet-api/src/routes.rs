@@ -4,7 +4,7 @@ use crate::{
     ArchivePlan, ArchiveReport, ArchiveRequest, AskAnswer, AskReply, ChatPage, CheckoutList,
     ControlRequest, Conversation, ConversationMessage, DecideBreakdown, DefFile, DefInfo, DefKind,
     DiffReport, EffectiveSettings, Event, FleetView, GrantRepoRequest, HiddenSpecialistsPut,
-    InternalBranches, InternalFile, InternalFiles, InternalHistory, MoveDefinition,
+    InternalBranches, InternalFile, InternalFiles, InternalHistory, MergedPr, MoveDefinition,
     NewConversation, NewPersona, NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut,
     Persona, PersonaList, PersonaUpdate, Post, Product, ProductList, ProductUpdate,
     RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, Room,
@@ -113,6 +113,13 @@ pub fn mark_done() {}
 /// 409 when GitHub could not be asked.
 #[utoipa::path(post, path = "/api/tasks/{id}/pr/refresh", params(("id" = String, Path)), responses((status = 200, body = Task), (status = 404), (status = 409)))]
 pub fn refresh_task_prs() {}
+
+/// Merges the task's open PR (`repo` names it when the task has several) with the first method its repo allows:
+/// rebase, else squash, else merge. The PR's checks and mergeability are read from GitHub first, and the merge is
+/// refused (409, naming why) unless CI is green and GitHub says the PR can merge, or when the task has no open PR or
+/// the repo allows no method. The merge watcher is asked to look at the task at once.
+#[utoipa::path(post, path = "/api/tasks/{id}/merge", params(("id" = String, Path), ("repo" = Option<String>, Query, description = "The task's repo whose PR to merge; needed only when several PRs are open")), responses((status = 200, body = MergedPr), (status = 404), (status = 409)))]
+pub fn merge_task_pr() {}
 
 /// The repos a task may be started with: one product's, or every product's. Repos an agent made inside a task
 /// folder are left out.
