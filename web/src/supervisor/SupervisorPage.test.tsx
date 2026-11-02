@@ -166,7 +166,17 @@ describe("Supervisor page", () => {
     expect([...grid!.querySelectorAll(".widget")].map((w) => w.getAttribute("data-widget"))).toEqual(["agents_by_status", "storage", "rooms"]);
     // The chat stays outside the grid, which wraps rather than covering it.
     expect(container.querySelector(".supervisor-chat")!.contains(grid)).toBe(false);
-    expect(readFileSync("src/supervisor/supervisor.css", "utf8")).toMatch(/\.supervisor-grid \{[^}]*flex-wrap: wrap;/);
+  });
+
+  it("each_widget_keeps_the_size_the_grid_gives_it", () => {
+    // #491: rows share the grid's height and a cell never grows with its content; the room chat scrolls inside.
+    const css = readFileSync("src/supervisor/supervisor.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.supervisor-grid \{[^}]*display: grid;[^}]*grid-template-columns: repeat\(auto-fit, minmax\(var\(--layout-chart-compact\), 1fr\)\);[^}]*grid-auto-rows: minmax\(var\(--layout-panel-min\), 1fr\);/);
+    expect(css).toMatch(/\.supervisor-cell \{[^}]*min-height: 0;[^}]*overflow: hidden;/);
+    expect(css).toMatch(/\.supervisor-cell\[data-cell="rooms"\] \{[^}]*grid-column: span 2;/);
+    const rooms = readFileSync("src/supervisor/widgets/rooms.css", "utf8").replace(/\s+/g, " ");
+    expect(rooms).not.toMatch(/\.rooms \.list-detail \{[^}]*height: auto/);
+    expect(rooms).toMatch(/\.rooms \.list-detail \{[^}]*flex: 1;[^}]*min-height: 0;/);
   });
 
   it("supervisor_agents_do_not_appear_on_the_kanban", async () => {

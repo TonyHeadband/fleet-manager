@@ -251,6 +251,43 @@ describe("Rooms widget", () => {
     expect(css).toMatch(/\.chat-ask\[data-answered\] \.chat-ask-caption \{[^}]*color: var\(--text\);/);
   });
 
+  describe("long posts fold (#487 in rooms)", () => {
+    const heights = () =>
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.textContent?.includes("TALL") ? 900 : 20;
+      });
+
+    it("a_long_announcement_and_message_fold_and_open", async () => {
+      heights();
+      const long = post({ kind: "announcement", text: "TALL announcement" });
+      const said = post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "TALL message" });
+      show(clientWith({ r1: [long, said] }));
+      const feed = await log();
+      await within(feed).findByText(/TALL announcement/);
+      const more = within(feed).getAllByRole("button", { name: "Read more" });
+      expect(more).toHaveLength(2);
+      await userEvent.click(more[0]!);
+      expect(within(feed).getByRole("button", { name: "Show less" })).toBeInTheDocument();
+      expect(within(feed).getByText(/TALL announcement/).closest("[data-folded]")).toBeNull();
+      vi.restoreAllMocks();
+    });
+
+    it("a_long_answer_under_its_ask_folds_and_is_not_one_line", async () => {
+      heights();
+      const ask = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which findings?" });
+      const answer = post({ sender: "owner", sender_name: "owner", kind: "answer", reply_to: ask.id, text: "TALL answer\n\n1. first finding" });
+      show(clientWith({ r1: [ask, answer] }));
+      const feed = await log();
+      const group = (await within(feed).findByText("Which findings?")).closest<HTMLElement>(".chat-ask")!;
+      // The answer is its own folded markdown block under a short "Answered" caption, not one long caption line.
+      expect(within(group).getByText("Answered")).toBeInTheDocument();
+      expect(within(group).getByText("first finding")).toBeInTheDocument();
+      await userEvent.click(within(group).getByRole("button", { name: "Read more" }));
+      expect(within(group).getByRole("button", { name: "Show less" })).toBeInTheDocument();
+      vi.restoreAllMocks();
+    });
+  });
+
   it("an_owner_ask_answers_inline", async () => {
     const ask = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which port?" });
     const toSomeoneElse = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: { agent: "t9" }, text: "Ready?" });

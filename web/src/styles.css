@@ -38,7 +38,7 @@ input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
     repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px var(--column-tick-step)) left / calc(var(--layout-scrollbar) / 2) 100% no-repeat,
     repeating-linear-gradient(to bottom, var(--dashed) 0 1px, transparent 1px calc(5 * var(--column-tick-step)));
 }
-::-webkit-scrollbar-thumb { background: var(--fill); background-clip: padding-box; border-left: calc(var(--layout-scrollbar) - var(--layout-scrollbar-thumb)) solid transparent; }
+::-webkit-scrollbar-thumb { background: var(--fill); }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-text); }
 @supports not selector(::-webkit-scrollbar) {
   * { scrollbar-width: thin; scrollbar-color: var(--fill) transparent; }
