@@ -1071,6 +1071,7 @@ async fn add_event(
             task_title: "t1".into(),
             kind,
             text: text.into(),
+            room: None,
             at: T0 + secs,
         })
         .await

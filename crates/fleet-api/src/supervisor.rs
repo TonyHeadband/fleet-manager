@@ -74,6 +74,11 @@ pub struct TaskEvent {
     pub task_title: String,
     pub kind: TaskEventKind,
     pub text: String,
+    /// The room the event is about: the one a room_message or room_ask was posted in, else the task's product
+    /// room. Only on the broadcast: the stored row has no column for it, so a reload has none.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub room: Option<String>,
     #[ts(type = "number")]
     pub at: i64,
 }

@@ -303,3 +303,27 @@ async fn room_events_are_not_announced_again() {
         .unwrap();
     assert!(room_texts(&fx).await.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tasks_own_event_names_its_product_room() {
+    let fx = fixture().await;
+    let _c = conversation(&fx).await;
+    let a = spawn_ready(&fx).await;
+    let mut rx = fx.store.subscribe();
+    route(
+        &fx.svc,
+        &a.id,
+        TaskEventKind::ChecksPassed,
+        "checks passed".into(),
+    )
+    .await
+    .unwrap();
+    let product = fx.store.task(&a.id).await.unwrap().unwrap().product;
+    let mut room = None;
+    while let Ok(ev) = rx.try_recv() {
+        if let EventKind::SupervisorEvent { event } = ev.kind {
+            room = Some(event.room);
+        }
+    }
+    assert_eq!(room, Some(Some(format!("product:{product}"))));
+}

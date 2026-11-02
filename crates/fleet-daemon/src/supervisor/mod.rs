@@ -4,7 +4,7 @@ mod events;
 mod files;
 pub(crate) mod tools;
 
-pub(crate) use events::{latest_conversation, route_with};
+pub(crate) use events::{latest_conversation, route_in, route_with};
 pub use events::{route, start_event_watcher};
 pub use files::{conversation_folder, folder};
 
