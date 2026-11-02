@@ -9,4 +9,9 @@ export type TaskEvent = { id: number,
 /**
  * `None` when the persona had no conversation: the event is only toasted.
  */
-conversation?: AgentId | null, persona: string, task: AgentId, task_title: string, kind: TaskEventKind, text: string, at: number, };
+conversation?: AgentId | null, persona: string, task: AgentId, task_title: string, kind: TaskEventKind, text: string, 
+/**
+ * The room the event is about: the one a room_message or room_ask was posted in, else the task's product
+ * room. Only on the broadcast: the stored row has no column for it, so a reload has none.
+ */
+room?: string | null, at: number, };

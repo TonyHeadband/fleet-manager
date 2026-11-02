@@ -1,7 +1,7 @@
 //! Task events: what the daemon already sees about a task. The notices go to the task's product room; the event is
 //! stored and broadcast so the web toasts it. The supervisor's chat does not show them.
 use crate::agents::AgentService;
-use crate::rooms::announce;
+use crate::rooms::{announce, product_room_id};
 use crate::store::{Store, StoreError};
 use fleet_api::{task_id, AgentId, AgentKind, EventKind, Status, TaskEvent, TaskEventKind};
 use std::collections::HashMap;
@@ -30,6 +30,18 @@ pub(crate) async fn route_with(
     kind: TaskEventKind,
     text: String,
 ) -> Result<(), StoreError> {
+    route_in(store, at, task, kind, text, None).await
+}
+
+/// `route_with` for an event about `room` (the one a room post was made in); with None, the task's product room.
+pub(crate) async fn route_in(
+    store: &Store,
+    at: i64,
+    task: &AgentId,
+    kind: TaskEventKind,
+    text: String,
+    room: Option<String>,
+) -> Result<(), StoreError> {
     let Some(t) = store.task(task).await? else {
         return Ok(());
     };
@@ -53,6 +65,7 @@ pub(crate) async fn route_with(
             warn!(task = %t.id.0, error = %e, "cannot announce the task's notice in the product room");
         }
     }
+    let room = room.or_else(|| (!t.product.is_empty()).then(|| product_room_id(&t.product)));
     store
         .add_task_event(&TaskEvent {
             id: 0,
@@ -62,6 +75,7 @@ pub(crate) async fn route_with(
             task: t.id,
             kind,
             text,
+            room,
             at,
         })
         .await?;

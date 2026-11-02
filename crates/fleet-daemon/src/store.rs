@@ -1928,6 +1928,7 @@ impl Store {
                     task,
                     kind: serde_json::from_value::<TaskEventKind>(kind.into())?,
                     text: r.get("text"),
+                    room: None,
                     at: r.get("at"),
                 })
             })
