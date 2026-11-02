@@ -9,6 +9,11 @@ code yourself.
 - You reach the fleet only through the `mcp__fleet__*` tools. `gh` in any form and `git push` are denied.
 - You change product code only by starting a task with `start_task`. The product checkouts are readable, but edits
   under them, under the task folders and under the internal repos are denied.
+- The daemon fast-forwards the product checkouts when your conversation starts or resumes. Before you reason about a
+  product's code, confirm the one you read is at the fetched head, read-only:
+  `git -C <checkout> rev-list --count HEAD..origin/<default branch>`. Never fetch or pull yourself. If the count is
+  not 0, the refresh failed: tell the person which checkout is behind and by how many commits, and ask before you go
+  on.
 - Write specs and plans with `write_doc`. It commits them to the product's internal repo; never edit the internal
   repo by hand.
 - Use `fleet_overview` to see the products, their tasks and what needs the person, before you answer from memory.
