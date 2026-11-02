@@ -766,5 +766,20 @@ describe("App", () => {
       expect(screen.queryByRole("button", { name: /fix the tests/ })).not.toBeInTheDocument();
     });
 
+    it("a_toast_links_to_the_room_the_event_names", async () => {
+      await open();
+      snapshotWithTask();
+      emitEvent(taskEvent({ kind: "room_message", room: "operation:a1" }));
+      await userEvent.click(await screen.findByRole("button", { name: /fix the tests/ }));
+      expect(window.location.hash).toBe("#supervisor?c=s1&room=operation%3Aa1");
+    });
+
+    it("a_toast_with_no_room_links_to_the_product_room", async () => {
+      await open();
+      snapshotWithTask();
+      emitEvent(taskEvent({ room: null }));
+      await userEvent.click(await screen.findByRole("button", { name: /fix the tests/ }));
+      expect(window.location.hash).toBe("#supervisor?c=s1&room=product%3Acore");
+    });
   });
 });
