@@ -8,6 +8,10 @@
 //! start would see none. `record_orchestrator` calls `sync_task` for the record, and `start_task` again once it
 //! has set the origin. Ends change no event of their own (the merge checker, a stop and an archive store the
 //! record silently), so the watcher re-reads every task on the events that come with an end.
+//!
+//! An operation room is archived (grey) when its tasks have ended, and drops out of the owner's list (`list_for`)
+//! once every task that came from its conversation is archived. Nothing is deleted: the room, its members and its
+//! posts stay, and a new task from the conversation reopens it and lists it again.
 pub mod announce;
 pub mod asks;
 pub mod deliver;
@@ -120,14 +124,16 @@ pub async fn list(store: &Store) -> Result<Vec<Room>, StoreError> {
     Ok(out)
 }
 
-/// The rooms the persona's owner reads: its operation rooms, live before archived, then every product room that has
-/// posts. The owner's unread count needs no member row: until they first read a room, every post in it counts.
+/// The rooms the persona's owner reads: its operation rooms, live before ended (grey), then every product room that
+/// has posts. An operation room whose tasks are all archived is left out (see `all_archived`). The owner's unread
+/// count needs no member row: until they first read a room, every post in it counts.
 pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreError> {
     let (agents, tasks) = (store.snapshot().await?.agents, store.tasks().await?);
     let (mut live, mut archived, mut products) = (Vec::new(), Vec::new(), Vec::new());
     for r in store.rooms().await? {
         let shelf = match r.kind {
             RoomKind::Operation if r.persona.as_deref() != Some(persona) => continue,
+            RoomKind::Operation if all_archived(&r, &tasks) => continue,
             RoomKind::Operation if r.archived_at.is_some() => &mut archived,
             RoomKind::Operation => &mut live,
             RoomKind::Product if store.room_posts(&r.id, None, 1).await?.is_empty() => continue,
@@ -138,6 +144,20 @@ pub async fn list_for(store: &Store, persona: &str) -> Result<Vec<Room>, StoreEr
     live.extend(archived);
     live.extend(products);
     Ok(live)
+}
+
+/// Whether the operation room has task records and every one is archived. A room's tasks are those whose `origin` is
+/// its conversation: a task's member row is its task id, and a restart adds an agent to the same record, so each
+/// task counts once. A room with no record (a conversation that only looked in) is never hidden.
+fn all_archived(r: &RoomRow, tasks: &[Task]) -> bool {
+    let Some(conversation) = &r.conversation else {
+        return false;
+    };
+    let mut mine = tasks
+        .iter()
+        .filter(|t| t.origin.as_ref() == Some(conversation))
+        .peekable();
+    mine.peek().is_some() && mine.all(|t| t.state == TaskState::Archived)
 }
 
 /// The room as the list shows it. `tasks` is every task, read once for the whole list.
