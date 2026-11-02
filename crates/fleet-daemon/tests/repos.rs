@@ -629,6 +629,53 @@ async fn url_repo_still_starts_from_origin_head() {
 }
 
 #[tokio::test]
+async fn attach_fast_forwards_the_clone_after_its_fetch() {
+    let f = fx().await;
+    let (bare, url) = bare_repo(f.tmp.path(), "up");
+    let r = f.repos.resolve(P, &typed(&url), &pe()).await.unwrap();
+    let other = f.tmp.path().join("other");
+    git(
+        f.tmp.path(),
+        &["clone", "-q", &url, other.to_str().unwrap()],
+    );
+    commit(&other, "b");
+    git(&other, &["push", "-q", "origin", "main"]);
+    let upstream = git(&bare, &["rev-parse", "main"]);
+
+    let dest = f.tasks.join("p").join("up");
+    let (wt, warning) = f.repos.attach(&r, &dest, "fleet/p", &pe()).await.unwrap();
+    assert_eq!(warning, None);
+    assert_eq!(wt.base, upstream);
+    assert_eq!(git(&r.base, &["rev-parse", "HEAD"]), upstream);
+    assert!(r.base.join("b").exists());
+}
+
+#[tokio::test]
+async fn attach_still_starts_from_origin_head_when_the_clone_cannot_fast_forward() {
+    let f = fx().await;
+    let (bare, url) = bare_repo(f.tmp.path(), "up");
+    let r = f.repos.resolve(P, &typed(&url), &pe()).await.unwrap();
+    let other = f.tmp.path().join("other");
+    git(
+        f.tmp.path(),
+        &["clone", "-q", &url, other.to_str().unwrap()],
+    );
+    commit(&other, "b");
+    git(&other, &["push", "-q", "origin", "main"]);
+    let upstream = git(&bare, &["rev-parse", "main"]);
+    let before = git(&r.base, &["rev-parse", "HEAD"]);
+    std::fs::write(r.base.join("a"), "edited").unwrap();
+
+    let dest = f.tasks.join("p").join("up");
+    let (wt, warning) = f.repos.attach(&r, &dest, "fleet/p", &pe()).await.unwrap();
+    assert_eq!(warning, None);
+    assert_eq!(wt.base, upstream);
+    assert_eq!(wt.from_branch.as_deref(), Some("origin/main"));
+    assert_eq!(git(&r.base, &["rev-parse", "HEAD"]), before);
+    assert_eq!(std::fs::read_to_string(r.base.join("a")).unwrap(), "edited");
+}
+
+#[tokio::test]
 async fn path_repo_starts_from_local_head_without_fetching() {
     let f = fx().await;
     let (_bare, url) = bare_repo(f.tmp.path(), "up");

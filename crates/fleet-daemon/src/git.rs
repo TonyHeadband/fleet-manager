@@ -531,6 +531,15 @@ pub async fn origin_head(repo: &Path) -> Result<Option<(String, String)>, GitErr
     )))
 }
 
+/// Moves the checked-out branch of `repo` to `target` (a ref) when that is a fast-forward, with none of the user's
+/// hooks run (`post-merge`); otherwise git refuses and nothing changes.
+pub async fn fast_forward(repo: &Path, no_hooks: &Path, target: &str) -> Result<(), GitError> {
+    let mut args = hookless(no_hooks)?;
+    args.extend(["merge", "--quiet", "--ff-only", target].map(String::from));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    git(repo, &args).await.map(|_| ())
+}
+
 /// The checked-out branch, or None on a detached HEAD. Works on an unborn branch (`git init`, no commit yet),
 /// where `rev-parse --abbrev-ref HEAD` fails.
 pub async fn current_branch(repo: &Path) -> Result<Option<String>, GitError> {

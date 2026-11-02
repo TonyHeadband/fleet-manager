@@ -117,6 +117,10 @@ impl Supervisor {
             .ready_env(persona)
             .await
             .map_err(SpawnError::from)?;
+        // Waited for, so the supervisor's first look at a clone finds it current; bounded, and never an error.
+        svc.repos
+            .refresh_persona_clones(&env, svc.options().clone_refresh_cap)
+            .await;
         let fleet =
             fleet_config(&svc.config().agent_config_dir).map_err(SpawnError::AgentConfig)?;
         let role = files::role_settings(svc, persona).await?;
