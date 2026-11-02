@@ -722,6 +722,9 @@ describe("App", () => {
       act(() => FakeEventSource.for("/api/events").emit("event", { seq, kind: { type: "supervisor_event", event: e } }, String(seq)));
     const conversation = (id: string) => ({ id, persona: "me", title: id, created_at: 0, last_used_at: 0, live: false, tasks: [] });
     const open = async () => {
+      // Saved before the render: a toast is only for the drawer's persona, which is otherwise unknown until the
+      // personas load, and an event that comes first is dropped (#503).
+      localStorage.setItem("fleet.persona", "me");
       const conversations = vi.fn().mockResolvedValue([conversation("s1"), conversation("s2")]);
       render(<App client={fakeClient({ personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }), conversations })} eventSource={factory} nowSeconds={() => 1300} />);
       await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
