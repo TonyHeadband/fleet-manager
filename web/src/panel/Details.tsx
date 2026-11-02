@@ -5,6 +5,8 @@ import { badgeItems, shownFields } from "../board/card";
 import type { Stage } from "../board/stage";
 import { Badge } from "../ui/Badge";
 import { Field } from "../ui/Field";
+import type { Task } from "../api/generated/Task";
+import { useMerge, type MergeApi } from "./MergeButton";
 import { navigate, tasksHref } from "../shell/routes";
 
 /**
@@ -13,7 +15,25 @@ import { navigate, tasksHref } from "../shell/routes";
  * know), then the model, mode and effort on one line. The header's path names the repos and the branch, the card the persona.
  * A stopped agent's opens in Tasks, where its history is.
  */
-export function Details({ schema, agent, now, stage = null }: { schema: UiSchema; agent: Agent; now: number; stage?: Stage | null }) {
+export function Details({
+  schema,
+  agent,
+  now,
+  stage = null,
+  task,
+  merge,
+  onTaskChanged = () => {},
+}: {
+  schema: UiSchema;
+  agent: Agent;
+  now: number;
+  stage?: Stage | null;
+  /** The task's record, for the Merge button next to the PR link; `merge` is how it reaches the daemon. */
+  task?: Task;
+  merge?: MergeApi;
+  onTaskChanged?: () => void;
+}) {
+  const mergeControl = useMerge(merge ? task : undefined, merge ?? NO_MERGE, onTaskChanged);
   const shown = shownFields(schema.card_fields, agent);
   const ofKind = (kind: string) => shown.filter((f) => f.kind === kind);
   const column = columnFor(schema, agent);
@@ -51,6 +71,7 @@ export function Details({ schema, agent, now, stage = null }: { schema: UiSchema
           ) : (
             <StageBadge stage={stage} />
           ))}
+        {mergeControl.button}
         {ofKind("bytes").map((f) => (
           <Field key={f.key} def={f} agent={agent} now={now} />
         ))}
@@ -60,6 +81,7 @@ export function Details({ schema, agent, now, stage = null }: { schema: UiSchema
           </span>
         ))}
       </div>
+      {mergeControl.outcome}
       {others.map((f) => (
         <div key={f.key} className="details-field">
           <span className="mono-label">{f.label}</span>
@@ -81,3 +103,5 @@ const StageBadge = ({ stage }: { stage: Stage }) => (
     {stage.text}
   </Badge>
 );
+
+const NO_MERGE: MergeApi = { refresh: () => Promise.reject(new Error("no merge")), merge: () => Promise.reject(new Error("no merge")) };

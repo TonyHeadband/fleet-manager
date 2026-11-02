@@ -360,6 +360,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
     if (openTask !== null) fleet.fetch(openTask);
   }, [openTask, taskState, fleet.fetch]);
   const decisions = useBreakdownDecisions(client, fleet.views, fleet.fetch, say);
+  const mergeApi = useMemo(() => ({ refresh: client.refreshTaskPrs, merge: client.mergePr }), [client]);
   const archive = useArchive(client, say, reloadTasks);
   const daemonSettings = useDaemonSettings(native);
   const daemonRestart = useRestart(native, {
@@ -989,7 +990,15 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                       </button>
                     </div>
                   )}
-                  <Details schema={schema} agent={open} now={now} stage={open.kind === "specialist" ? null : workStage(open, taskRecords[taskId(open)])} />
+                  <Details
+                    schema={schema}
+                    agent={open}
+                    now={now}
+                    stage={open.kind === "specialist" ? null : workStage(open, taskRecords[taskId(open)])}
+                    task={open.kind === "specialist" ? undefined : taskRecords[taskId(open)]}
+                    merge={mergeApi}
+                    onTaskChanged={reloadTasks}
+                  />
                 </>
               )
             }

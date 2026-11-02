@@ -60,3 +60,11 @@
 .request-targets { display: flex; flex-wrap: wrap; align-items: center; gap: var(--panel-gap-s); }
 .request-targets .mono-label, .repo-request label { color: var(--text-low); }
 .request-row { display: flex; justify-content: flex-end; margin: var(--panel-gap-m) 0 var(--panel-band-gap); }
+/* The Merge button is a stage badge that acts: the badge's frame, tone by the PR's CI, grey while it cannot be used. */
+.merge-button { flex: none; background: transparent; color: var(--text-high); cursor: pointer; }
+.merge-button:disabled { cursor: default; }
+.merge-button[data-tone="done"] { border-color: var(--tone-done); color: var(--tone-done); background: var(--tint-done); }
+.merge-button[data-tone="danger"] { border-color: var(--tone-danger); color: var(--tone-danger); background: var(--tint-danger); }
+.merge-button[data-tone="muted"] { border-color: var(--border); color: var(--text-low); background: var(--tint-muted); }
+.merge-outcome { margin: 0; font-size: var(--size-meta); color: var(--text-high); }
+.merge-outcome[data-ok="false"] { color: var(--tone-danger); }

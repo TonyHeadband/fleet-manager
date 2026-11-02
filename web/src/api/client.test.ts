@@ -374,6 +374,9 @@ describe("the Tasks view's calls", () => {
     await c.orphanPlan(id);
     await c.archiveOrphan(id, plan);
     await c.markDone(id);
+    await c.refreshTaskPrs(id);
+    await c.mergePr(id, "core");
+    await c.mergePr(id);
     await c.setTaskRelease(id, 7);
     await c.setTaskRelease(id, null);
     expect(calls).toEqual([
@@ -383,6 +386,9 @@ describe("the Tasks view's calls", () => {
       { method: "POST", url: "http://d/api/orphans/plan", body: { id } },
       { method: "POST", url: "http://d/api/orphans/archive", body: { id, items: plan.items } },
       { method: "POST", url: `http://d/api/tasks/${enc}/done`, body: undefined },
+      { method: "POST", url: `http://d/api/tasks/${enc}/pr/refresh`, body: undefined },
+      { method: "POST", url: `http://d/api/tasks/${enc}/merge?repo=core`, body: undefined },
+      { method: "POST", url: `http://d/api/tasks/${enc}/merge`, body: undefined },
       { method: "PUT", url: `http://d/api/tasks/${enc}/release`, body: { release: 7 } },
       { method: "PUT", url: `http://d/api/tasks/${enc}/release`, body: { release: null } },
     ]);
