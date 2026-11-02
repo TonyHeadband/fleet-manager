@@ -109,6 +109,31 @@ describe("Archive dialog", () => {
     expect(shell).toMatch(/\.dialog-backdrop \{[^}]*grid-template-rows: minmax\(0, 1fr\);/);
   });
 
+  it("the_kept_transcripts_row_is_cut_from_its_start_and_is_not_freed", async () => {
+    const { plans, over } = calls();
+    await tasks("s1", undefined, over);
+    await open();
+    const transcripts = "/home/me/.local/share/fleet-manager/transcripts/t1";
+    await land(plans[0]!, {
+      items: [
+        { path: "/home/me/fleet-tasks/bravo/fleet/1-fix/core", bytes: 1_000, uncommitted_files: 0, stays: false },
+        { path: "/home/me/fleet-tasks/bravo", bytes: 4_000, uncommitted_files: 0, stays: true },
+        { path: transcripts, bytes: 2_000_000, uncommitted_files: 0, stays: true },
+      ],
+      total: 1_000,
+    });
+    expect(dialog().getByText("/home/me/fleet-tasks/bravo", { selector: ".archive-root code" })).toBeInTheDocument();
+    expect(dialog().getByText("fleet/1-fix/core")).toBeInTheDocument();
+    const row = dialog().getByText(transcripts).closest("code")!;
+    expect(row).toHaveAttribute("data-cut", "start");
+    expect(row).toHaveAttribute("title", transcripts);
+    const item = row.closest(".archive-item")! as HTMLElement;
+    expect(item).toHaveAttribute("data-stays");
+    expect(within(item).getByText("stays")).toBeInTheDocument();
+    expect(within(item).getByText("2.0 MB")).toBeInTheDocument();
+    expect(dialog().getByText("Frees 1.0 KB")).toBeInTheDocument();
+  });
+
   it("a_plan_for_another_task_does_not_enable_archive", async () => {
     const { plans, over } = calls();
     await tasks("s1", undefined, over);
