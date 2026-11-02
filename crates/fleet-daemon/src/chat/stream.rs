@@ -1,5 +1,6 @@
 //! An agent's whole chat: every Claude session it has had, built once and then followed as the last one grows.
 use crate::agents::{transcript_path, AgentService, PROMPT_FILE};
+use crate::chat::kept::Kept;
 use crate::chat::{blocks_before, Builder, Tail};
 use crate::personas::PersonaEnv;
 use fleet_api::{Agent, AgentId, AgentKind, ChatItem, ChatPage, MarkerKind, PromptFrom};
@@ -51,9 +52,19 @@ struct Session {
     tail: Option<Tail>,
 }
 
+/// Who a chat's first item, its PROMPT.md, is from: a specialist's is its orchestrator's.
+fn prompt_from(kind: AgentKind) -> PromptFrom {
+    match kind {
+        AgentKind::Specialist => PromptFrom::System,
+        AgentKind::Solo | AgentKind::Orchestrator | AgentKind::Supervisor => PromptFrom::Owner,
+    }
+}
+
 /// Every item of an agent's chat so far, indexed by `seq`.
 pub struct Chat {
     env: Option<PersonaEnv>,
+    /// The kept chat of an archived agent, whose transcripts are read from there instead of from `env`.
+    kept: Option<Kept>,
     builder: Builder,
     sessions: Vec<Session>,
     items: Vec<ChatItem>,
@@ -68,6 +79,7 @@ impl Chat {
     ) -> Self {
         Chat {
             env,
+            kept: None,
             builder: Builder::new(prompt_text, prompt_from),
             sessions: Vec::new(),
             items: Vec::new(),
@@ -85,11 +97,15 @@ impl Chat {
         let prompt = tokio::fs::read_to_string(Path::new(&agent.workdir).join(PROMPT_FILE))
             .await
             .ok();
-        let from = match agent.kind {
-            AgentKind::Specialist => PromptFrom::System,
-            AgentKind::Solo | AgentKind::Orchestrator | AgentKind::Supervisor => PromptFrom::Owner,
-        };
-        Chat::new(env, prompt, from)
+        Chat::new(env, prompt, prompt_from(agent.kind))
+    }
+
+    /// The chat of an archived agent, built from the PROMPT.md and transcripts its archive kept.
+    pub fn kept(kept: Kept) -> Self {
+        let from = prompt_from(kept.chat.kind);
+        let mut chat = Chat::new(None, kept.prompt(), from);
+        chat.kept = Some(kept);
+        chat
     }
 
     /// Reads what the agent's `sessions` (oldest first) added since the last call; returns the new and updated items.
@@ -143,11 +159,14 @@ impl Chat {
             return Vec::new();
         };
         if session.tail.is_none() {
-            session.tail = self
-                .env
-                .as_ref()
-                .and_then(|env| transcript_path(env, &session.id))
-                .map(Tail::new);
+            let path = match &self.kept {
+                Some(kept) => kept.transcript(&session.id),
+                None => self
+                    .env
+                    .as_ref()
+                    .and_then(|env| transcript_path(env, &session.id)),
+            };
+            session.tail = path.map(Tail::new);
         }
         let Some(tail) = session.tail.as_mut() else {
             return Vec::new();

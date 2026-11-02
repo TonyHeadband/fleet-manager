@@ -2,6 +2,7 @@
 use crate::agent_config;
 use crate::agents::{fleet_config, refuse_retired, AgentService, ServiceError, SpawnError};
 use crate::chat::asks::{tool_input, AnswerError, Asks, SCREEN_ID};
+use crate::chat::kept::{self, Kept};
 use crate::chat::stream::{self as chat, Chat, ChatWake};
 use crate::fleet::defs::{persona_defs_root, Defs, FleetError};
 use crate::fleet::defs_migrate::known_defs;
@@ -2252,7 +2253,11 @@ async fn chat_stream(
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<SseStream, ApiError> {
-    let agent = st.svc.agent(&AgentId(id)).await?;
+    let agent = match st.svc.agent(&AgentId(id.clone())).await {
+        Ok(agent) => agent,
+        Err(ServiceError::NotFound) => return kept_stream(&st, &id).await,
+        Err(e) => return Err(e.into()),
+    };
     // Subscribed before the first read, so a hook landing during it is not missed.
     let mut wake = st.chat_wake.subscribe();
     let mut asks = st.asks.subscribe();
@@ -2339,6 +2344,42 @@ async fn chat_stream(
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
 }
 
+/// The chat an archive kept for `id`, when the store does not know the agent any more.
+async fn kept_chat(st: &AppState, id: &str) -> Result<Kept, ApiError> {
+    let (dir, id) = (st.svc.config().state_dir.clone(), id.to_string());
+    tokio::task::spawn_blocking(move || kept::find(&dir, &id))
+        .await
+        .map_err(|_| internal("cannot read the chat"))?
+        .ok_or_else(|| ServiceError::NotFound.into())
+}
+
+/// A kept chat, read whole: it is over, so there is nothing to follow.
+async fn kept_page(kept: Kept) -> Result<(Chat, i64), ApiError> {
+    let (sessions, ended) = (kept.chat.sessions.clone(), kept.chat.ended);
+    let (chat, _) = chat::step(Chat::kept(kept), sessions, Some(ended))
+        .await
+        .ok_or_else(|| internal("cannot read the chat"))?;
+    Ok((chat, ended))
+}
+
+/// The stream of an archived agent's chat: `page`, then `ended`, then it closes, as for a Stopped agent, and no `ask`.
+async fn kept_stream(st: &AppState, id: &str) -> Result<SseStream, ApiError> {
+    let (chat, ended) = kept_page(kept_chat(st, id).await?).await?;
+    let (tx, rx) = mpsc::channel(2);
+    tokio::spawn(async move {
+        let Some(page) = chat_event("page", &chat.page(None, chat::PAGE)) else {
+            return;
+        };
+        if tx.send(Ok(page)).await.is_err() {
+            return;
+        }
+        if let Some(e) = chat_event("ended", &ended) {
+            let _ = tx.send(Ok(e)).await;
+        }
+    });
+    Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default()))
+}
+
 /// What a chat stream last sent as its `ask`, and the newest registry version that went into it.
 #[derive(Default)]
 struct SentAsk {
@@ -2379,12 +2420,18 @@ async fn chat_history(
     Path(id): Path<String>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<ChatPage>, ApiError> {
-    let agent = st.svc.agent(&AgentId(id)).await?;
-    let chat = Chat::open(&st.svc, &agent).await;
-    let src = chat_sources(&st, &agent).await?;
-    let (chat, _) = chat_step(chat, src)
-        .await
-        .ok_or_else(|| internal("cannot read the chat"))?;
+    let chat = match st.svc.agent(&AgentId(id.clone())).await {
+        Ok(agent) => {
+            let chat = Chat::open(&st.svc, &agent).await;
+            let src = chat_sources(&st, &agent).await?;
+            let (chat, _) = chat_step(chat, src)
+                .await
+                .ok_or_else(|| internal("cannot read the chat"))?;
+            chat
+        }
+        Err(ServiceError::NotFound) => kept_page(kept_chat(&st, &id).await?).await?.0,
+        Err(e) => return Err(e.into()),
+    };
     let limit = q.limit.unwrap_or(chat::PAGE).min(HISTORY_MAX);
     Ok(Json(chat.page(q.before, limit)))
 }

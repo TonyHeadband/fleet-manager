@@ -1,13 +1,19 @@
 mod common;
 
+use common::net::*;
 use common::*;
 use fleet_api::{
-    Actor, Agent, AgentId, ArchiveReport, EventKind, OrphanKind, SpawnRequest, Status, TaskState,
+    Actor, Agent, AgentId, ArchiveReport, ChatBody, ChatPage, EventKind, MarkerKind, OrphanKind,
+    SpawnRequest, Status, TaskState,
 };
-use fleet_daemon::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
+use fleet_daemon::agents::{
+    AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE, PROMPT_POINTER,
+};
 use fleet_daemon::git;
+use fleet_daemon::http::{bind_loopback, router, AppState};
 use fleet_daemon::ingest::{authenticate, ingest, IngestError};
 use serde_json::json;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 fn req_with(fx: &Fx, prompt: &str, repos: &[&str]) -> SpawnRequest {
@@ -54,6 +60,12 @@ fn entries(dir: &Path) -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+/// The task folder's item: the first that stays, which is what the web dialog takes as its root. The kept chats
+/// come after it.
+fn folder_item(plan: &fleet_api::ArchivePlan) -> &fleet_api::PlanItem {
+    plan.items.iter().find(|i| i.stays).unwrap()
 }
 
 fn s(p: &Path) -> String {
@@ -121,7 +133,8 @@ async fn the_plan_counts_uncommitted_files() {
             s(&daemon_dir),
             s(&workdir.join("CLAUDE.md")),
             s(&workdir.join(PROMPT_FILE)),
-            a.workdir.clone()
+            a.workdir.clone(),
+            s(&fx.state_dir.join("transcripts").join(&a.id.0)),
         ]
     );
     assert_eq!(plan.items[0].uncommitted_files, 2);
@@ -132,11 +145,12 @@ async fn the_plan_counts_uncommitted_files() {
         plan.items[4].bytes, 0,
         "the folder holds nothing but what goes"
     );
+    assert!(plan.items[5].bytes > 0, "the chat to keep has a PROMPT.md");
     let stays: Vec<bool> = plan.items.iter().map(|i| i.stays).collect();
     assert_eq!(
         stays,
-        [false, false, false, false, true],
-        "only the folder stays"
+        [false, false, false, false, true, true],
+        "only the folder and the kept chats stay"
     );
     assert_eq!(
         plan.total,
@@ -270,10 +284,9 @@ async fn archive_keeps_a_folder_holding_the_users_files() {
     let workdir = PathBuf::from(&a.workdir);
     std::fs::write(workdir.join("notes.txt"), "mine").unwrap();
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
-    assert_eq!(plan.items.last().unwrap().path, a.workdir);
-    assert!(plan.items.last().unwrap().stays);
+    assert_eq!(folder_item(&plan).path, a.workdir);
     assert_eq!(
-        plan.items.last().unwrap().bytes,
+        folder_item(&plan).bytes,
         4,
         "notes.txt stays, and the plan says so"
     );
@@ -1079,12 +1092,24 @@ async fn archive_waits_for_whole_fleet() {
     // Each path once, though two orchestrators shared the worktree; the task folder is the one that stays.
     let unique: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
     assert_eq!(unique.len(), paths.len(), "{paths:?}");
-    let last = plan.items.last().unwrap();
+    let folder = folder_item(&plan);
+    assert_eq!((folder.path.as_str(), folder.bytes), (s(&task).as_str(), 0));
+    // The task folder, then the chats kept: the only two that stay.
+    let stay: Vec<&str> = plan
+        .items
+        .iter()
+        .filter(|i| i.stays)
+        .map(|i| i.path.as_str())
+        .collect();
     assert_eq!(
-        (last.path.as_str(), last.stays, last.bytes),
-        (s(&task).as_str(), true, 0)
+        stay,
+        [
+            s(&task).as_str(),
+            s(&fx.state_dir.join("transcripts").join(&a.id.0)).as_str()
+        ],
+        "{plan:?}"
     );
-    assert_eq!(plan.items.iter().filter(|i| i.stays).count(), 1, "{plan:?}");
+    assert_eq!(plan.items.last().unwrap().path, stay[1]);
     let step_item = plan.items.iter().find(|i| i.path == s(&step_wt)).unwrap();
     assert_eq!(step_item.uncommitted_files, 1);
 
@@ -1124,7 +1149,7 @@ async fn archive_of_a_fleet_keeps_the_users_files_and_says_where() {
     fx.svc.stop_task(&a.id).await.unwrap();
     std::fs::write(folder.join("notes.txt"), "mine").unwrap();
     let plan = fx.svc.archive_plan(&a.id).await.unwrap();
-    assert_eq!(plan.items.last().unwrap().bytes, 4, "{plan:?}");
+    assert_eq!(folder_item(&plan).bytes, 4, "{plan:?}");
     let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     let kept = format!("kept {}: it contains notes.txt", folder.display());
     assert_eq!(r.kept.as_deref(), Some(kept.as_str()));
@@ -1251,7 +1276,7 @@ async fn archive_removes_the_shared_build_output() {
         .sum();
     assert_eq!(plan.total, others + 1300);
     // The task folder holds nothing else that stays.
-    assert_eq!(plan.items.last().unwrap().bytes, 0, "{plan:?}");
+    assert_eq!(folder_item(&plan).bytes, 0, "{plan:?}");
 
     let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     assert_eq!(r.kept, None, "{r:?}");
@@ -1326,7 +1351,7 @@ async fn a_task_without_build_output_archives_as_before() {
             .collect::<Vec<_>>()
     };
     assert_eq!(what(&plan), what(&before));
-    assert_eq!(plan.items.last().unwrap().bytes, 4, "{plan:?}");
+    assert_eq!(folder_item(&plan).bytes, 4, "{plan:?}");
     let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
     let kept = format!("kept {}: it contains target", task.display());
     assert_eq!(r.kept.as_deref(), Some(kept.as_str()));
@@ -1360,4 +1385,406 @@ async fn archive_never_removes_build_output_inside_a_kept_worktree() {
         std::fs::read_to_string(wt.join("src/keep")).unwrap(),
         "uncommitted"
     );
+}
+
+// Chats kept past an archive.
+
+async fn serve(fx: &Fx) -> SocketAddr {
+    let listener = bind_loopback("127.0.0.1:0".parse().unwrap()).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let state = AppState::new(fx.svc.clone(), fx.store.clone(), fx.sessions.clone(), addr);
+    tokio::spawn(async move { axum::serve(listener, router(state)).await });
+    addr
+}
+
+fn line(kind: &str, text: &str, secs: i64) -> String {
+    let stamp = format!("2026-11-01T03:{:02}:{:02}.000Z", secs / 60, secs % 60);
+    if kind == "user" {
+        json!({"type": "user", "timestamp": stamp, "message": {"role": "user", "content": text}})
+    } else {
+        json!({"type": "assistant", "timestamp": stamp,
+               "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}})
+    }
+    .to_string()
+}
+
+/// `n` alternating owner and reply lines.
+fn talk(who: &str, n: i64) -> Vec<String> {
+    (0..n)
+        .map(|i| {
+            line(
+                if i % 2 == 0 { "user" } else { "assistant" },
+                &format!("{who} {i}"),
+                i,
+            )
+        })
+        .collect()
+}
+
+/// Where the persona's Claude keeps transcripts: the fake Claude's project folder.
+fn projects(fx: &Fx) -> PathBuf {
+    let dir = fx
+        .svc
+        .config()
+        .personas_dir
+        .join(PERSONA)
+        .join("claude/projects/fake-cwd");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Records `session` for the agent and writes `lines` as its transcript (none: no file).
+async fn session(fx: &Fx, id: &AgentId, session: &str, at: i64, lines: &[String]) {
+    if !lines.is_empty() {
+        std::fs::write(
+            projects(fx).join(format!("{session}.jsonl")),
+            lines.join("\n") + "\n",
+        )
+        .unwrap();
+    }
+    fx.store.add_claude_session(id, session, at).await.unwrap();
+}
+
+/// Gives the agent a long first session and a second one, plus one recorded session that has no file.
+async fn chatted(fx: &Fx, id: &AgentId, who: &str) {
+    let own = fx.store.claude_session(id).await.unwrap().unwrap();
+    let mut lines = vec![line("user", PROMPT_POINTER, 0)];
+    lines.extend(talk(who, 30));
+    // The agent's own session began when it was spawned; the others come after it.
+    let now = fx.clock.now_for_test();
+    session(fx, id, &own, now, &lines).await;
+    session(fx, id, &format!("{who}-lost"), now + 10, &[]).await;
+    session(
+        fx,
+        id,
+        &format!("{who}-two"),
+        now + 20,
+        &talk(&format!("{who} again"), 4),
+    )
+    .await;
+}
+
+fn history_path(id: &AgentId, query: &str) -> String {
+    format!("/api/agents/{}/chat/history{query}", id.0)
+}
+
+async fn history(addr: SocketAddr, id: &AgentId, query: &str) -> ChatPage {
+    let (status, v) = json_of(addr, "GET", &history_path(id, query), None).await;
+    assert_eq!(status, 200, "{v}");
+    serde_json::from_value(v).unwrap()
+}
+
+fn kept_dir(fx: &Fx, task: &AgentId, agent: &AgentId) -> PathBuf {
+    fx.state_dir
+        .join("transcripts")
+        .join(&task.0)
+        .join(&agent.0)
+}
+
+fn dir_len(dir: &Path) -> u64 {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                dir_len(&p)
+            } else {
+                std::fs::metadata(&p).unwrap().len()
+            }
+        })
+        .sum()
+}
+
+#[tokio::test]
+async fn an_archived_fleets_chats_are_still_readable() {
+    let fx = fixture().await;
+    let addr = serve(&fx).await;
+    let (a, sp) = orchestrated(&fx).await;
+    chatted(&fx, &a.id, "lead").await;
+    chatted(&fx, &sp.id, "step").await;
+    fx.svc.stop_task(&a.id).await.unwrap();
+    let (lead_before, step_before) = (
+        history(addr, &a.id, "").await,
+        history(addr, &sp.id, "").await,
+    );
+    let (lead_paged, step_paged) = (
+        history(addr, &a.id, "?before=20&limit=7").await,
+        history(addr, &sp.id, "?before=20&limit=7").await,
+    );
+    assert_eq!(lead_paged.items.len(), 7);
+    assert!(lead_before.items.iter().any(|i| matches!(
+        i.body,
+        ChatBody::Marker {
+            kind: MarkerKind::NewSession
+        }
+    )));
+    // The first item is each agent's own PROMPT.md, which archive deletes with its folder.
+    let lead_md = std::fs::read_to_string(PathBuf::from(&a.workdir).join(PROMPT_FILE)).unwrap();
+    let step_md = std::fs::read_to_string(PathBuf::from(&sp.workdir).join(PROMPT_FILE)).unwrap();
+    assert_eq!(
+        lead_before.items[0].body,
+        ChatBody::Prompt {
+            text: lead_md,
+            from: fleet_api::PromptFrom::Owner
+        }
+    );
+    assert_eq!(
+        step_before.items[0].body,
+        ChatBody::Prompt {
+            text: step_md,
+            from: fleet_api::PromptFrom::System
+        }
+    );
+
+    archive_now(&fx, &a.id).await.unwrap();
+
+    assert!(find_opt(&fx.svc, &sp.id).await.is_none());
+    assert!(!PathBuf::from(&sp.workdir).exists());
+    assert_eq!(history(addr, &a.id, "").await, lead_before);
+    assert_eq!(history(addr, &sp.id, "").await, step_before);
+    assert_eq!(history(addr, &a.id, "?before=20&limit=7").await, lead_paged);
+    assert_eq!(
+        history(addr, &sp.id, "?before=20&limit=7").await,
+        step_paged
+    );
+    // The session that never had a file left nothing to keep.
+    let lead = kept_dir(&fx, &a.id, &a.id);
+    assert_eq!(
+        entries(&lead).len(),
+        4,
+        "chat.json, PROMPT.md and two transcripts: {:?}",
+        entries(&lead)
+    );
+}
+
+#[tokio::test]
+async fn the_plan_lists_the_kept_chats_as_staying() {
+    let fx = fixture().await;
+    let a = stopped(&fx, "talk to me", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let task = PathBuf::from(&a.workdir);
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+
+    let folder = plan.items.iter().position(|i| i.path == s(&task)).unwrap();
+    let kept_path = s(&fx.state_dir.join("transcripts").join(&a.id.0));
+    let kept = plan.items.iter().position(|i| i.path == kept_path).unwrap();
+    assert!(kept > folder, "after the task folder: {plan:?}");
+    assert_eq!(
+        plan.items.iter().position(|i| i.stays),
+        Some(folder),
+        "the first staying item is the root the dialog shows"
+    );
+    assert!(plan.items[kept].stays);
+    assert!(plan.items[kept].bytes > 0);
+    let going: u64 = plan
+        .items
+        .iter()
+        .filter(|i| !i.stays)
+        .map(|i| i.bytes)
+        .sum();
+    assert_eq!(plan.total, going);
+    assert!(!fx.state_dir.join("transcripts").exists());
+
+    let r = fx.svc.archive(&a.id, &plan.items).await.unwrap();
+
+    assert_eq!(r.freed, plan.total);
+    assert!(!r.removed.contains(&kept_path), "{r:?}");
+    assert_eq!(r.kept, None);
+    assert_eq!(
+        plan.items[kept].bytes,
+        dir_len(&fx.state_dir.join("transcripts").join(&a.id.0)),
+        "the size is what was copied"
+    );
+}
+
+#[tokio::test]
+async fn a_solo_tasks_chat_survives_its_archive() {
+    let fx = fixture().await;
+    let addr = serve(&fx).await;
+    let a = stopped(&fx, "remember me", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let before = history(addr, &a.id, "").await;
+    assert!(before.items.len() > 30);
+
+    archive_now(&fx, &a.id).await.unwrap();
+
+    assert!(find_opt(&fx.svc, &a.id).await.is_none());
+    assert_eq!(history(addr, &a.id, "").await, before);
+    // Archiving does not delete what it kept.
+    assert!(kept_dir(&fx, &a.id, &a.id).join("chat.json").is_file());
+}
+
+#[tokio::test]
+async fn a_chat_that_cannot_be_kept_stops_the_archive() {
+    let fx = fixture().await;
+    let a = stopped(&fx, "keep or nothing", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let wt = PathBuf::from(&a.workspaces[0].worktree);
+    // A file where the folder of kept chats belongs.
+    std::fs::write(fx.state_dir.join("transcripts"), "in the way").unwrap();
+    let log_len = fx.store.task(&a.id).await.unwrap().unwrap().log.len();
+
+    let err = archive_now(&fx, &a.id).await.unwrap_err();
+
+    assert!(err.to_string().contains("transcripts"), "{err}");
+    assert!(wt.is_dir());
+    assert!(PathBuf::from(&a.workdir).join(PROMPT_FILE).is_file());
+    assert!(fx.state_dir.join("agents").join(&a.id.0).is_dir());
+    assert_eq!(
+        find_opt(&fx.svc, &a.id)
+            .await
+            .expect("the card stays")
+            .status,
+        Status::Stopped
+    );
+    let p = fx.store.task(&a.id).await.unwrap().unwrap();
+    assert_eq!(
+        (p.state, p.archive, p.archived_at),
+        (TaskState::Stopped, None, None)
+    );
+    assert_eq!(p.log.len(), log_len + 1);
+    assert_eq!(p.log.last().unwrap().text, format!("archive failed: {err}"));
+    assert_eq!(
+        std::fs::read_to_string(fx.state_dir.join("transcripts")).unwrap(),
+        "in the way",
+        "what was in the way is left alone"
+    );
+
+    // Once the way is clear the same task archives.
+    std::fs::remove_file(fx.state_dir.join("transcripts")).unwrap();
+    archive_now(&fx, &a.id).await.unwrap();
+    assert!(!wt.exists());
+}
+
+#[tokio::test]
+async fn a_failed_try_leaves_no_temp_folder_and_a_retry_replaces_what_it_left() {
+    let fx = fixture().await;
+    let a = stopped(&fx, "retry", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let task_dir = fx.state_dir.join("transcripts").join(&a.id.0);
+    // What an earlier try left behind, holding a file the new copy does not have.
+    std::fs::create_dir_all(task_dir.join("stale")).unwrap();
+    std::fs::write(task_dir.join("stale/old"), "x").unwrap();
+
+    archive_now(&fx, &a.id).await.unwrap();
+
+    assert_eq!(entries(&task_dir), [a.id.0.as_str()]);
+    assert_eq!(
+        entries(&fx.state_dir.join("transcripts")),
+        [a.id.0.as_str()],
+        "no temp folder is left"
+    );
+}
+
+#[tokio::test]
+async fn an_archived_agents_stream_sends_the_page_and_ended_then_closes() {
+    let fx = fixture().await;
+    let addr = serve(&fx).await;
+    let a = stopped(&fx, "stream me", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    let before = history(addr, &a.id, "").await;
+    let since = fx.svc.agent(&a.id).await.unwrap().status_since;
+    archive_now(&fx, &a.id).await.unwrap();
+
+    let (status, body) = http(
+        addr,
+        "GET",
+        &format!("/api/agents/{}/chat", a.id.0),
+        &[],
+        None,
+    )
+    .await;
+
+    assert_eq!(status, 200, "{body}");
+    let events: Vec<&str> = body.lines().filter(|l| l.starts_with("event:")).collect();
+    assert_eq!(events, ["event: page", "event: ended"], "{body}");
+    let data: Vec<&str> = body
+        .lines()
+        .filter_map(|l| l.strip_prefix("data:"))
+        .map(str::trim)
+        .collect();
+    let page: ChatPage = serde_json::from_str(data[0]).unwrap();
+    assert_eq!(page, before);
+    assert_eq!(serde_json::from_str::<i64>(data[1]).unwrap(), since);
+}
+
+#[tokio::test]
+async fn nothing_can_be_sent_to_an_archived_agent() {
+    let fx = fixture().await;
+    let addr = serve(&fx).await;
+    let a = stopped(&fx, "gone", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    archive_now(&fx, &a.id).await.unwrap();
+    let id = &a.id.0;
+
+    for (method, path, body) in [
+        (
+            "POST",
+            format!("/api/agents/{id}/answer"),
+            Some(json!({"actor": "local", "text": "hi"})),
+        ),
+        (
+            "POST",
+            format!("/api/agents/{id}/asks/x"),
+            Some(json!({"choice": "allow", "text": null})),
+        ),
+        (
+            "POST",
+            format!("/api/agents/{id}/pause"),
+            Some(json!({"actor": "local"})),
+        ),
+        (
+            "POST",
+            format!("/api/agents/{id}/resume"),
+            Some(json!({"actor": "local"})),
+        ),
+        (
+            "POST",
+            format!("/api/agents/{id}/stop"),
+            Some(json!({"actor": "local"})),
+        ),
+        ("GET", format!("/api/agents/{id}/terminal"), None),
+    ] {
+        let (status, body) = http(addr, method, &path, &[], body.as_ref()).await;
+        assert_eq!(status, 404, "{method} {path}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_or_path_like_agent_has_no_kept_chat() {
+    let fx = fixture().await;
+    let addr = serve(&fx).await;
+    let a = stopped(&fx, "kept", &["core"]).await;
+    chatted(&fx, &a.id, "solo").await;
+    archive_now(&fx, &a.id).await.unwrap();
+    // A folder with a chat.json outside any task folder, which a traversing id would reach.
+    let outside = fx.state_dir.join("transcripts").join("loose");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::copy(
+        kept_dir(&fx, &a.id, &a.id).join("chat.json"),
+        outside.join("chat.json"),
+    )
+    .unwrap();
+
+    for id in [
+        "ghost",
+        "..",
+        ".",
+        "%2E%2E",
+        "..%2Floose",
+        "%2E%2E%2F%2E%2E%2Ftranscripts%2F".to_string().as_str(),
+        &format!("{}%2F{}", a.id.0, "x"),
+        &format!("{}%5C{}", a.id.0, "x"),
+        "",
+    ] {
+        for tail in ["chat", "chat/history"] {
+            let (status, body) =
+                http(addr, "GET", &format!("/api/agents/{id}/{tail}"), &[], None).await;
+            assert!(
+                status == 404 || status == 400,
+                "/api/agents/{id}/{tail}: {status} {body}"
+            );
+        }
+    }
 }

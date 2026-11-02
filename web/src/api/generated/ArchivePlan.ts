@@ -2,8 +2,9 @@
 import type { PlanItem } from "./PlanItem";
 
 /**
- * What archiving would do, for the user to confirm: each worktree, the daemon's files, and last the task folder
- * itself, whose `bytes` are what else it holds. Those stay, and so does the folder unless it ends up empty.
+ * What archiving would do, for the user to confirm: each worktree, the daemon's files, then the task folder
+ * itself, whose `bytes` are what else it holds (it stays unless it ends up empty), and last, for a task, the folder
+ * of chats that are kept. The first item that stays is the task folder.
  * `total` is what archiving frees: every item whose `stays` is false.
  */
 export type ArchivePlan = { items: Array<PlanItem>, total: number, };

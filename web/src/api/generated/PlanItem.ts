@@ -9,7 +9,8 @@ export type PlanItem = { path: string, bytes: number,
  */
 uncommitted_files: number, 
 /**
- * True when this item's contents are kept, not removed: the task folder's remaining contents, or a repository
- * found where a worktree was. Not counted in `ArchivePlan::total`.
+ * True when this item's contents are kept, not removed: the task folder's remaining contents, a repository
+ * found where a worktree was, or the chats the archive copies for the task (`<state>/transcripts/<task-id>`),
+ * whose `bytes` are what is copied. Not counted in `ArchivePlan::total`.
  */
 stays: boolean, };
