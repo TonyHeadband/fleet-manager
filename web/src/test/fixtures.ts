@@ -165,6 +165,7 @@ export function fakeClient(over: Partial<Record<keyof FleetClient, unknown>> = {
     checkouts: vi.fn().mockResolvedValue([]),
     fleetView: vi.fn().mockResolvedValue({ task: "", breakdowns: [], gate_runs: [] }),
     conversations: vi.fn().mockResolvedValue([]),
+    storage: vi.fn().mockResolvedValue({ worktrees_bytes: 0, build_bytes: 0, repos_bytes: 0, transcripts_bytes: 0, daemon_bytes: 0, disk_free_bytes: 0, disk_total_bytes: 0 }),
     rooms: vi.fn().mockResolvedValue([]),
     roomPosts: vi.fn().mockResolvedValue([]),
     agentConfig: vi.fn().mockResolvedValue({ instructions: "", settings: { allow: [], deny: [], env: {} } }),

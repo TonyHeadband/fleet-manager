@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import type { Conversation } from "../api/generated/Conversation";
-import { FakeEventSource, agent, factory, fakeClient, persona, pickInDrawer } from "../test/fixtures";
+import { FakeEventSource, agent, factory, fakeClient, fullTask, persona, pickInDrawer } from "../test/fixtures";
 import { SupervisorPage } from "./SupervisorPage";
 
 beforeEach(() => {
@@ -39,7 +39,7 @@ function clientWith(lists: Record<string, Conversation[]> = { me: LIST }) {
 
 const chatOf = (id: string) => FakeEventSource.instances.filter((i) => i.url.includes(`/api/agents/${id}/chat`) && !i.closed);
 const page = (client = clientWith(), persona = "me") => (
-  <SupervisorPage baseUrl="" client={client} persona={persona} personas={[]} agents={[]} tasks={[]} loaded factory={factory} />
+  <SupervisorPage baseUrl="" client={client} persona={persona} personas={[]} agents={[]} tasks={[]} loaded onArchive={() => {}} factory={factory} />
 );
 const picker = () => screen.getByRole("button", { name: "Conversation" });
 
@@ -55,6 +55,20 @@ describe("Supervisor page", () => {
     expect(links[0]).toHaveAttribute("aria-current", "page");
   });
 
+  it("the_storage_widgets_archive_button_opens_the_archive_dialog", async () => {
+    const archivePlan = vi.fn(() => new Promise<never>(() => {}));
+    const client = fakeClient({
+      personas: vi.fn().mockResolvedValue({ personas: [persona("me")] }),
+      tasks: vi.fn().mockResolvedValue({ tasks: [fullTask("t1", "alpha", "stopped", "stopped", { persona: "me" })], orphans: [], clones_bytes: null }),
+      archivePlan,
+    });
+    render(<App client={client} eventSource={factory} nowSeconds={() => NOW} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Archive alpha" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/alpha/)).toBeInTheDocument();
+    expect(archivePlan).toHaveBeenCalledWith("t1");
+  });
+
   it("opens_the_latest_conversation_of_the_persona", async () => {
     render(page());
     await waitFor(() => expect(chatOf("c2")).toHaveLength(1));
@@ -63,7 +77,7 @@ describe("Supervisor page", () => {
   });
 
   it("names_the_owner_and_the_supervisor_in_the_chat", async () => {
-    render(<SupervisorPage baseUrl="" client={clientWith()} persona="me" personas={[{ ...persona("me"), name: "Ada" }]} agents={[]} tasks={[]} loaded factory={factory} />);
+    render(<SupervisorPage baseUrl="" client={clientWith()} persona="me" personas={[{ ...persona("me"), name: "Ada" }]} agents={[]} tasks={[]} loaded onArchive={() => {}} factory={factory} />);
     await waitFor(() => expect(chatOf("c2")).toHaveLength(1));
     const items = [
       { seq: 0, at: NOW, body: { type: "prompt", text: "hi", from: "owner" } },

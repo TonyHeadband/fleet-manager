@@ -8,7 +8,6 @@ const BARS: { status: Status; label: string }[] = [
   { status: "working", label: "Working" },
   { status: "needs_you", label: "Needs you" },
   { status: "review", label: "Review" },
-  { status: "talking", label: "Talking" },
   { status: "queued", label: "Queued" },
 ];
 

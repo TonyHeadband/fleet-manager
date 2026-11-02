@@ -1,7 +1,9 @@
 import type { JSX } from "react";
 import type { EventSourceFactory } from "../../api/events";
 import type { Agent } from "../../api/generated/Agent";
+import type { FleetClient } from "../../api/client";
 import type { Task } from "../../api/generated/Task";
+import type { ArchiveTarget } from "../../tasks/ArchiveDialog";
 import type { RoomsClient } from "./RoomChat";
 
 export interface WidgetProps {
@@ -12,7 +14,9 @@ export interface WidgetProps {
   loaded: boolean;
   /** The daemon, for a widget that reads more than the board has (the rooms). */
   baseUrl: string;
-  client: RoomsClient;
+  client: RoomsClient & Pick<FleetClient, "storage">;
+  /** Opens the app's archive dialog for a task. */
+  onArchive: (target: ArchiveTarget) => void;
   factory?: EventSourceFactory;
 }
 

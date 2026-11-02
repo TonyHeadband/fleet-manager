@@ -1,34 +1,89 @@
+import { useEffect, useState } from "react";
+import type { StorageSummary } from "../../api/generated/StorageSummary";
+import type { Task } from "../../api/generated/Task";
 import type { Paint } from "../../charts";
 import { SegmentedBar } from "../../charts";
 import { formatBytes } from "../../shell/counts";
+import { look, taskOutcome } from "../../tasks/model";
+import { Button } from "../../ui/Button";
 import type { WidgetDef, WidgetProps } from "./widget";
 import { Widget } from "./Widget";
 
-/** Footprint kinds in a fixed order, so a kind keeps its colour whatever else is on disk. */
-const KINDS = ["worktrees", "build output", "internal", "daemon files", "other files"];
+/** How many tasks the clean-up list shows. */
+const LIST_LEN = 5;
+/** The bar is read again this often, besides when the tasks change. */
+const REFRESH_MS = 60_000;
 
-/** A worktree is named for its repo ("core worktree"); they are one kind here. */
-const kindOf = (label: string) => (label.endsWith(" worktree") ? "worktrees" : label);
+/** The kinds in a fixed order, so a kind keeps its colour whatever else is on disk. */
+const KINDS: { label: string; bytes: (s: StorageSummary) => number; paint: Paint }[] = [
+  { label: "worktrees", bytes: (s) => s.worktrees_bytes, paint: { series: 0 } },
+  { label: "build output", bytes: (s) => s.build_bytes, paint: { series: 1 } },
+  { label: "repo copies", bytes: (s) => s.repos_bytes, paint: { series: 2 } },
+  { label: "kept chats", bytes: (s) => s.transcripts_bytes, paint: { series: 3 } },
+  { label: "daemon files", bytes: (s) => s.daemon_bytes, paint: { series: 4 } },
+];
 
-function StorageWidget({ persona, tasks }: WidgetProps) {
-  const sums = new Map<string, number>();
-  for (const t of tasks) {
-    if (t.persona !== persona || t.kind === "supervisor" || t.archived_at !== null || t.state === "archived") continue;
-    for (const i of t.footprint?.items ?? []) sums.set(kindOf(i.label), (sums.get(kindOf(i.label)) ?? 0) + i.bytes);
-  }
-  const known = KINDS.filter((k) => sums.has(k));
-  const unknown = [...sums.keys()].filter((k) => !KINDS.includes(k)).sort();
-  const segments = [...known, ...unknown].map((label) => {
-    const slot = KINDS.indexOf(label);
-    const paint: Paint = { series: slot >= 0 && slot < 5 ? (slot as 0 | 1 | 2 | 3 | 4) : "other" };
-    return { label, value: sums.get(label) ?? 0, paint };
-  });
+/** The persona's biggest merged or stopped tasks that are not archived, largest first. */
+export function cleanUpList(tasks: Task[], persona: string): Task[] {
+  return tasks
+    .filter(
+      (t) =>
+        t.persona === persona &&
+        t.kind !== "supervisor" &&
+        t.archived_at === null &&
+        t.state !== "archived" &&
+        (t.state === "stopped" || taskOutcome(t) === "merged"),
+    )
+    .sort((a, b) => (b.footprint?.total ?? 0) - (a.footprint?.total ?? 0))
+    .slice(0, LIST_LEN);
+}
+
+const stageOf = (t: Task) => (taskOutcome(t) === "merged" ? "Merged" : look({ kind: "task", task: t }, {})[0]);
+
+function StorageWidget({ persona, tasks, client, onArchive }: WidgetProps) {
+  const [summary, setSummary] = useState<StorageSummary | null>(null);
+  // A task starting, stopping or being archived moves the numbers: ask again when the tasks' states change.
+  const standing = tasks.map((t) => `${t.id}:${t.state}`).join(" ");
+  useEffect(() => {
+    let live = true;
+    const read = () =>
+      client.storage().then(
+        (s) => live && setSummary(s),
+        () => {}, // keep the last numbers; the next read tries again
+      );
+    read();
+    const timer = setInterval(read, REFRESH_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [client, standing]);
+
+  const segments = KINDS.map((k) => ({ label: k.label, value: summary ? k.bytes(summary) : 0, paint: k.paint }));
+  const used = segments.reduce((sum, s) => sum + s.value, 0);
+  // Scaled to what Fleet Manager holds plus what the disk has left, so the bar shows its share of what is available.
+  const max = summary ? used + summary.disk_free_bytes : 0;
+  const list = cleanUpList(tasks, persona);
+
   return (
     <Widget def={STORAGE}>
-      <div className="widget-chart">
-        {/* No disk size is known, so the scale runs to the total. */}
-        <SegmentedBar label="Storage" segments={segments} max={0} format={formatBytes} />
+      <div className="storage-bar">
+        <SegmentedBar label="Storage" segments={segments} max={max} format={formatBytes} />
       </div>
+      {list.length > 0 && (
+        <ul className="storage-list" aria-label="Biggest tasks to clean up">
+          {list.map((t) => (
+            <li key={t.id} className="storage-row">
+              <span className="storage-name">{t.name}</span>
+              <span className="storage-stage">{stageOf(t)}</span>
+              <span className="storage-size">{t.footprint ? formatBytes(t.footprint.total) : "—"}</span>
+              <Button onClick={() => onArchive({ kind: "task", id: t.id, name: t.name })} aria-label={`Archive ${t.name}`}>
+                Archive
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Widget>
   );
 }

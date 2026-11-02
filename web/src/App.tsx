@@ -743,8 +743,8 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
 
   if (route === "supervisor") {
     return (
-      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Supervisor</h1>} footer={footer} dialog={appDialogs(dialog)}>
-        <SupervisorPage baseUrl={client.baseUrl} client={client} persona={persona} personas={personaList} agents={snapshot.agents} tasks={tasks?.tasks ?? []} loaded={snapshot.seq > 0} factory={streams} />
+      <Shell entry={entry} drawer={drawer} header={<h1 className="view-title">Supervisor</h1>} footer={footer} dialog={appDialogs(dialog || (archive.dialog && <ArchiveDialog dialog={archive.dialog} onGo={archive.go} onCancel={archive.cancel} />))}>
+        <SupervisorPage baseUrl={client.baseUrl} client={client} persona={persona} personas={personaList} agents={snapshot.agents} tasks={tasks?.tasks ?? []} loaded={snapshot.seq > 0} onArchive={archive.open} factory={streams} />
       </Shell>
     );
   }
