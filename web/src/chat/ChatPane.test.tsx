@@ -483,6 +483,39 @@ describe("long messages fold", () => {
     expect(screen.getByText("TALL PROMPT.md").closest("[data-folded]")).toBeNull();
   });
 
+  const limit = (text: string) => (screen.getByText(text).closest(".chat-fold-text") as HTMLElement).style.getPropertyValue("--fold-limit");
+
+  it("a_system_prompt_folds_at_eight_of_its_own_lines", () => {
+    heights("TALL");
+    // Its own line is 17.25px (11.5px at 1.5), not the body text's 19.5px: eight of them are 138px, not 156px.
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({ lineHeight: "17.25px" } as CSSStyleDeclaration);
+    start();
+    page([prompt("TALL PROMPT.md", "system")]);
+    expect(limit("TALL PROMPT.md")).toBe("138px");
+    const css = readFileSync("src/chat/chat.css", "utf8");
+    expect(css).toMatch(/\.chat-line\[data-from="system"\] \{[^}]*line-height: 1\.5;/);
+    expect(css).toMatch(/\.chat-fold-text\[data-folded\] \{[^}]*max-height: var\(--fold-limit\)/);
+  });
+
+  it("the_cut_snaps_to_the_last_whole_line_when_paragraph_margins_push_lines_down", () => {
+    heights("TALL");
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({ lineHeight: "19.5px" } as CSSStyleDeclaration);
+    // Two paragraphs: four lines, a 6px margin, then more. Line bottoms (box top at 0); the eighth ends at 162 > 156.
+    const bottoms = [19.5, 39, 58.5, 78, 103.5, 123, 142.5, 162, 181.5];
+    const rects = bottoms.map((bottom) => ({ top: bottom - 19.5, bottom }) as DOMRect);
+    const proto = Range.prototype as unknown as { getClientRects?: () => DOMRect[] };
+    const had = proto.getClientRects;
+    proto.getClientRects = () => rects;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 181.5 } as DOMRect);
+    try {
+      start();
+      page([reply("TALL one\n\nTALL two")]);
+      expect(limit("TALL one")).toBe("142.5px");
+    } finally {
+      proto.getClientRects = had;
+    }
+  });
+
   it("a_message_is_measured_again_when_the_panel_is_resized", async () => {
     let height = 20;
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(() => height);

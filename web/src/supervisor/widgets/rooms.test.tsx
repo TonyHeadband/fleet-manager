@@ -244,7 +244,7 @@ describe("Rooms widget", () => {
     const done = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which host?", answered_at: 1767225600 });
     show(clientWith({ r1: [open, done] }));
     const feed = await log();
-    expect(within(feed).getByText("Which port?").closest(".chat-ask")).not.toHaveAttribute("data-answered");
+    expect((await within(feed).findByText("Which port?")).closest(".chat-ask")).not.toHaveAttribute("data-answered");
     expect(within(feed).getByText("Which host?").closest(".chat-ask")).toHaveAttribute("data-answered");
     const css = readFileSync("src/chat/chat.css", "utf8").replace(/\s+/g, " ");
     expect(css).toMatch(/\.chat-ask\[data-answered\] \{[^}]*border-color: var\(--text\);/);

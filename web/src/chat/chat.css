@@ -12,15 +12,17 @@
 
 /* A line: what the owner did not type, a marker, the end of the session. */
 .chat-line { margin: 0; font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-low); font-weight: var(--weight-mono); }
-.chat-line[data-from="system"] { font-size: var(--size-code); letter-spacing: normal; text-transform: none; }
+.chat-line[data-from="system"] { font-size: var(--size-code); line-height: 1.5; letter-spacing: normal; text-transform: none; }
 .chat-line[data-marker="compacted"] { text-align: center; }
 .chat-line[data-marker="new_session"],
 .chat-line[data-marker="session_ended"] { padding-top: var(--panel-gap-m); border-top: 1px solid var(--border); }
 .chat-line[data-marker="new_session"] { text-align: center; }
 .chat-earlier { align-self: center; padding: 0; border: none; background: transparent; color: var(--text-low); }
 
-/* A long message folds at a measured height and is cut clean there: no fade. */
-.chat-fold-text[data-folded] { max-height: var(--panel-fold-max); overflow: hidden; }
+/* A long message folds at eight whole lines of its own, measured by ChatPane (--fold-limit; --panel-fold-max is the
+   body text's eight) and cut clean there: no fade. */
+.chat-fold-text { --fold-limit: var(--panel-fold-max); }
+.chat-fold-text[data-folded] { max-height: var(--fold-limit); overflow: hidden; }
 .chat-fold-toggle { margin-top: var(--panel-gap-s); }
 
 /* Claude's rich text. */
