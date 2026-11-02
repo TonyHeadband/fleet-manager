@@ -9,6 +9,7 @@ import { ReplyBox } from "./components/ReplyBox";
 import { stopAction, visibleActions } from "./api/schema";
 import { kept, personaRows, personaTags, repoRows, shownAgents, type ReleaseFilter as ReleaseFilterValue } from "./board/filters";
 import { groups, taskId, type FleetDisplay } from "./board/groups";
+import { workStage } from "./board/stage";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Details } from "./panel/Details";
 import { fleetPanel, useFleetViews } from "./panel/fleetViews";
@@ -988,7 +989,7 @@ export function App({ client, eventSource = browserEventSource, nowSeconds = wal
                       </button>
                     </div>
                   )}
-                  <Details schema={schema} agent={open} now={now} />
+                  <Details schema={schema} agent={open} now={now} stage={open.kind === "specialist" ? null : workStage(open, taskRecords[taskId(open)])} />
                 </>
               )
             }

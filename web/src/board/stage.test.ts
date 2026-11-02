@@ -41,7 +41,7 @@ describe("workStage", () => {
   });
 
   it("an_open_pr_shows_its_number_from_the_gate_before_github_is_checked", () => {
-    expect(workStage(agent(), task({ repos: committed, gate_runs: [run(0, URL)] }))).toEqual({ text: "PR #499", tone: "active", title: `PR open: ${URL}` });
+    expect(workStage(agent(), task({ repos: committed, gate_runs: [run(0, URL)] }))).toEqual({ text: "PR #499", tone: "active", title: `PR open: ${URL}`, url: URL });
     expect(workStage(agent(), task({ repos: committed, prs: [pr("open")] }))).toMatchObject({ text: "PR #499" });
     // The same PR seen twice counts once; two repos' PRs are counted.
     expect(workStage(agent(), task({ repos: committed, prs: [pr("open")], gate_runs: [run(0, URL)] }))).toMatchObject({ text: "PR #499" });
@@ -53,7 +53,10 @@ describe("workStage", () => {
       text: "Merged",
       tone: "done",
       title: "Every PR of the task is merged",
+      url: URL,
     });
+    // Two PRs, two repos: no single one to link to.
+    expect(workStage(agent(), task({ repos: committed, prs: [pr("merged"), pr("merged", "https://github.com/o/s/pull/7")] }))).not.toHaveProperty("url");
     expect(workStage(agent(), task({ repos: committed, prs: [pr("closed")] }))).toMatchObject({ text: "PR closed", tone: "caution" });
     expect(workStage(agent(), task({ done_by_hand: true }))).toMatchObject({ text: "Done by hand", tone: "done" });
   });

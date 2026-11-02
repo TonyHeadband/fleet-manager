@@ -4,6 +4,9 @@
 /* One row across the panel's width: the status and its badges, the time closing it at the right end. */
 .details-status { display: flex; align-items: center; gap: var(--space-button-gap); min-width: 0; overflow: hidden; white-space: nowrap; }
 .details-status .badge { flex: none; }
+/* A PR's stage is a link to it: the badge as on the card, its text underlined while pointed at. */
+.details-stage { flex: none; text-decoration: none; }
+.details-stage:hover .badge { text-decoration: underline; }
 .details-time { margin-left: auto; flex: none; }
 .details-column { display: inline-flex; align-items: center; gap: var(--space-button-gap); color: var(--text-high); }
 .details-field { display: flex; align-items: baseline; gap: var(--space-item); min-width: 0; }

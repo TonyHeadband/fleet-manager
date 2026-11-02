@@ -17,11 +17,28 @@ describe("the panel's details", () => {
   it("the_details_are_one_status_row_the_time_at_its_end", () => {
     show(detailsAgent({ status: "needs_you", blocked_reason: "permission" }));
     const row = document.querySelector<HTMLElement>(".details-status")!;
-    for (const text of ["Needs you", "Permission needed", "Has changes", "Paused", "5m"]) expect(within(row).getByText(text)).toBeInTheDocument();
+    for (const text of ["Needs you", "Permission needed", "Paused", "5m"]) expect(within(row).getByText(text)).toBeInTheDocument();
+    // "Has changes" said only that something happened: the stage says where the work is, as on the card.
+    expect(within(row).queryByText("Has changes")).toBeNull();
     // The badges come first; the time closes the row at its right end.
     expect(row.lastElementChild).toHaveTextContent("5m");
     // The header's path already names the repos and the branch.
     for (const text of ["Branch", "fleet/idea", "core"]) expect(screen.queryByText(text)).toBeNull();
+  });
+
+  it("the_details_show_the_cards_stage_and_link_a_pr", () => {
+    const url = "https://github.com/o/r/pull/504";
+    const { rerender } = render(<Details schema={schema} agent={detailsAgent({ status: "review" })} now={NOW} stage={{ text: "PR #504", tone: "active", title: `PR open: ${url}`, url }} />);
+    const row = document.querySelector<HTMLElement>(".details-status")!;
+    const link = within(row).getByRole("link", { name: "PR #504" });
+    expect(link).toHaveAttribute("href", url);
+    // The app opens it in the browser (native.ts catches target=_blank links).
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(within(link).getByText("PR #504")).toHaveAttribute("data-tone", "active");
+    // A stage with no PR is the badge alone.
+    rerender(<Details schema={schema} agent={detailsAgent({ status: "review" })} now={NOW} stage={{ text: "Committed", title: "Commits on the task's branch, no PR yet" }} />);
+    expect(within(row).getByText("Committed")).toBeInTheDocument();
+    expect(within(row).queryByRole("link")).toBeNull();
   });
 
   it("a_stopped_agents_details_show_its_cause_and_size", () => {
