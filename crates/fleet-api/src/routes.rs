@@ -8,8 +8,8 @@ use crate::{
     NewConversation, NewPersona, NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut,
     Persona, PersonaList, PersonaUpdate, Post, Product, ProductList, ProductUpdate,
     RefuseRepoRequest, Release, ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, Room,
-    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse, Task,
-    TaskList, ToolList, UiSchema, VersionInfo, Workspace,
+    SetTaskRelease, SetToken, Snapshot, SpawnRequest, SpawnResponse, StopTaskResponse,
+    StorageSummary, Task, TaskList, ToolList, UiSchema, VersionInfo, Workspace,
 };
 
 #[utoipa::path(get, path = "/api/agents", responses((status = 200, body = Snapshot)))]
@@ -143,6 +143,10 @@ pub fn refuse_repo_request() {}
 
 #[utoipa::path(get, path = "/api/tasks", responses((status = 200, body = TaskList)))]
 pub fn list_tasks() {}
+
+/// Fleet Manager's live disk use by kind and the free space of the tasks folder's volume.
+#[utoipa::path(get, path = "/api/storage", responses((status = 200, body = StorageSummary)))]
+pub fn storage() {}
 
 /// Rescans for orphans, re-measures, and checks the open tasks' PRs, in the background.
 #[utoipa::path(post, path = "/api/tasks/refresh", responses((status = 202)))]

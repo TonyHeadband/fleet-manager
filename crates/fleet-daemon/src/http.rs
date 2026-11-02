@@ -40,8 +40,8 @@ use fleet_api::{
     NewPost, NewProduct, NewRelease, OrphanRequest, OverridesPut, Persona, PersonaList,
     PersonaUpdate, Post, PostKind, Product, ProductList, ProductUpdate, RefuseRepoRequest, Release,
     ReleaseUpdate, RepoInfo, RepoList, RepoUpsert, Room, SetTaskRelease, SetToken, Snapshot,
-    SpawnRequest, SpawnResponse, Status, StopTaskResponse, Task, TaskList, ToolError, ToolList,
-    VersionInfo, Workspace,
+    SpawnRequest, SpawnResponse, Status, StopTaskResponse, StorageSummary, Task, TaskList,
+    ToolError, ToolList, VersionInfo, Workspace,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -190,6 +190,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/rooms/{id}/posts", get(room_posts).post(post_to_room))
         .route("/api/rooms/asks/{post}/answer", post(answer_room_ask))
         .route("/api/tasks", get(list_tasks))
+        .route("/api/storage", get(storage))
         .route("/api/tasks/refresh", post(refresh_tasks))
         .route("/api/tasks/{id}/archive-plan", get(archive_plan))
         .route("/api/tasks/{id}/archive", post(archive_task))
@@ -1803,6 +1804,11 @@ async fn list_tasks(State(st): State<AppState>) -> Result<Json<TaskList>, ApiErr
         orphans: st.svc.orphans(),
         clones_bytes: st.svc.clones_bytes(),
     }))
+}
+
+/// Live disk use by kind; walks only the state folder, off the async threads, and at most every 30 s.
+async fn storage(State(st): State<AppState>) -> Json<StorageSummary> {
+    Json(st.svc.storage().await)
 }
 
 /// Starts the rescan, the measurements and a PR check, and returns at once; the Tasks view picks the results up by
