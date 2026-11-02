@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
 import type { RoomKind } from "../../api/generated/RoomKind";
-import { useSupervisorRoom } from "../../shell/routes";
+import { replaceSupervisorRoom, useSupervisorRoom } from "../../shell/routes";
 import { ErrorLine } from "../../ui/ErrorLine";
 import { ListDetail } from "../../ui/ListDetail";
 import { ListRow } from "../../ui/ListRow";
@@ -46,7 +46,10 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
     <ul>
       {list.map((r) => (
         <li key={r.id}>
-          <ListRow mark="current" selected={r.id === current?.id} onSelect={() => setPicked(r.id)} dimmed={r.archived_at != null}>
+          <ListRow mark="current" selected={r.id === current?.id} onSelect={() => {
+              setPicked(r.id);
+              replaceSupervisorRoom(r.id);
+            }} dimmed={r.archived_at != null}>
             <span className="list-row-name">{r.title}</span>
             <span className="rooms-kind mono-label">{KIND[r.kind]}</span>
             {r.unread > 0 && (
