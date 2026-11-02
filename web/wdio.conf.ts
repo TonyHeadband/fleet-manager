@@ -8,7 +8,8 @@ export const config: WebdriverIO.Config = {
   runner: "local",
   hostname: "127.0.0.1",
   port: 4444,
-  specs: ["./e2e/**/*.e2e.ts"],
+  // CI runs the smoke specs; FLEET_E2E_SPECS names others (e2e/manual/, see scripts/tauri-check.sh).
+  specs: [process.env.FLEET_E2E_SPECS ?? "./e2e/**/*.e2e.ts"],
   maxInstances: 1,
   capabilities: [{ maxInstances: 1, "tauri:options": { application: process.env.FLEET_TAURI_APP } } as WebdriverIO.Capabilities],
   logLevel: "warn",
