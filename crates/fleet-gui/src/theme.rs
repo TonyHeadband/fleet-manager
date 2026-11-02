@@ -278,8 +278,8 @@ pub mod layout {
     pub const CALL_TARGET_MIN: f32 = 12.0;
     /// A dialog's widest.
     pub const DIALOG: f32 = 520.0;
-    /// The Archive dialog's widest: its plan lists paths.
-    pub const ARCHIVE_DIALOG: f32 = 560.0;
+    /// The Archive dialog's widest: its plan lists a worktree per step, each a path deep in the task's folder.
+    pub const ARCHIVE_DIALOG: f32 = 880.0;
     /// The footer's History popup.
     pub const HISTORY: f32 = 380.0;
     /// The drawer's watermark: its side, and how far it hangs out past the drawer's left edge.

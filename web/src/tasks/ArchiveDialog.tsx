@@ -159,15 +159,32 @@ export function ArchiveDialog({ dialog: d, onGo, onCancel }: Props) {
   );
 }
 
-/** One row per item: what is removed with its size and any work it loses, and what stays. */
+/**
+ * One row per item: what is removed with its size and any work it loses, and what stays. Every path starts with the
+ * same task folder, so it is named once above and each row shows what follows it (a step's worktree, the internal
+ * repo); a path elsewhere (the daemon's agent files) is cut from its start, where the paths agree, never its end.
+ */
 function PlanRows({ plan }: { plan: ArchivePlan }) {
+  const root = plan.items.find((i) => i.stays)?.path ?? null;
+  const shown = (path: string) => (root !== null && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null);
   return (
     <>
       <p className="dialog-body">What archiving does:</p>
+      {root !== null && (
+        <p className="archive-root low">
+          In <code>{root}</code>
+        </p>
+      )}
       <div className="archive-plan">
         {plan.items.map((item) => (
           <div key={item.path} className="archive-item" data-stays={item.stays || undefined}>
-            <code>{item.path}</code>
+            {shown(item.path) !== null ? (
+              <code title={item.path}>{shown(item.path)}</code>
+            ) : (
+              <code title={item.path} data-cut="start">
+                <bdi dir="ltr">{item.path}</bdi>
+              </code>
+            )}
             <span>{formatBytes(item.bytes)}</span>
             {item.stays ? (
               <span className="low" title="Kept on disk: archiving does not remove it">

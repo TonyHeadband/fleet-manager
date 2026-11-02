@@ -173,17 +173,36 @@
   margin-bottom: var(--layout-section-gap);
 }
 
-/* The Archive dialog (crates/fleet-gui/src/components/archive_dialog.rs), wider than the shared dialog. */
+/* The Archive dialog (crates/fleet-gui/src/components/archive_dialog.rs), wider than the shared dialog. A task with
+   many steps lists a worktree each: the dialog stays inside the window and the plan scrolls in it. */
 .dialog.archive-dialog {
   width: min(var(--layout-archive-dialog), 100% - 2 * var(--space-row-x));
+  max-height: calc(100% - 2 * var(--space-row-x));
+  display: flex;
+  flex-direction: column;
+}
+.archive-dialog > * {
+  flex: none;
+}
+.archive-root {
+  margin: 0;
+  font-size: var(--size-small);
+  overflow-wrap: anywhere;
+}
+.archive-root code {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-mono);
 }
 .archive-dialog .high {
   color: var(--text-high);
 }
 .archive-plan {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
-  grid-template-columns: minmax(0, auto) auto auto;
-  justify-content: start;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-content: start;
   gap: var(--tasks-grid-y) var(--tasks-grid-x);
 }
 .archive-item {
@@ -196,6 +215,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: var(--weight-mono);
+}
+/* Cut at its start: the end of a path is what tells it from the others. */
+.archive-item code[data-cut="start"] {
+  direction: rtl;
+  text-align: left;
 }
 .archive-item[data-stays] > :not(:last-child) {
   color: var(--text-low);

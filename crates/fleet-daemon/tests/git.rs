@@ -221,6 +221,36 @@ async fn uncommitted_files_counts_ignored_files_but_not_build_output() {
     assert_eq!(uncommitted_files(&wt.path).await.unwrap(), 1);
 }
 
+/// Build output is regenerable wherever it sits: a web app's `web/node_modules`, a `dist` or a generated `gen` deep in
+/// the tree are not lost work, so a worktree holding only those warns of nothing.
+#[tokio::test]
+async fn uncommitted_files_skips_build_output_at_any_depth() {
+    let f = fixture("core");
+    let wt = create(&f.repo, "fleet", "x", &dest(&f, "x"), "HEAD", None)
+        .await
+        .unwrap();
+    std::fs::write(
+        wt.path.join(".gitignore"),
+        "node_modules/\ndist/\ngen/\n.env\n",
+    )
+    .unwrap();
+    git(&wt.path, &["add", ".gitignore"]);
+    git(&wt.path, &["commit", "-q", "-m", "ignore"]);
+    for dir in [
+        "web/node_modules",
+        "web/dist",
+        "crates/app/dist",
+        "crates/app/gen",
+    ] {
+        std::fs::create_dir_all(wt.path.join(dir)).unwrap();
+        std::fs::write(wt.path.join(dir).join("x"), "built").unwrap();
+    }
+    assert_eq!(uncommitted_files(&wt.path).await.unwrap(), 0);
+    // An ignored file beside them still counts: it is work the archive would lose.
+    std::fs::write(wt.path.join("web/.env"), "SECRET=1").unwrap();
+    assert_eq!(uncommitted_files(&wt.path).await.unwrap(), 1);
+}
+
 #[tokio::test]
 async fn has_changes_false_fresh_true_when_dirty_or_committed() {
     let f = fixture("core");

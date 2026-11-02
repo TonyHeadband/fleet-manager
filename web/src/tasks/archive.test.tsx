@@ -83,6 +83,29 @@ describe("Archive dialog", () => {
     expect(dialog().getByRole("button", { name: "Cancel" }), "the safe choice must be the default").toHaveFocus();
   });
 
+  it("paths_read_from_the_task_folder_and_the_list_scrolls_in_the_window", async () => {
+    const { plans, over } = calls();
+    await tasks("s1", undefined, over);
+    await open();
+    await land(plans[0]!, {
+      items: [
+        { path: "/home/me/fleet-tasks/bravo/fleet/1-fix/core", bytes: 1_000, uncommitted_files: 0, stays: false },
+        { path: "/home/me/.local/share/fleet-manager/agents/a1b2", bytes: 100, uncommitted_files: 0, stays: false },
+        { path: "/home/me/fleet-tasks/bravo", bytes: 4_000, uncommitted_files: 0, stays: true },
+      ],
+      total: 1_100,
+    });
+    // The task folder is named once; each row under it shows only what follows.
+    expect(dialog().getByText("/home/me/fleet-tasks/bravo", { selector: ".archive-root code" })).toBeInTheDocument();
+    expect(dialog().getByText("fleet/1-fix/core")).toHaveAttribute("title", "/home/me/fleet-tasks/bravo/fleet/1-fix/core");
+    // A path elsewhere keeps its end in view: cut from its start.
+    const elsewhere = dialog().getByText("/home/me/.local/share/fleet-manager/agents/a1b2").closest("code")!;
+    expect(elsewhere).toHaveAttribute("data-cut", "start");
+    const css = readFileSync("src/tasks/tasks.css", "utf8").replace(/\s+/g, " ");
+    expect(css).toMatch(/\.dialog\.archive-dialog \{[^}]*max-height: calc\(100% - 2 \* var\(--space-row-x\)\);[^}]*display: flex;/);
+    expect(css).toMatch(/\.archive-plan \{[^}]*min-height: 0; overflow-y: auto;/);
+  });
+
   it("a_plan_for_another_task_does_not_enable_archive", async () => {
     const { plans, over } = calls();
     await tasks("s1", undefined, over);
@@ -165,8 +188,8 @@ describe("Archive dialog", () => {
   });
 
   it("the_archive_dialog_is_wider_than_the_shared_one", () => {
-    // egui's 560, one token for both apps: the plan's paths need the room.
-    expect(layout.archiveDialog).toBe(560);
+    // One token for both apps: a step's worktree path, read from the task folder, needs the room.
+    expect(layout.archiveDialog).toBe(880);
     expect(layout.archiveDialog).toBeGreaterThan(layout.dialog);
     expect(css).toMatch(/\.dialog\.archive-dialog \{[^}]*width: min\(var\(--layout-archive-dialog\)/);
   });

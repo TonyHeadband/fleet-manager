@@ -560,8 +560,8 @@ pub async fn remove_worktree_at(repo: &Path, path: &Path) -> Result<(), GitError
 
 /// How many files in the worktree are changed, untracked or ignored: what an archive loses, since only commits stay
 /// on the branch. Each untracked file counts, not just its folder. Ignored files count too (`.env`, local notes),
-/// but not the build output under `footprint::BUILD_DIRS`, which can be built again; an ignored folder
-/// counts once, since git does not look inside it (a `node_modules` would make this walk slow).
+/// but not build output (`REGENERABLE`), which can be built again; an ignored folder counts once, since git does not
+/// look inside it (a `node_modules` would make this walk slow).
 pub async fn uncommitted_files(wt: &Path) -> Result<u32, GitError> {
     let out = git(
         wt,
@@ -580,11 +580,16 @@ pub async fn uncommitted_files(wt: &Path) -> Result<u32, GitError> {
         .count() as u32)
 }
 
-/// A path from `git status` (quoted when it holds unusual characters) inside a build folder at the worktree root.
+/// Ignored folders a build or a package manager makes again, at any depth: a web app's `web/node_modules`, a bundle's
+/// `dist`, a generator's `gen` (Tauri's schemas) are no work to lose.
+const REGENERABLE: [&str; 4] = ["target", "node_modules", "dist", "gen"];
+
+/// A path from `git status` (quoted when it holds unusual characters) inside a build folder, wherever it sits.
 fn is_build_output(path: &str) -> bool {
-    let path = path.trim_start_matches('"');
-    let top = path.split('/').next().unwrap_or(path);
-    crate::footprint::BUILD_DIRS.contains(&top)
+    path.trim_matches('"')
+        .trim_end_matches('/')
+        .split('/')
+        .any(|part| REGENERABLE.contains(&part))
 }
 
 /// Forgets the worktree at `path` after its folder was deleted by hand. Prune skips a locked worktree, which would
