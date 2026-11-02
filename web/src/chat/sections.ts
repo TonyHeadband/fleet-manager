@@ -18,10 +18,9 @@ export function blocks(items: ChatItem[]): Block[] {
   return out;
 }
 
+/** Only a section still at work is open by itself; once done it folds, a failure too (its mark says so). */
 export function opensItself(section: Section): boolean {
-  return section.calls.some(
-    (c) => c.body.type === "call" && (c.body.status === "running" || c.body.status === "failed"),
-  );
+  return section.calls.some((c) => c.body.type === "call" && c.body.status === "running");
 }
 
 // An updated item arrives again with its seq; the newer one wins.

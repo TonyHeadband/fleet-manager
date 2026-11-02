@@ -27,8 +27,15 @@ export function AskFrame({ caption, answered, error, children }: Props) {
 
 /** A one-line answer ("Approved") reads beside its caption; a longer one is its own folded block under it, so a long
  * answer is never a single wall-of-text caption line. */
+/** The answer under its ask, folded past eight lines like any message: a one-line answer can still be a long one. */
 function Answer({ text }: { text: string }) {
-  if (!text.includes("\n")) return <p className="chat-ask-answered">{text ? `Answered · ${text}` : "Answered"}</p>;
+  if (!text) return <p className="chat-ask-answered">Answered</p>;
+  if (!text.includes("\n"))
+    return (
+      <Folding>
+        <p className="chat-ask-answered">Answered · {text}</p>
+      </Folding>
+    );
   return (
     <>
       <p className="chat-ask-answered">Answered</p>

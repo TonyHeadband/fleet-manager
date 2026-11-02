@@ -127,9 +127,12 @@ describe("ChatPane", () => {
     expect(read).toHaveTextContent("Read");
     expect(read).toHaveTextContent("12 lines");
     expect(screen.getByText("fn backfill").closest(".chat-call")).toHaveTextContent("3 files");
-    // A failure opens itself, its output under it.
-    const failed = screen.getByText("cargo test").closest(".chat-section") as HTMLElement;
-    expect(within(failed).getByRole("button", { name: "1 call · Bash" })).toHaveAttribute("aria-expanded", "true");
+    // A failure folds like any finished section, its mark failed; opened, its output is under it.
+    const failedHead = screen.getAllByRole("button", { name: "1 call · Bash" })[0]!;
+    expect(failedHead).toHaveAttribute("aria-expanded", "false");
+    expect(failedHead.querySelector(".chat-mark")).toHaveAttribute("data-status", "failed");
+    await userEvent.click(failedHead);
+    expect(failedHead).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("cargo test").closest(".chat-call")).toHaveTextContent("1 failed");
     expect(screen.getByText(/left: 1/)).toHaveClass("chat-call-output");
     // The running section is open, its + a −.
@@ -417,10 +420,11 @@ describe("the Chat in the app", () => {
     const css = readFileSync("src/chat/chat.css", "utf8");
     expect(css).not.toMatch(/\d+(vw|vh|vmin|vmax)\b|position: fixed/);
   });
-  it("a_long_failed_call_line_wraps_inside_the_chat", () => {
+  it("a_long_failed_call_line_wraps_inside_the_chat", async () => {
     const long = 'set title failed: this task already has a title: Definitions say "No active persona" instead of loading forever (#478)';
     start();
     page([call("Bash", "set_title", "failed", long, `${"x".repeat(300)}\n${long}`), reply("y".repeat(300)), reply("| a | b |\n|---|---|\n| 1 | 2 |")]);
+    await userEvent.click(screen.getByRole("button", { name: "1 call · Bash" }));
     expect(document.querySelector(".markdown table")).toHaveTextContent("a b 1 2");
     const result = screen.getByText(long, { selector: ".chat-call-result" });
     expect(result).toBeInTheDocument();

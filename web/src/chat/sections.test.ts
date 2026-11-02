@@ -29,8 +29,8 @@ describe("sections", () => {
     expect(opensItself(sections([call(1), call(2, "running")])[0]!)).toBe(true);
   });
 
-  it("a_section_with_a_failure_opens_itself", () => {
-    expect(opensItself(sections([call(1, "failed"), call(2)])[0]!)).toBe(true);
+  it("a_section_with_a_failure_stays_folded", () => {
+    expect(opensItself(sections([call(1, "failed"), call(2)])[0]!)).toBe(false);
   });
 
   it("a_done_section_stays_folded", () => {

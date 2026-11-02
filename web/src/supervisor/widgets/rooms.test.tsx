@@ -290,6 +290,17 @@ describe("Rooms widget", () => {
       expect(within(group).getByRole("button", { name: "Show less" })).toBeInTheDocument();
       vi.restoreAllMocks();
     });
+
+    it("a_long_one_line_answer_folds_too", async () => {
+      heights();
+      const ask = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Breakdown v6?" });
+      const answer = post({ sender: "owner", sender_name: "owner", kind: "answer", reply_to: ask.id, text: "TALL comment with no line breaks at all" });
+      show(clientWith({ r1: [ask, answer] }));
+      const group = (await within(await log()).findByText("Breakdown v6?")).closest<HTMLElement>(".chat-ask")!;
+      expect(within(group).getByText(/Answered · TALL comment/)).toBeInTheDocument();
+      expect(within(group).getByRole("button", { name: "Read more" })).toBeInTheDocument();
+      vi.restoreAllMocks();
+    });
   });
 
   it("an_owner_ask_answers_inline", async () => {
