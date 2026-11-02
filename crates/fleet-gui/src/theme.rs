@@ -272,6 +272,10 @@ pub mod layout {
     pub const PANEL_CAP: f32 = 0.75;
     /// The detail panel goes fullscreen once the board would keep less than this share of its width.
     pub const BOARD_KEEP: f32 = 0.25;
+    /// The chat's line-height, unitless: the markdown's and a system line's. The fold height is whole lines of it.
+    pub const CHAT_LINE: f32 = 1.5;
+    /// A chat call's target keeps at least this many characters (`ch`) before it truncates.
+    pub const CALL_TARGET_MIN: f32 = 12.0;
     /// A dialog's widest.
     pub const DIALOG: f32 = 520.0;
     /// The Archive dialog's widest: its plan lists paths.
@@ -483,7 +487,7 @@ pub mod panel {
     /// An icon button in a header row (Close, Fullscreen, Open in terminal).
     pub const ICON_BUTTON: f32 = 26.0;
     /// A chat message's height past which it folds behind "Read more": eight whole lines of the chat's text
-    /// (`--size-body`, 13px, at the markdown's line-height of 1.5: 19.5px a line), so the cut falls between lines.
+    /// (`--size-body`, 13px, at `layout::CHAT_LINE`, 1.5: 19.5px a line), so the cut falls between lines.
     pub const FOLD_MAX: f32 = 156.0;
 }
 

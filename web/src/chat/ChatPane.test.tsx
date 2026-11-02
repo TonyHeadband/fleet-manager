@@ -347,6 +347,12 @@ describe("ChatPane", () => {
   it("chat_css_uses_tokens_only", () => {
     const css = readFileSync("src/chat/chat.css", "utf8");
     expect(css.match(/(?<![\w.])(?!1px\b)\d+(\.\d+)?px\b/g)).toBeNull();
+    // The call target's width and every line-height are tokens too: `1px` is the only literal.
+    expect(css).not.toMatch(/12ch\b/);
+    expect(css).not.toMatch(/line-height:\s*[\d.]/);
+    expect(css).toMatch(/\.chat-call-target \{[^}]*min-width: var\(--layout-call-target-min\);/);
+    expect(css).toMatch(/\.chat-line\[data-from="system"\] \{[^}]*line-height: var\(--layout-chat-line\);/);
+    expect(css).toMatch(/\.markdown \{ line-height: var\(--layout-chat-line\); \}/);
     expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(css).not.toMatch(/aspect-ratio|border-radius|gradient/);
     // The section's open motion is motion.css's, under the motion guard.
@@ -426,7 +432,7 @@ describe("the Chat in the app", () => {
     // and the target keeps a minimum beside a result that fits.
     expect(rule(".chat-call")).toMatch(/flex-wrap: wrap/);
     expect(rule(".chat-call-target")).toMatch(/flex: 1 1 0(px|%)?;/);
-    expect(rule(".chat-call-target")).toMatch(/min-width: \d+ch/);
+    expect(rule(".chat-call-target")).toMatch(/min-width: var\(--layout-call-target-min\)/);
     expect(rule(".chat-call-target")).toMatch(/text-overflow: ellipsis/);
     expect(rule(".chat-call-target")).toMatch(/white-space: nowrap/);
     expect(rule(".chat-call-result")).toMatch(/max-width: 100%/);
@@ -493,7 +499,7 @@ describe("long messages fold", () => {
     page([prompt("TALL PROMPT.md", "system")]);
     expect(limit("TALL PROMPT.md")).toBe("138px");
     const css = readFileSync("src/chat/chat.css", "utf8");
-    expect(css).toMatch(/\.chat-line\[data-from="system"\] \{[^}]*line-height: 1\.5;/);
+    expect(css).toMatch(/\.chat-line\[data-from="system"\] \{[^}]*line-height: var\(--layout-chat-line\);/);
     expect(css).toMatch(/\.chat-fold-text\[data-folded\] \{[^}]*max-height: var\(--fold-limit\)/);
   });
 

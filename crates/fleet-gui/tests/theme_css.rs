@@ -209,10 +209,15 @@ const MOTION: [(&str, &str, u32); 16] = [
     ("at-cards", "atCards", motion::AT_CARDS),
 ];
 
-const RATIOS: [(&str, &str, f32); 2] = [
+const RATIOS: [(&str, &str, f32); 3] = [
     ("panel-cap", "panelCap", layout::PANEL_CAP),
     ("board-keep", "boardKeep", layout::BOARD_KEEP),
+    ("chat-line", "chatLine", layout::CHAT_LINE),
 ];
+
+/// Widths in characters (`ch`), which follow the font rather than the screen.
+const CHARS: [(&str, &str, f32); 1] =
+    [("call-target-min", "callTargetMin", layout::CALL_TARGET_MIN)];
 
 const SPACE: [(&str, &str, f32); 10] = [
     ("row-x", "rowX", space::ROW_X),
@@ -431,7 +436,12 @@ const SETTINGS: [(&str, &str, f32); 12] = [
 ];
 
 fn layout_ts() -> String {
-    let layout: Vec<_> = LAYOUT.iter().chain(RATIOS.iter()).copied().collect();
+    let layout: Vec<_> = LAYOUT
+        .iter()
+        .chain(RATIOS.iter())
+        .chain(CHARS.iter())
+        .copied()
+        .collect();
     format!(
         "// Generated from crates/fleet-gui/src/theme.rs by `cargo test -p fleet-gui --test theme_css`; do not edit.\n\
          export const layout = {{ {} }} as const;\n\
@@ -485,6 +495,10 @@ fn css() -> String {
     );
     let layouts = px_vars("layout", &css_names(&LAYOUT))
         + &ratio_vars("layout", &css_names(&RATIOS))
+        + &css_names(&CHARS)
+            .iter()
+            .map(|(name, v)| format!("  --layout-{name}: {v}ch;\n"))
+            .collect::<String>()
         + &px_vars("space", &css_names(&SPACE))
         + &px_vars("card", &css_names(&CARD))
         + &px_vars("column", &css_names(&COLUMN))
@@ -602,6 +616,8 @@ fn the_canvas_tokens_are_exported() {
         "--layout-changes-dot: 5px;",
         "--motion-wipe: 360ms;",
         "--motion-at-footer: 500ms;",
+        "--layout-chat-line: 1.5;",
+        "--layout-call-target-min: 12ch;",
         "--track-caps: 0.13em;",
         "--grid-alpha: 0.07;",
     ] {
@@ -614,8 +630,8 @@ fn the_canvas_tokens_are_exported() {
 
 #[test]
 fn a_message_folds_at_a_whole_number_of_lines() {
-    // Chat text is `--size-body` at the `.markdown` line-height of 1.5; a fold height off a line boundary cuts a line.
-    let line = size::BODY * 1.5;
+    // Chat text is `--size-body` at the chat line-height; a fold height off a line boundary cuts a line.
+    let line = size::BODY * layout::CHAT_LINE;
     let lines = panel::FOLD_MAX / line;
     assert_eq!(lines, 8.0, "FOLD_MAX is {} lines of {line}px", lines);
 }
