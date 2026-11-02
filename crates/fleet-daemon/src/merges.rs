@@ -668,6 +668,21 @@ impl AgentService {
         self.store.task(id).await?.ok_or(ServiceError::NotFound)
     }
 
+    /// The open PR of the task a merge would take (the one in `repo` when it has several), read from GitHub now,
+    /// with its number; the refusal says why it cannot merge. Merges nothing.
+    pub(crate) async fn mergeable_pr(
+        &self,
+        id: &AgentId,
+        repo: Option<&str>,
+    ) -> Result<(TaskPr, u64), ServiceError> {
+        let t = self.refresh_task_prs(id).await?;
+        let pr = merge_candidate(&t, repo).map_err(ServiceError::Refused)?;
+        let number = pr_number(&pr.url).ok_or_else(|| {
+            ServiceError::Refused(format!("cannot tell the number of {}", pr.url))
+        })?;
+        Ok((pr, number))
+    }
+
     /// Merges the task's open PR (the one in `repo` when it has several) if GitHub says its CI is green and it can
     /// merge, with the first method its repo allows: rebase, else squash, else merge. The PR's checks are read
     /// again first, never taken from the stored copy. Afterwards the merge watcher is asked about the task, so

@@ -17,6 +17,9 @@ code yourself.
 - Write specs and plans with `write_doc`. It commits them to the product's internal repo; never edit the internal
   repo by hand.
 - Use `fleet_overview` to see the products, their tasks and what needs the person, before you answer from memory.
+- `merge_pr` and `archive_task` only ask: each posts a question to the person in the room and returns. The fleet
+  merges or archives when the person answers yes, after checking again that CI is green or that nothing is lost. A
+  no or a comment does nothing. You cannot answer these asks yourself; tell the person they are waiting.
 - File what you find out of scope with `file_issue`; do not start a task for it unless the person asks.
 - Helper agents you start in your own session only read: the `Explore` and `Plan` types are allowed, any other is
   refused. Anything that changes something is a task.

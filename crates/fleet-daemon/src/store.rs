@@ -341,7 +341,7 @@ impl Store {
         }
         // 004 to 012 alter or drop tables, so unlike the others they must run exactly once.
         // PRAGMA takes no bind parameters, so each step carries its own constant.
-        let steps: [(i64, &'static str, &'static str); 13] = [
+        let steps: [(i64, &'static str, &'static str); 14] = [
             (
                 4,
                 include_str!("../migrations/004_personas.sql"),
@@ -406,6 +406,11 @@ impl Store {
                 16,
                 include_str!("../migrations/016_rooms.sql"),
                 "PRAGMA user_version = 16",
+            ),
+            (
+                17,
+                include_str!("../migrations/017_pending_actions.sql"),
+                "PRAGMA user_version = 17",
             ),
         ];
         for (_, sql, pragma) in steps.into_iter().filter(|(to, ..)| version < *to) {
@@ -1816,6 +1821,27 @@ impl Store {
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(post_row).collect()
+    }
+
+    /// Attaches the action (as JSON) the daemon takes when the owner answers the ask yes.
+    pub async fn set_pending_action(&self, ask: i64, action: &str) -> Result<()> {
+        let _w = self.write_lock.lock().await;
+        sqlx::query("INSERT OR REPLACE INTO pending_actions (ask, action) VALUES (?, ?)")
+            .bind(ask)
+            .bind(action)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The action attached to the ask, as JSON.
+    pub async fn pending_action(&self, ask: i64) -> Result<Option<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT action FROM pending_actions WHERE ask = ?")
+                .bind(ask)
+                .fetch_optional(&self.pool)
+                .await?,
+        )
     }
 
     /// Records that the ask was reposted; false when it already was, so only one caller reposts it.
