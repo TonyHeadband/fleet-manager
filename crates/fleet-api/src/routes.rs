@@ -109,6 +109,11 @@ pub fn set_task_release() {}
 #[utoipa::path(post, path = "/api/tasks/{id}/done", params(("id" = String, Path)), responses((status = 200, body = Task), (status = 404), (status = 409)))]
 pub fn mark_done() {}
 
+/// Reads the task's PRs and their checks from GitHub now (the watcher also does it on a timer) and returns the task.
+/// 409 when GitHub could not be asked.
+#[utoipa::path(post, path = "/api/tasks/{id}/pr/refresh", params(("id" = String, Path)), responses((status = 200, body = Task), (status = 404), (status = 409)))]
+pub fn refresh_task_prs() {}
+
 /// The repos a task may be started with: one product's, or every product's. Repos an agent made inside a task
 /// folder are left out.
 #[utoipa::path(get, path = "/api/repos", params(("product" = Option<String>, Query, description = "Only this product's repos")), responses((status = 200, body = RepoList)))]

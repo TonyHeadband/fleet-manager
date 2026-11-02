@@ -64,7 +64,7 @@ pub use supervisor::{
     Conversation, ConversationMessage, NewConversation, TaskEvent, TaskEventKind, TaskMark,
 };
 pub use task::{
-    format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
+    format_bytes, ArchivePlan, ArchiveReport, CiState, Footprint, FootprintItem, LogEntry, Orphan,
     OrphanKind, PlanItem, PrState, StatusTimes, StorageSummary, Task, TaskList, TaskOutcome,
     TaskPr, TaskState, PLAN_CHANGED,
 };
@@ -110,6 +110,7 @@ use utoipa::OpenApi;
         routes::delete_release,
         routes::set_task_release,
         routes::mark_done,
+        routes::refresh_task_prs,
         routes::agent_diff,
         routes::add_repo,
         routes::grant_repo_request,
@@ -236,6 +237,7 @@ use utoipa::OpenApi;
         Task,
         TaskPr,
         PrState,
+        CiState,
         TaskList,
         OrphanRequest,
         ArchiveRequest,

@@ -192,6 +192,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tasks", get(list_tasks))
         .route("/api/storage", get(storage))
         .route("/api/tasks/refresh", post(refresh_tasks))
+        .route("/api/tasks/{id}/pr/refresh", post(refresh_task_prs))
         .route("/api/tasks/{id}/archive-plan", get(archive_plan))
         .route("/api/tasks/{id}/archive", post(archive_task))
         .route("/api/tasks/{id}/fleet", get(fleet_view))
@@ -1818,6 +1819,14 @@ async fn refresh_tasks(State(st): State<AppState>) -> StatusCode {
     st.svc.request_measure_all();
     st.svc.request_merge_check(None);
     StatusCode::ACCEPTED
+}
+
+/// Reads the task's PRs and their CI from GitHub now and returns the task: the side panel calls it when it opens one.
+async fn refresh_task_prs(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Task>, ApiError> {
+    Ok(Json(st.svc.refresh_task_prs(&AgentId(id)).await?))
 }
 
 async fn mark_done(

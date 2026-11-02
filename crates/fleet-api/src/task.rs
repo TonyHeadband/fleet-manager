@@ -167,6 +167,24 @@ pub enum PrState {
     Closed,
 }
 
+/// Whether a PR's checks pass, as the daemon last read them from GitHub.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, TS,
+)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum CiState {
+    /// Every counted check passed (skipped and neutral count as passing).
+    Green,
+    /// A counted check failed; see `TaskPr::failing_checks`.
+    Red,
+    /// No counted check failed, and one is queued or running (or a required one has not reported).
+    Pending,
+    /// Not read yet, or GitHub could not be asked.
+    #[default]
+    Unknown,
+}
+
 /// A PR whose head is the task's branch on one of its repos.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]
@@ -176,6 +194,15 @@ pub struct TaskPr {
     pub state: PrState,
     #[ts(type = "number | null")]
     pub merged_at: Option<i64>,
+    /// The PR's checks (runs and commit statuses on its head commit); only read for an open PR.
+    #[serde(default)]
+    pub ci: CiState,
+    /// The names of the counted checks that failed.
+    #[serde(default)]
+    pub failing_checks: Vec<String>,
+    /// Whether GitHub says the PR can merge now (`mergeable`, and a `mergeable_state` that does not block it).
+    #[serde(default)]
+    pub can_merge: bool,
 }
 
 /// Where a task stands for its release's count; see `progress::task_outcome`.
@@ -324,4 +351,30 @@ pub struct TaskList {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub clones_bytes: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_pr_without_ci_fields_loads_with_unknown_ci() {
+        let old =
+            r#"{"url":"https://github.com/a/b/pull/1","repo":"b","state":"open","merged_at":null}"#;
+        let pr: TaskPr = serde_json::from_str(old).unwrap();
+        assert_eq!(pr.ci, CiState::Unknown);
+        assert!(pr.failing_checks.is_empty());
+        assert!(!pr.can_merge);
+    }
+
+    #[test]
+    fn ci_state_is_lowercase_on_the_wire() {
+        let json = serde_json::to_string(&[
+            CiState::Green,
+            CiState::Red,
+            CiState::Pending,
+            CiState::Unknown,
+        ]);
+        assert_eq!(json.unwrap(), r#"["green","red","pending","unknown"]"#);
+    }
 }

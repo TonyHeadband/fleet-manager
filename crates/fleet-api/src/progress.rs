@@ -176,6 +176,9 @@ mod tests {
             repo: repo.into(),
             state,
             merged_at: (state == PrState::Merged).then_some(100),
+            ci: crate::CiState::Unknown,
+            failing_checks: vec![],
+            can_merge: false,
         }
     }
 
