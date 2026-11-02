@@ -235,6 +235,8 @@ async fn run(config_path: PathBuf) -> Result<(), String> {
         if let Err(e) = ticker.recover().await {
             error!(error = %e, "resuming the interrupted agents failed");
         }
+        // After the resume, or it would bring the merged tasks' agents back.
+        ticker.stop_merged_tasks().await;
         loop {
             tokio::time::sleep(RECONCILE_EVERY).await;
             if let Err(e) = ticker.reconcile().await {

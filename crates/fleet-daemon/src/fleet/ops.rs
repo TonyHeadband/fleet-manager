@@ -2564,6 +2564,17 @@ impl AgentService {
     /// orchestrator last. Returns how many it stopped; agents that had already ended are not counted.
     #[tracing::instrument(skip_all, fields(task = %task.0))]
     pub async fn stop_task(&self, task: &AgentId) -> Result<u32, ServiceError> {
+        self.stop_task_with(task, StopCause::Stopped, "stopped by you")
+            .await
+    }
+
+    /// `stop_task` with the cause and activity text its agents record.
+    pub async fn stop_task_with(
+        &self,
+        task: &AgentId,
+        cause: StopCause,
+        activity: &str,
+    ) -> Result<u32, ServiceError> {
         // Held throughout, so no specialist starts between the listing and the orchestrator's stop.
         let _bd = self.breakdown_lock.lock().await;
         let p = self.store.task(task).await?.ok_or(ServiceError::NotFound)?;
@@ -2580,7 +2591,7 @@ impl AgentService {
         let mut stopped = 0;
         let mut failed = None;
         for a in &live {
-            match self.stop(&a.id).await {
+            match self.stop_with(&a.id, cause, activity).await {
                 Ok(()) => stopped += 1,
                 Err(e) => {
                     warn!(agent_id = %a.id.0, error = %e, "cannot stop the task's agent");

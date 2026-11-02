@@ -1315,3 +1315,145 @@ async fn a_merge_with_no_open_pr_names_the_latest_pr() {
     );
     refused_with(fx, "pull/9 is not open").await;
 }
+
+/// A running solo task on `core` (GitHub Enterprise URL) with a commit on its branch.
+async fn running_github_task(fx: &Fx) -> fleet_api::Agent {
+    let a = fx
+        .svc
+        .spawn(SpawnRequest {
+            plan: None,
+            actor: Actor("local".into()),
+            product: PRODUCT.into(),
+            release: None,
+            repos: vec![pick(fx, "core")],
+            prompt: "work".into(),
+            slug: None,
+            title: None,
+            persona: PERSONA.into(),
+            kind: AgentKind::Solo,
+            role: None,
+        })
+        .await
+        .unwrap();
+    set_core_url(fx, Some(GHE_URL)).await;
+    commit_in(&record(fx, &a.id).await.repos[0].worktree);
+    a
+}
+
+async fn agent_of(fx: &Fx, id: &AgentId) -> fleet_api::Agent {
+    fx.store
+        .task_agents(id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|a| a.id == *id)
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_last_merge_stops_the_task_with_cause_merged() {
+    let fx = fixture().await;
+    fx.svc.enable_merge_stop();
+    let a = running_github_task(&fx).await;
+    reply_merged(&fx);
+
+    fx.svc.check_merges().await;
+
+    let x = agent_of(&fx, &a.id).await;
+    assert_eq!(x.status, fleet_api::Status::Stopped, "{x:?}");
+    assert_eq!(x.stop_cause, Some(fleet_api::StopCause::Merged));
+    assert_eq!(x.activity, "stopped: its PRs merged");
+    assert!(!fx.sessions.alive(&x.session));
+    let t = record(&fx, &a.id).await;
+    assert_eq!(t.state, fleet_api::TaskState::Stopped);
+    assert_eq!(t.stop_cause, Some(fleet_api::StopCause::Merged));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_partial_merge_stops_nothing() {
+    let fx = fixture().await;
+    fx.svc.enable_merge_stop();
+    let a = running_github_task(&fx).await;
+    reply_for(
+        &fx,
+        "core",
+        &[rest_pr("core", 7, "MERGED"), rest_pr("core", 8, "OPEN")],
+    );
+
+    fx.svc.check_merges().await;
+
+    let x = agent_of(&fx, &a.id).await;
+    assert_ne!(x.status, fleet_api::Status::Stopped, "{x:?}");
+    assert!(fx.sessions.alive(&x.session));
+    fx.svc.stop(&a.id).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_done_by_hand_is_not_stopped() {
+    let fx = fixture().await;
+    fx.svc.enable_merge_stop();
+    let a = running_github_task(&fx).await;
+    fx.store
+        .update_task(&a.id, |x| x.done_by_hand = true)
+        .await
+        .unwrap();
+    reply_merged(&fx);
+
+    fx.svc.check_merges().await;
+    fx.svc.stop_merged_tasks().await;
+
+    let x = agent_of(&fx, &a.id).await;
+    assert_ne!(x.status, fleet_api::Status::Stopped, "{x:?}");
+    fx.svc.stop(&a.id).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_startup_sweep_stops_a_merged_task_still_running() {
+    let fx = fixture().await;
+    let a = running_github_task(&fx).await;
+    fx.store
+        .update_task(&a.id, |x| {
+            x.repos[0].changed = true;
+            x.prs = vec![pr("core", 7, PrState::Merged, Some(merged_at()))];
+            x.done_at = Some(merged_at());
+        })
+        .await
+        .unwrap();
+
+    fx.svc.stop_merged_tasks().await;
+
+    let x = agent_of(&fx, &a.id).await;
+    assert_eq!(x.status, fleet_api::Status::Stopped, "{x:?}");
+    assert_eq!(x.stop_cause, Some(fleet_api::StopCause::Merged));
+    // Run again: nothing left to stop, nothing fails.
+    fx.svc.stop_merged_tasks().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merged_task_archives_with_no_separate_stop() {
+    let fx = fixture().await;
+    fx.svc.enable_merge_stop();
+    let a = running_github_task(&fx).await;
+    reply_merged(&fx);
+    fx.svc.check_merges().await;
+
+    let plan = fx.svc.archive_plan(&a.id).await.unwrap();
+    fx.svc.archive(&a.id, &plan.items).await.unwrap();
+
+    assert_eq!(
+        record(&fx, &a.id).await.state,
+        fleet_api::TaskState::Archived
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_stop_button_still_records_cause_stopped() {
+    let fx = fixture().await;
+    let a = running_github_task(&fx).await;
+
+    assert_eq!(fx.svc.stop_task(&a.id).await.unwrap(), 1);
+
+    let x = agent_of(&fx, &a.id).await;
+    assert_eq!(x.stop_cause, Some(fleet_api::StopCause::Stopped));
+    assert_eq!(x.activity, "stopped by you");
+}
