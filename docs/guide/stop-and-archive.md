@@ -8,9 +8,10 @@ branches are never deleted, and the record stays in the history.
 
 ## The chats stay
 
-An archive deletes the agents, their sessions and their folders, and Claude Code removes the transcripts with them. So
-before anything is deleted, Archive copies each agent's chat into Fleet Manager's own state folder, so a task's
-conversations survive the cleanup:
+An archive deletes the agents, their sessions and their folders. It does not touch the transcripts in the persona's
+Claude config folder, but they do not last: Claude Code's own cleanup (`cleanupPeriodDays`) prunes them later, and
+deleting the persona removes them. So before anything is deleted, Archive copies each agent's chat into Fleet
+Manager's own state folder, so a task's conversations survive:
 
 - Where: `transcripts/<task-id>/<agent-id>/` in the state folder (`state_dir`, see
   [Configuration](../reference/configuration.md)).
