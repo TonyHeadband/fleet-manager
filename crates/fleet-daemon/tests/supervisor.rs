@@ -772,3 +772,65 @@ async fn a_fetch_that_hangs_ends_at_the_cap_and_the_start_goes_ahead() {
     assert_eq!(head(&p), before);
     drop(held);
 }
+
+#[tokio::test]
+async fn a_daemon_resume_refreshes_a_personas_clones_once_however_many_conversations_it_resumes() {
+    let fx = fixture_options(
+        |_| {},
+        |o| o.clone_refresh_cap = Duration::from_millis(1500),
+    )
+    .await;
+    let p = product_clone(&fx);
+    push_new_file(&p);
+    let (a, b) = (start(&fx, "one").await, start(&fx, "two").await);
+    for x in [&a, &b] {
+        wait_screen_in(&fx.sessions, &x.session, |s| s.contains("ready")).await;
+        set_status(&fx, &x.id, Status::Working).await;
+        // What Claude writes for a session that can be resumed.
+        let session = fx.store.claude_session(&x.id).await.unwrap().unwrap();
+        let dir = fx
+            .svc
+            .config()
+            .personas_dir
+            .join(PERSONA)
+            .join("claude/projects");
+        let dir = std::fs::read_dir(dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        std::fs::write(dir.join(format!("{session}.jsonl")), "{}\n").unwrap();
+    }
+    // Accepts and never answers (the persona allows only https and file); counts the connections.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = accepted.clone();
+    let _held = std::thread::spawn(move || {
+        let mut streams = Vec::new();
+        while let Ok((s, _)) = listener.accept() {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            streams.push(s);
+        }
+    });
+    git(
+        &p.clone,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            &format!("https://127.0.0.1:{port}/up.git"),
+        ],
+    );
+    let (svc, sessions) = restart(&fx).await;
+    let started = std::time::Instant::now();
+    svc.resume_interrupted().await.unwrap();
+    let took = started.elapsed();
+    sessions.shutdown_all();
+    assert!(
+        took < Duration::from_millis(2500),
+        "two caps' worth of waiting: {took:?}"
+    );
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

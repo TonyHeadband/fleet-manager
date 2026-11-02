@@ -2825,6 +2825,8 @@ impl AgentService {
     pub async fn resume_interrupted(&self) -> Result<(), ServiceError> {
         // Each check runs the persona's CLIs, so it is made once per persona, not once per agent.
         let mut personas = HashMap::new();
+        // Likewise the clones' refresh, which waits up to the cap on a remote that may hang.
+        let mut refreshed = HashSet::new();
         for a in self.store.snapshot().await?.agents {
             if self.shutting_down.load(Ordering::SeqCst) {
                 break;
@@ -2832,7 +2834,10 @@ impl AgentService {
             if a.status == Status::Stopped || self.sessions.alive(&a.session) {
                 continue;
             }
-            if let Err(why) = self.resume_one(&a, &mut personas, false).await {
+            if let Err(why) = self
+                .resume_one(&a, &mut personas, Some(&mut refreshed), false)
+                .await
+            {
                 if let Err(e) = self.unresumable().stop(&a.id, &why).await {
                     error!(agent_id = %a.id.0, error = %e, "cannot stop the agent that could not resume");
                 }
@@ -2861,7 +2866,7 @@ impl AgentService {
     /// Relaunches the Stopped agent `a` with `--resume` on its Claude session and leaves it idle (Review): a
     /// supervisor conversation the idle reaper closed, resumed for a message. `Err` says why it cannot be resumed.
     pub(crate) async fn resume_stopped(&self, a: &Agent) -> Result<(), String> {
-        self.resume_one(a, &mut HashMap::new(), true).await
+        self.resume_one(a, &mut HashMap::new(), None, true).await
     }
 
     /// `Err` says why the agent cannot be resumed; it is empty when there is no Claude session to resume. `revive`
@@ -2870,6 +2875,7 @@ impl AgentService {
         &self,
         a: &Agent,
         personas: &mut HashMap<String, Result<PersonaEnv, String>>,
+        refreshed: Option<&mut HashSet<String>>,
         revive: bool,
     ) -> Result<(), String> {
         // Not prompted yet (still starting, or at the trust dialog): Claude has written no transcript to resume, so
@@ -2924,7 +2930,10 @@ impl AgentService {
             }
         }
         // A supervisor reads the persona's clones: they are current before it is back, as at its first start.
-        if a.kind == AgentKind::Supervisor {
+        // During a daemon-wide resume (`refreshed` is set) a persona's clones are refreshed for its first supervisor
+        // only.
+        if a.kind == AgentKind::Supervisor && refreshed.is_none_or(|r| r.insert(persona.id.clone()))
+        {
             self.repos
                 .refresh_persona_clones(&persona, self.opts.clone_refresh_cap)
                 .await;
