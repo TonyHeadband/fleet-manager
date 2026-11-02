@@ -164,19 +164,18 @@ describe("Supervisor page", () => {
     const grid = container.querySelector(".supervisor-grid");
     expect(grid).toHaveClass("outlined");
     expect([...grid!.querySelectorAll(".widget")].map((w) => w.getAttribute("data-widget"))).toEqual(["agents_by_status", "storage", "rooms"]);
-    // The grid runs along the top and the chat sits below it, never inside it.
+    // The chat stays on the left and the grid fills the space beside it, never covering it.
     expect(container.querySelector(".supervisor-chat")!.contains(grid)).toBe(false);
-    expect([...container.querySelector(".supervisor")!.children].map((c) => c.className)).toEqual(["supervisor-grid outlined", "supervisor-chat outlined"]);
+    expect([...container.querySelector(".supervisor")!.children].map((c) => c.className)).toEqual(["supervisor-chat outlined", "supervisor-grid outlined"]);
   });
 
   it("each_widget_keeps_the_size_the_grid_gives_it", () => {
-    // #491: rows share the grid's height and a cell never grows with its content; the room chat scrolls inside.
     const css = readFileSync("src/supervisor/supervisor.css", "utf8").replace(/\s+/g, " ");
-    expect(css).toMatch(/\.supervisor \{[^}]*flex-direction: column;/);
-    expect(css).toMatch(/\.supervisor-grid \{[^}]*flex: none; box-sizing: content-box; height: var\(--layout-panel-min\);/);
-    expect(css).toMatch(/\.supervisor-grid \{[^}]*display: grid;[^}]*grid-template-columns: repeat\(auto-fit, minmax\(var\(--layout-chart-compact\), 1fr\)\);[^}]*grid-auto-rows: minmax\(var\(--layout-panel-min\), 1fr\);/);
+    // #491: two rows share the grid's height, the graphs on top and Rooms across the bottom; a cell never grows.
+    expect(css).not.toMatch(/\.supervisor \{[^}]*flex-direction: column;/);
+    expect(css).toMatch(/\.supervisor-grid \{[^}]*flex: 1;[^}]*display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); grid-template-rows: repeat\(2, minmax\(var\(--layout-panel-min\), 1fr\)\);/);
     expect(css).toMatch(/\.supervisor-cell \{[^}]*min-height: 0;[^}]*overflow: hidden;/);
-    expect(css).toMatch(/\.supervisor-cell\[data-cell="rooms"\] \{[^}]*grid-column: span 2;/);
+    expect(css).toMatch(/\.supervisor-cell\[data-cell="rooms"\] \{[^}]*grid-column: 1 \/ -1;/);
     const rooms = readFileSync("src/supervisor/widgets/rooms.css", "utf8").replace(/\s+/g, " ");
     expect(rooms).not.toMatch(/\.rooms \.list-detail \{[^}]*height: auto/);
     expect(rooms).toMatch(/\.rooms \.list-detail \{[^}]*flex: 1;[^}]*min-height: 0;/);
