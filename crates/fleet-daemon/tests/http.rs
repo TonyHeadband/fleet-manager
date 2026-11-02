@@ -2575,3 +2575,16 @@ async fn a_tauri_origin_with_a_foreign_host_is_refused() {
     .await;
     assert_eq!(s, 403);
 }
+
+#[tokio::test]
+async fn storage_route_serves_the_summary() {
+    let fx = fixture().await;
+    std::fs::create_dir_all(fx.state_dir.join("repos/core")).unwrap();
+    std::fs::write(fx.state_dir.join("repos/core/pack"), [b'x'; 123]).unwrap();
+    let srv = serve(fx).await;
+    let (status, v) = json_of(srv.addr, "GET", "/api/storage", None).await;
+    assert_eq!(status, 200, "{v}");
+    let s: fleet_api::StorageSummary = serde_json::from_value(v).unwrap();
+    assert_eq!(s.repos_bytes, 123);
+    assert!(s.disk_total_bytes > 0, "{s:?}");
+}

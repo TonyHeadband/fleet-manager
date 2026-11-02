@@ -31,6 +31,9 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
 pub const SESSION_PREFIX: &str = "fleet-";
+/// How long `storage` reuses its walk of the state folder.
+const STORAGE_TTL: Duration = Duration::from_secs(30);
+
 /// Pause between an answer's text and its Enter. Claude Code treats input arriving in one burst as a paste and
 /// would swallow the Enter into it; 100 ms is well past its paste-detection window and still imperceptible.
 const SUBMIT_DELAY: Duration = Duration::from_millis(100);
@@ -1048,6 +1051,8 @@ pub struct AgentService {
     measure_all_pending: Arc<AtomicBool>,
     measure_all_passes: Arc<AtomicUsize>,
     clones_bytes: Arc<Mutex<Option<u64>>>,
+    /// The state folder's sizes by kind and when they were walked: `storage` reuses them for `STORAGE_TTL`.
+    state_kinds: Mutex<Option<(std::time::Instant, crate::storage::StateKinds)>>,
     /// True from a requested rescan until it starts, so a refresh meanwhile adds nothing; one made while a scan
     /// runs queues the next, since the running one may have read the disk before the change it was asked for.
     rescan_pending: Arc<AtomicBool>,
@@ -1131,6 +1136,7 @@ impl AgentService {
             measure_all_pending: Arc::new(AtomicBool::new(false)),
             measure_all_passes: Arc::new(AtomicUsize::new(0)),
             clones_bytes: Arc::new(Mutex::new(None)),
+            state_kinds: Mutex::new(None),
             rescan_pending: Arc::new(AtomicBool::new(false)),
             rescans: AtomicUsize::new(0),
             rescan_lock: tokio::sync::Mutex::new(()),
@@ -1232,6 +1238,47 @@ impl AgentService {
     /// The clone cache's size from the last full pass; None before the first.
     pub fn clones_bytes(&self) -> Option<u64> {
         *self.clones_bytes.lock().expect("clones poisoned")
+    }
+
+    /// Live disk use by kind (see `storage`). Task kinds come from the cached footprints; the state folder is
+    /// walked off the async threads and the result reused for `STORAGE_TTL`, so a widget polling this route does
+    /// not walk the clone cache each time. The free space is asked on every call.
+    pub async fn storage(&self) -> fleet_api::StorageSummary {
+        let tasks = self.store.tasks().await.unwrap_or_else(|e| {
+            warn!(error = %e, "cannot list tasks for the storage summary");
+            Vec::new()
+        });
+        let cached = self
+            .state_kinds
+            .lock()
+            .expect("state kinds poisoned")
+            .filter(|(at, _)| at.elapsed() < STORAGE_TTL)
+            .map(|(_, k)| k);
+        let kinds = match cached {
+            Some(k) => k,
+            None => {
+                let (state_dir, tasks_root) =
+                    (self.cfg.state_dir.clone(), self.cfg.tasks_root.clone());
+                let k = tokio::task::spawn_blocking(move || {
+                    crate::storage::state_kinds(&state_dir, &tasks_root)
+                })
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(error = %e, "measuring the state folder panicked");
+                    Default::default()
+                });
+                *self.state_kinds.lock().expect("state kinds poisoned") =
+                    Some((std::time::Instant::now(), k));
+                k
+            }
+        };
+        let tasks_root = self.cfg.tasks_root.clone();
+        tokio::task::spawn_blocking(move || crate::storage::summarize(&tasks, kinds, &tasks_root))
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "summarizing storage panicked");
+                Default::default()
+            })
     }
 
     /// `rescan_orphans` in the background, unless one is already queued; after the running one, if any.

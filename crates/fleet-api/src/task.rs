@@ -64,6 +64,40 @@ pub struct Footprint {
     pub total: u64,
 }
 
+/// Fleet Manager's live disk use by kind, with the room left on the volume that holds the tasks folder. Every
+/// `*_bytes` field is a size in bytes of regular files (symlinks are not followed), and the five kinds never
+/// overlap, so their sum is all that Fleet Manager holds. Archived tasks count for nothing: whatever an archive
+/// left in a task's folder is not measured here.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
+#[ts(export)]
+pub struct StorageSummary {
+    /// Live (not archived) tasks' worktrees and the rest of their folders (the notes checkout, stray files),
+    /// without build output. From each task's last footprint, so a task not yet measured counts 0.
+    #[ts(type = "number")]
+    pub worktrees_bytes: u64,
+    /// Regenerable build output of live tasks: `target` and `node_modules` at the root of their worktrees and
+    /// their shared build folders. From each task's last footprint.
+    #[ts(type = "number")]
+    pub build_bytes: u64,
+    /// The daemon's copies of the repos: `<state>/repos/`.
+    #[ts(type = "number")]
+    pub repos_bytes: u64,
+    /// The chats kept when tasks were archived: `<state>/transcripts/`.
+    #[ts(type = "number")]
+    pub transcripts_bytes: u64,
+    /// The rest of the daemon's state folder: everything under it except `repos/`, `transcripts/` and the tasks
+    /// folder (should it lie inside the state folder). The database, logs, agents' and personas' folders, the
+    /// internal notes checkouts.
+    #[ts(type = "number")]
+    pub daemon_bytes: u64,
+    /// Space available to the daemon's user on the volume holding the tasks folder.
+    #[ts(type = "number")]
+    pub disk_free_bytes: u64,
+    /// Size of that volume.
+    #[ts(type = "number")]
+    pub disk_total_bytes: u64,
+}
+
 /// What archiving a task removed and kept.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]

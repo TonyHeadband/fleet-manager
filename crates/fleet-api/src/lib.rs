@@ -65,8 +65,8 @@ pub use supervisor::{
 };
 pub use task::{
     format_bytes, ArchivePlan, ArchiveReport, Footprint, FootprintItem, LogEntry, Orphan,
-    OrphanKind, PlanItem, PrState, StatusTimes, Task, TaskList, TaskOutcome, TaskPr, TaskState,
-    PLAN_CHANGED,
+    OrphanKind, PlanItem, PrState, StatusTimes, StorageSummary, Task, TaskList, TaskOutcome,
+    TaskPr, TaskState, PLAN_CHANGED,
 };
 pub use tool::{Os, ToolError, ToolFix, ToolId, ToolList, ToolStatus, VersionInfo};
 pub use ui::{
@@ -115,6 +115,7 @@ use utoipa::OpenApi;
         routes::grant_repo_request,
         routes::refuse_repo_request,
         routes::list_tasks,
+        routes::storage,
         routes::refresh_tasks,
         routes::archive_plan,
         routes::archive_task,
@@ -244,6 +245,7 @@ use utoipa::OpenApi;
         StatusTimes,
         FootprintItem,
         Footprint,
+        StorageSummary,
         ArchiveReport,
         ArchivePlan,
         PlanItem,
