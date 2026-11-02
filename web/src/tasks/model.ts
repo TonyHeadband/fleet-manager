@@ -92,6 +92,7 @@ const CAUSE_LOOK: Record<StopCause, [string, Tone]> = {
   crashed: ["Crashed", "danger"],
   finished: ["Finished", "active"],
   interrupted: ["Interrupted", "caution"],
+  merged: ["Merged", "active"],
   stopped: ["Stopped", "caution"],
 };
 

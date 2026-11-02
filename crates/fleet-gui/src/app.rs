@@ -1324,7 +1324,13 @@ impl FleetApp {
                 tracing::info!(notify = "info", agent_id = %id.0, "{goal} exited")
             }
             // An interrupted agent did not crash: its card says why, with no warning.
-            Some(StopCause::Stopped | StopCause::Finished | StopCause::Interrupted) | None => {}
+            Some(
+                StopCause::Stopped
+                | StopCause::Finished
+                | StopCause::Interrupted
+                | StopCause::Merged,
+            )
+            | None => {}
         }
         true
     }

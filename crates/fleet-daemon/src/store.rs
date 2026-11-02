@@ -2049,6 +2049,7 @@ fn fleet_event(a: &Agent) -> Option<FleetEvent> {
                 Some(StopCause::Crashed) => "crashed",
                 Some(StopCause::Exited) => "exited",
                 Some(StopCause::Interrupted) => "interrupted",
+                Some(StopCause::Merged) => "merged",
                 _ => "stopped",
             };
             (FleetEventKind::Failed, cause.to_string())

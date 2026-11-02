@@ -28,6 +28,8 @@ pub enum StopCause {
     Finished,
     /// A daemon restart could not resume it; the activity says why. Not a crash: no warning, not counted as one.
     Interrupted,
+    /// The task's last PR merged and the daemon stopped the agent.
+    Merged,
 }
 
 /// Why a Needs you card is blocked, so the owner knows what kind of attention it wants.

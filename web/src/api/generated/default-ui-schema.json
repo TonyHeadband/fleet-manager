@@ -159,6 +159,7 @@
         "exited": "Exited",
         "finished": "Finished",
         "interrupted": "Interrupted",
+        "merged": "Merged",
         "stopped": "Stopped"
       },
       "value_tones": {
@@ -166,6 +167,7 @@
         "exited": "active",
         "finished": "active",
         "interrupted": "caution",
+        "merged": "active",
         "stopped": "caution"
       }
     },
