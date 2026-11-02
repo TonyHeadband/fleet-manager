@@ -135,6 +135,7 @@ async fn overview_lists_the_personas_tasks_across_products() {
                 ci: fleet_api::CiState::Unknown,
                 failing_checks: vec![],
                 can_merge: false,
+                merge_method: None,
             }];
         })
         .await

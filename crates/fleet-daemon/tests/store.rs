@@ -495,6 +495,7 @@ async fn backfill_deletes_ghosts_and_keeps_real_records() {
         ci: fleet_api::CiState::Unknown,
         failing_checks: vec![],
         can_merge: false,
+        merge_method: None,
     });
     let mut genuine = ghost_of(&lead, "old", "/w/old");
     genuine.state = TaskState::Stopped;

@@ -203,6 +203,10 @@ pub struct TaskPr {
     /// Whether GitHub says the PR can merge now (`mergeable`, and a `mergeable_state` that does not block it).
     #[serde(default)]
     pub can_merge: bool,
+    /// The method a merge would use now (rebase, else squash, else merge commit), read with the checks; None when
+    /// not read or the repo allows none. GitHub may still refuse it.
+    #[serde(default)]
+    pub merge_method: Option<MergeMethod>,
 }
 
 /// How GitHub merges a PR into its base.
@@ -387,6 +391,7 @@ mod tests {
         assert_eq!(pr.ci, CiState::Unknown);
         assert!(pr.failing_checks.is_empty());
         assert!(!pr.can_merge);
+        assert_eq!(pr.merge_method, None);
     }
 
     #[test]
