@@ -24,7 +24,13 @@ describe("Storage widget on Tauri", () => {
       window.location.hash = "#supervisor";
     });
     await expect($('section[data-widget="storage"]')).toBeDisplayed({ wait: 15_000 });
-    await browser.pause(12_000);
+    await browser.waitUntil(
+      async () => {
+        const text = (await $('section[data-widget="storage"]').getText()) ?? "";
+        return text.includes("daemon files") && /archive/i.test(text);
+      },
+      { timeout: 30_000, timeoutMsg: "the Storage widget never showed the daemon files and the clean-up list" },
+    );
     const probe = await browser.execute(() => {
       const box = (el: Element | null) => (el ? { w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height } : null);
       const q = (s: string) => document.querySelector(s);
