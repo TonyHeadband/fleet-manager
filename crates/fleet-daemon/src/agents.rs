@@ -365,6 +365,9 @@ pub enum ServiceError {
     /// Something an archive could not remove (an I/O failure); the text names it.
     #[error("{0}")]
     Removal(String),
+    /// An archive could not copy the agents' chats to keep; nothing was removed. The text names where and why.
+    #[error("cannot keep the chats: {0}")]
+    Keep(String),
     /// Something an archive deliberately would not touch (e.g. a symbolic link); the text says why.
     #[error("{0}")]
     Refused(String),

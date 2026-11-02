@@ -84,13 +84,15 @@ pub struct PlanItem {
     pub bytes: u64,
     /// Changed and untracked files in a worktree: lost on archive, since only commits survive on the branch.
     pub uncommitted_files: u32,
-    /// True when this item's contents are kept, not removed: the task folder's remaining contents, or a repository
-    /// found where a worktree was. Not counted in `ArchivePlan::total`.
+    /// True when this item's contents are kept, not removed: the task folder's remaining contents, a repository
+    /// found where a worktree was, or the chats the archive copies for the task (`<state>/transcripts/<task-id>`),
+    /// whose `bytes` are what is copied. Not counted in `ArchivePlan::total`.
     pub stays: bool,
 }
 
-/// What archiving would do, for the user to confirm: each worktree, the daemon's files, and last the task folder
-/// itself, whose `bytes` are what else it holds. Those stay, and so does the folder unless it ends up empty.
+/// What archiving would do, for the user to confirm: each worktree, the daemon's files, then the task folder
+/// itself, whose `bytes` are what else it holds (it stays unless it ends up empty), and last, for a task, the folder
+/// of chats that are kept. The first item that stays is the task folder.
 /// `total` is what archiving frees: every item whose `stays` is false.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema, TS)]
 #[ts(export)]

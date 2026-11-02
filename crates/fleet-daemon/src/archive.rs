@@ -1,8 +1,10 @@
 //! Archive, the one destructive operation: removes a stopped task's worktrees and the daemon's files for it,
 //! then its folder if nothing else is left, and writes the record one last time. Orphans go the same way and get a
 //! record for it. Branches are never touched; nothing is deleted outside the task's recorded folder and the
-//! daemon's own files, and nothing through a symbolic link.
-use crate::agents::{AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
+//! daemon's own files, and nothing through a symbolic link. Before anything goes, each agent's chat is copied to
+//! `<state_dir>/transcripts/<task-id>/` (see `chat::kept`), which an archive never deletes.
+use crate::agents::{transcript_path, AgentService, ServiceError, CLAUDE_MD_HEADER, PROMPT_FILE};
+use crate::chat::kept;
 use crate::fleet::breakdown::BREAKDOWN_FILE;
 use crate::fleet::env;
 use crate::fleet::ops::{FLEET_DIR, INTERNAL_DIR, ORCHESTRATOR_DIR, SNAPSHOTS_DIR};
@@ -51,6 +53,19 @@ struct Target {
     daemon_files: Vec<PathBuf>,
     /// The task's shared build folders, removed whole like `daemon_dirs`; only for an orchestrated task.
     build_dirs: Vec<PathBuf>,
+    /// The chats copied before anything is removed; none for an orphan, which has no agents.
+    keep: Option<Keep>,
+}
+
+/// The chats of a task's agents, and where they are kept.
+#[derive(Clone, Debug)]
+struct Keep {
+    /// `<state_dir>/transcripts`.
+    root: PathBuf,
+    /// The task's own folder in it.
+    dir: PathBuf,
+    task: String,
+    sources: Vec<kept::Source>,
 }
 
 enum TreeOutcome {
@@ -419,12 +434,14 @@ fn same_plan(confirmed: &[PlanItem], now: &[PlanItem]) -> bool {
 }
 
 /// The plan read off a measurement: each worktree that will go (or the repository that stays in its place), each of
-/// the daemon's paths, then the folder with what stays in it (its other files and the repos the agent made).
+/// the daemon's paths, the folder with what stays in it (its other files and the repos the agent made), then the
+/// folder of kept chats with what is copied into it, which also stays. `kept` is that size, when chats are kept.
 fn plan_of(
     t: &Target,
     fp: &Footprint,
     daemon: &[(String, u64)],
     uncommitted: &HashMap<PathBuf, u32>,
+    kept: Option<u64>,
 ) -> ArchivePlan {
     let item = |path: &str| fp.items.iter().find(|i| i.path == path);
     let mut items = Vec::new();
@@ -469,6 +486,15 @@ fn plan_of(
         items.push(PlanItem {
             path: folder.to_string_lossy().into_owned(),
             bytes: other + kept,
+            uncommitted_files: 0,
+            stays: true,
+        });
+    }
+    // After the task folder: the web dialog takes the first staying item as the root its paths are cut by.
+    if let (Some(keep), Some(bytes)) = (&t.keep, kept) {
+        items.push(PlanItem {
+            path: keep.dir.to_string_lossy().into_owned(),
+            bytes,
             uncommitted_files: 0,
             stays: true,
         });
@@ -583,6 +609,8 @@ impl AgentService {
                 info!(agent_id = %id.0, "archive refused: the plan changed since it was confirmed");
                 return Err(ServiceError::PlanChanged);
             }
+            // Before anything goes: the chats are all that is left of the agents once they do.
+            self.keep_chats(&t).await?;
             let report = self.remove(&t, &id.0).await?.report(&plan);
             (fp, report)
         };
@@ -603,6 +631,72 @@ impl AgentService {
             .await?;
         info!(agent_id = %id.0, freed = report.freed, kept = report.kept.as_deref().unwrap_or(""), "task archived");
         Ok(report)
+    }
+
+    /// Copies the target's chats to the folder of kept chats; nothing else is touched when that fails.
+    async fn keep_chats(&self, t: &Target) -> Result<(), ServiceError> {
+        let Some(keep) = t.keep.clone() else {
+            return Ok(());
+        };
+        let dir = keep.dir.clone();
+        tokio::task::spawn_blocking(move || kept::keep(&keep.root, &keep.task, &keep.sources))
+            .await
+            .map_err(std::io::Error::other)?
+            .map_err(|e| ServiceError::Keep(format!("{}: {e}", dir.display())))
+    }
+
+    /// The chats of the task's `agents` as an archive would keep them, found now: each agent's sessions, the
+    /// transcripts of them that exist, and its PROMPT.md.
+    async fn keep_of(
+        &self,
+        task: &AgentId,
+        agents: &[fleet_api::Agent],
+    ) -> Result<Keep, ServiceError> {
+        let mut found = Vec::new();
+        for a in agents {
+            let sessions = self.store.claude_sessions(&a.id).await?;
+            let env = if a.persona.is_empty() {
+                None
+            } else {
+                self.personas().env(&a.persona).await.ok()
+            };
+            found.push((a.clone(), sessions, env));
+        }
+        let sources = tokio::task::spawn_blocking(move || {
+            found
+                .into_iter()
+                .map(|(a, sessions, env)| {
+                    let prompt = Path::new(&a.workdir).join(PROMPT_FILE);
+                    kept::Source {
+                        agent: a.id.0.clone(),
+                        prompt: std::fs::symlink_metadata(&prompt)
+                            .is_ok_and(|m| m.is_file())
+                            .then_some(prompt),
+                        transcripts: sessions
+                            .iter()
+                            .filter_map(|(id, _)| {
+                                let path = transcript_path(env.as_ref()?, id)?;
+                                Some((id.clone(), path))
+                            })
+                            .collect(),
+                        chat: kept::KeptChat {
+                            kind: a.kind,
+                            sessions,
+                            ended: a.status_since,
+                        },
+                    }
+                })
+                .collect()
+        })
+        .await
+        .map_err(std::io::Error::other)?;
+        let root = self.cfg.state_dir.join(kept::DIR);
+        Ok(Keep {
+            dir: root.join(&task.0),
+            root,
+            task: task.0.clone(),
+            sources,
+        })
     }
 
     /// What archiving an orphan from the last scan would remove. Not for a session, which is ended instead.
@@ -750,6 +844,7 @@ impl AgentService {
             daemon_dirs: agents.iter().map(|a| self.agent_dir(&a.id.0)).collect(),
             daemon_files: vec![],
             build_dirs: vec![],
+            keep: Some(self.keep_of(id, &agents).await?),
         };
         for a in &agents {
             for w in &a.workspaces {
@@ -849,6 +944,7 @@ impl AgentService {
                     daemon_dirs: vec![],
                     daemon_files: vec![],
                     build_dirs: vec![],
+                    keep: None,
                 };
                 // A folder the daemon made says so in its CLAUDE.md; any other's CLAUDE.md and PROMPT.md are the
                 // user's. An orchestrated task's says so in each agent's folder instead.
@@ -885,6 +981,7 @@ impl AgentService {
                 daemon_dirs: vec![path.clone()],
                 daemon_files: vec![],
                 build_dirs: vec![],
+                keep: None,
             },
             OrphanKind::Worktree => {
                 // Only a worktree git still registers is known to be one; a plain folder at its path is not.
@@ -900,6 +997,7 @@ impl AgentService {
                     daemon_dirs: vec![],
                     daemon_files: vec![],
                     build_dirs: vec![],
+                    keep: None,
                 }
             }
         };
@@ -909,10 +1007,12 @@ impl AgentService {
     async fn plan(&self, t: &Target) -> Result<(Footprint, ArchivePlan), ServiceError> {
         let now = self.opts.clock.now();
         let owned = t.clone();
-        let (fp, daemon) =
-            tokio::task::spawn_blocking(move || (measure(&owned, now), daemon_items(&owned)))
-                .await
-                .map_err(std::io::Error::other)?;
+        let (fp, daemon, kept) = tokio::task::spawn_blocking(move || {
+            let kept = owned.keep.as_ref().map(|k| kept::bytes(&k.sources));
+            (measure(&owned, now), daemon_items(&owned), kept)
+        })
+        .await
+        .map_err(std::io::Error::other)?;
         let mut uncommitted = HashMap::new();
         for w in &t.trees {
             if !real_dir(&w.path) || !removable(&w.path, &t.boundary) || is_repository(&w.path) {
@@ -931,7 +1031,7 @@ impl AgentService {
             };
             uncommitted.insert(w.path.clone(), n);
         }
-        let plan = plan_of(t, &fp, &daemon, &uncommitted);
+        let plan = plan_of(t, &fp, &daemon, &uncommitted, kept);
         Ok((fp, plan))
     }
 
