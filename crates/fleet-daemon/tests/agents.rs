@@ -119,6 +119,8 @@ async fn a_solo_agent_starts_with_the_global_defaults() {
 
 /// The argv of `a` after a daemon restart resumed it.
 async fn resumed_argv(fx: &Fx, a: &Agent) -> String {
+    // A resume needs the Claude session's transcript, which the fake writes as it starts: restart only once it is up.
+    wait_screen_in(&fx.sessions, &a.session, |s| s.contains("ready")).await;
     set_status(fx, &a.id, Status::Working).await;
     let (svc, sessions) = restart(fx).await;
     svc.resume_interrupted().await.unwrap();
