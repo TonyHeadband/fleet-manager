@@ -7,6 +7,7 @@ import type { Persona } from "../api/generated/Persona";
 import type { Task } from "../api/generated/Task";
 import { ChatPane, type ChatClient } from "../chat/ChatPane";
 import { ownerSpeaker, supervisorSpeaker } from "../chat/speakers";
+import { Composer } from "../components/Composer";
 import { ReplyBox } from "../components/ReplyBox";
 import { navigate, supervisorHref, useSupervisorConversation, useSupervisorRoom } from "../shell/routes";
 import { ErrorLine } from "../ui/ErrorLine";
@@ -122,7 +123,11 @@ function Page({ baseUrl, client, persona, personas, agents, tasks, loaded, facto
           )}
         </div>
         {error && <ErrorLine text={error} />}
-        {persona !== null && <ReplyBox label="Message" text={text} onText={setText} onSend={send} busy={busy} />}
+        {persona !== null && (
+          <Composer label="Message" initiallyOpen draft={text.trim() !== ""}>
+            <ReplyBox label="Message" text={text} onText={setText} onSend={send} busy={busy} />
+          </Composer>
+        )}
       </section>
       <section className="supervisor-grid outlined" aria-label="Fleet widgets">
         {persona !== null &&

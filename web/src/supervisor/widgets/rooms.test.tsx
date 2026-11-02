@@ -224,6 +224,10 @@ describe("Rooms widget", () => {
   it("the_owner_posts_with_to_and_kind", async () => {
     const client = show();
     await within(await log()).findByText("on it");
+    // A room is mostly read: its post box starts folded to its header.
+    expect(screen.queryByPlaceholderText("Post…")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Post" }));
+    expect(screen.getByPlaceholderText("Post…")).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: "Recipient" }));
     // The room's members, whether or not they have posted (never the owner or the daemon), and All first.
     expect(within(menu()).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Fix login", "supervisor", "Write docs"]);

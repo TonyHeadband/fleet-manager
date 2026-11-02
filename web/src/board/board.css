@@ -94,6 +94,11 @@
 .reply textarea { width: 100%; resize: vertical; background: var(--sunken); }
 .reply-row { display: flex; align-items: center; justify-content: space-between; }
 .reply-hint { font-family: var(--font-mono); font-size: var(--size-small); color: var(--text-low); font-weight: var(--weight-mono); }
+/* Composer.tsx: the reply box under a chat, folding to its header as a chat's call sections do. */
+.composer { flex: none; display: flex; flex-direction: column; min-width: 0; border-top: 1px solid var(--border); }
+.composer-head { display: flex; align-items: center; gap: var(--space-item); width: 100%; padding: var(--layout-list-row-y) var(--layout-list-row-x); border: none; background: transparent; text-align: left; color: var(--text-low); }
+.composer-draft { color: var(--accent-text); }
+.composer-body { display: flex; flex-direction: column; gap: var(--space-item); min-width: 0; }
 /* A task's lead adds the fleet's tally row (Lite's card.rs). */
 .card[data-kind="lead"] .card-in { grid-template-rows: var(--card-row-title) var(--card-row-actions) var(--card-row-state) var(--card-row-tally); }
 .card-left > .card-title { flex: 0 1 auto; min-width: 0; }

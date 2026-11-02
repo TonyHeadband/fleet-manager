@@ -10,6 +10,7 @@ import { AskFrame } from "../../chat/AskFrame";
 import { Entry } from "../../chat/ChatPane";
 import { Feed } from "../../chat/Feed";
 import { grouper, type Speaker } from "../../chat/speakers";
+import { Composer } from "../../components/Composer";
 import { ReplyBox } from "../../components/ReplyBox";
 import { Avatar } from "../../ui/Avatar";
 import { supervisorSeed } from "../../ui/avatarArt";
@@ -224,14 +225,14 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
           {loaded && rows.length === 0 && <p className="chat-empty">Nothing yet: the room starts with its first post.</p>}
           {rows}
       </Feed>
-      <div className="room-post">
+      <Composer label="Post" initiallyOpen={false} draft={text.trim() !== ""}>
         <div className="room-post-pickers">
           <ChoiceMenu label="To" name="Recipient" width="menu" items={recipients} value={to} onPick={setTo} />
           <ChoiceMenu label="Kind" name="Post kind" width="menu" items={KINDS} value={kind} onPick={setKind} />
         </div>
         {postError && <ErrorLine text={postError} />}
         <ReplyBox label="Post" text={text} onText={setText} onSend={send} busy={busy} />
-      </div>
+      </Composer>
     </>
   );
 }
