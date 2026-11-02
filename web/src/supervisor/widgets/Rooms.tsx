@@ -99,7 +99,6 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
 export const ROOMS: WidgetDef = {
   id: "rooms",
   title: "Rooms",
-  source: "rooms",
   minW: 4,
   minH: 3,
   render: (p) => <Rooms {...p} />,

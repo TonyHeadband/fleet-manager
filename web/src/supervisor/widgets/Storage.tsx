@@ -36,7 +36,6 @@ function StorageWidget({ persona, tasks }: WidgetProps) {
 export const STORAGE: WidgetDef = {
   id: "storage",
   title: "Storage",
-  source: "task footprint",
   minW: 3,
   minH: 1,
   render: (p) => <StorageWidget {...p} />,

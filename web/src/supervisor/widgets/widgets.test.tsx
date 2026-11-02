@@ -93,16 +93,17 @@ describe("widgets", () => {
     expect(joined).not.toMatch(/GB/);
   });
 
-  it("widgets_show_their_source", () => {
+  it("widgets_show_their_title_and_no_footer", () => {
     for (const def of [AGENTS_BY_STATUS, STORAGE]) {
       const { container, unmount } = render(def.render({ persona: "me", agents: [], tasks: [], loaded: true, ...live }));
       const widget = container.querySelector("section.widget") as HTMLElement;
       expect(within(widget).getByRole("heading", { name: def.title })).toBeTruthy();
-      expect(widget.querySelector("footer.widget-source")?.textContent).toBe(def.source);
+      // The title alone names a widget: no footer repeats it under the content.
+      expect(widget.querySelector("footer")).toBeNull();
       unmount();
     }
-    expect(AGENTS_BY_STATUS).toMatchObject({ source: "fleet_status · agents", minW: 2, minH: 2 });
-    expect(STORAGE).toMatchObject({ source: "task footprint", minW: 3, minH: 1 });
+    expect(AGENTS_BY_STATUS).toMatchObject({ minW: 2, minH: 2 });
+    expect(STORAGE).toMatchObject({ minW: 3, minH: 1 });
   });
 
   it("widget_motion_is_off_when_motion_is_off", () => {

@@ -20,8 +20,6 @@ export interface WidgetProps {
 export interface WidgetDef {
   id: string;
   title: string;
-  /** Where the numbers come from, shown in the widget's footer. */
-  source: string;
   /** Smallest size in grid cells. */
   minW: number;
   minH: number;

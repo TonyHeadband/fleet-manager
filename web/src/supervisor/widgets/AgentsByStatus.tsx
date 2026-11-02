@@ -35,7 +35,6 @@ function AgentsByStatus({ persona, agents, loaded }: WidgetProps) {
 export const AGENTS_BY_STATUS: WidgetDef = {
   id: "agents_by_status",
   title: "Agents by status",
-  source: "fleet_status · agents",
   minW: 2,
   minH: 2,
   render: (p) => <AgentsByStatus {...p} />,

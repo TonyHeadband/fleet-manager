@@ -93,7 +93,7 @@ describe("Rooms widget", () => {
     const first = await roomButton(/Login fix/);
     expect(first).toHaveTextContent("Operation");
     await waitFor(() => expect(within(first).queryByText(/unread/)).toBeNull());
-    expect(ROOMS).toMatchObject({ id: "rooms", source: "rooms", minW: 4, minH: 3 });
+    expect(ROOMS).toMatchObject({ id: "rooms", minW: 4, minH: 3 });
   });
 
   it("clicking_a_room_opens_its_group_chat", async () => {
