@@ -100,7 +100,8 @@ impl PrChecks {
 
 /// The CI state and the failing check names. The counted checks are the required ones, or every check when the
 /// branch requires none. Red if a counted check failed; else pending while one is running or a required one has not
-/// reported; else green (so a PR without any check is green).
+/// reported; else green. A PR with no required checks and no check or status reported at all is pending, never
+/// green: only a PR that passed something is mergeable.
 pub fn derive_ci(checks: &[Check], required: &[String]) -> (CiState, Vec<String>) {
     let counted = |c: &&Check| required.is_empty() || required.contains(&c.name);
     let mut failing: Vec<String> = Vec::new();
@@ -123,7 +124,7 @@ pub fn derive_ci(checks: &[Check], required: &[String]) -> (CiState, Vec<String>
     let missing = required
         .iter()
         .any(|r| !checks.iter().any(|c| c.name == *r));
-    if running || missing {
+    if running || missing || (required.is_empty() && checks.is_empty()) {
         (CiState::Pending, failing)
     } else {
         (CiState::Green, failing)
@@ -139,17 +140,21 @@ pub struct MergeMethods {
 }
 
 impl MergeMethods {
+    /// The allowed methods in the order to try them: rebase, squash, merge commit.
+    pub fn candidates(&self) -> Vec<MergeMethod> {
+        [
+            (self.rebase, MergeMethod::Rebase),
+            (self.squash, MergeMethod::Squash),
+            (self.merge, MergeMethod::Merge),
+        ]
+        .into_iter()
+        .filter_map(|(allowed, m)| allowed.then_some(m))
+        .collect()
+    }
+
     /// Rebase, else squash, else a merge commit; None when the repo allows none.
     pub fn pick(&self) -> Option<MergeMethod> {
-        if self.rebase {
-            Some(MergeMethod::Rebase)
-        } else if self.squash {
-            Some(MergeMethod::Squash)
-        } else if self.merge {
-            Some(MergeMethod::Merge)
-        } else {
-            None
-        }
+        self.candidates().first().copied()
     }
 }
 
@@ -366,8 +371,8 @@ mod tests {
     }
 
     #[test]
-    fn a_pr_with_no_checks_and_no_required_ones_is_green() {
-        assert_eq!(derive_ci(&[], &[]), (CiState::Green, vec![]));
+    fn a_pr_with_no_checks_and_no_required_ones_is_pending() {
+        assert_eq!(derive_ci(&[], &[]), (CiState::Pending, vec![]));
     }
 
     #[test]
@@ -381,6 +386,19 @@ mod tests {
         assert_eq!(allow(false, true, true).pick(), Some(MergeMethod::Squash));
         assert_eq!(allow(false, false, true).pick(), Some(MergeMethod::Merge));
         assert_eq!(allow(false, false, false).pick(), None);
+    }
+
+    #[test]
+    fn the_candidates_are_the_allowed_methods_in_order() {
+        let all = MergeMethods {
+            rebase: true,
+            squash: true,
+            merge: true,
+        };
+        assert_eq!(
+            all.candidates(),
+            vec![MergeMethod::Rebase, MergeMethod::Squash, MergeMethod::Merge]
+        );
     }
 
     #[test]

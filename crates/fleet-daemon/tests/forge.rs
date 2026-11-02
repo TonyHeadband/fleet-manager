@@ -459,3 +459,37 @@ fn merge_pr_puts_the_method_and_reports_a_refusal() {
         .unwrap_err();
     assert!(matches!(err, ForgeError::Refused { status: 405, .. }));
 }
+
+#[test]
+fn a_token_that_may_not_read_the_protection_counts_every_check() {
+    let fake = FakeForge::start();
+    checks_fixture(&fake);
+    fake.fail_next_on(
+        "GET",
+        "/required_status_checks",
+        403,
+        "Resource not accessible",
+    );
+    let got = client(&fake, Duration::from_secs(5))
+        .pr_checks(&repo(), 7)
+        .unwrap();
+    assert!(got.required.is_empty());
+    assert_eq!(got.ci().0, CiState::Red);
+}
+
+#[test]
+fn merge_methods_without_the_allow_flags_rules_none_out() {
+    let fake = FakeForge::start();
+    fake.set_repo_settings("acme", "core", json!({"name": "core"}));
+    let got = client(&fake, Duration::from_secs(5))
+        .merge_methods(&repo())
+        .unwrap();
+    assert_eq!(
+        got.candidates(),
+        vec![
+            fleet_api::MergeMethod::Rebase,
+            fleet_api::MergeMethod::Squash,
+            fleet_api::MergeMethod::Merge
+        ]
+    );
+}

@@ -188,7 +188,8 @@ impl GitHub {
         Ok(all)
     }
 
-    /// The contexts the branch requires; none when it is not protected (GitHub answers 404).
+    /// The contexts the branch requires; none when it is not protected (GitHub answers 404), or when the token may
+    /// not read the protection (403): then every check counts, the stricter reading.
     fn required_checks(&self, repo: &RepoRef, branch: &str) -> Result<Vec<String>, ForgeError> {
         let path = format!(
             "/repos/{}/{}/branches/{}/protection/required_status_checks",
@@ -198,7 +199,9 @@ impl GitHub {
         );
         let reply = match self.send("GET", &path, None) {
             Ok(r) => r,
-            Err(ForgeError::Refused { status: 404, .. }) => return Ok(vec![]),
+            Err(ForgeError::Refused {
+                status: 403 | 404, ..
+            }) => return Ok(vec![]),
             Err(e) => return Err(e),
         };
         let mut names: Vec<String> = Vec::new();
@@ -289,9 +292,9 @@ impl Forge for GitHub {
 
     fn merge_methods(&self, repo: &RepoRef) -> Result<MergeMethods, ForgeError> {
         let reply = self.send("GET", &format!("/repos/{}/{}", repo.owner, repo.name), None)?;
-        // GitHub omits the flags from a reply it does not show the token's settings in; a method not said to be
-        // allowed is not used.
-        let allowed = |key: &str| reply[key].as_bool().unwrap_or(false);
+        // GitHub omits the flags from a reply for a token that is not an admin of the repo: then no method is ruled
+        // out, and the merge tries each until GitHub accepts one.
+        let allowed = |key: &str| reply[key].as_bool().unwrap_or(true);
         Ok(MergeMethods {
             rebase: allowed("allow_rebase_merge"),
             squash: allowed("allow_squash_merge"),
