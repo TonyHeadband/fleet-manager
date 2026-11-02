@@ -1,7 +1,8 @@
 /* The Rooms widget: the rooms list beside the open room's group chat (ListDetail), the chat drawn with the agent
    chat's items. The widget wipes in once from the left; picking a room never replays it. */
-.rooms { flex: 1; min-height: 0; display: flex; }
-.rooms .list-detail { flex: 1; min-height: 0; }
+/* Neither grows past the tile for a line that does not wrap (an answered ask's one line): it is cut to the width. */
+.rooms { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.rooms .list-detail { flex: 1; min-width: 0; min-height: 0; }
 .rooms .list-detail-list { padding: 0 var(--space-item) 0 0; }
 .rooms .list-detail-detail { display: flex; flex-direction: column; gap: var(--space-item); padding: 0 0 0 var(--space-item); overflow: hidden; }
 .rooms-kind { flex: none; margin-left: auto; color: var(--accent-text); }

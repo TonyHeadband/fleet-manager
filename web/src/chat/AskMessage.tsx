@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { FleetError } from "../api/client";
 import type { AskAnswer } from "../api/generated/AskAnswer";
+import type { AskKind } from "../api/generated/AskKind";
 import type { AskQuestion } from "../api/generated/AskQuestion";
 import type { ChatAsk } from "../api/generated/ChatAsk";
 import { screenText } from "../ui/screenText";
@@ -22,6 +23,13 @@ const CAPTION = { permission: "Wants to run", question: "Asks", screen: "Waiting
 function inputText(input: unknown): string {
   if (input && typeof input === "object" && "command" in input && typeof input.command === "string") return input.command;
   return JSON.stringify(input, null, 2);
+}
+
+/** What was asked, for an answered ask's one line. */
+function summaryOf(kind: AskKind): string {
+  if (kind.type === "permission") return `${kind.tool} ${inputText(kind.input)}`;
+  if (kind.type === "question") return kind.questions.map((q) => q.question).join(" · ");
+  return "";
 }
 
 /**
@@ -67,7 +75,7 @@ export function AskMessage({ agentId, ask, client, onAnswered }: Props) {
   }
 
   return (
-    <AskFrame caption={CAPTION[kind.type]} answered={ask.answered} error={error}>
+    <AskFrame caption={CAPTION[kind.type]} summary={summaryOf(kind)} answered={ask.answered} error={error}>
       {kind.type === "permission" && (
         <div className="chat-ask-call">
           <span className="chat-call-tool">{kind.tool}</span>

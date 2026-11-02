@@ -33,6 +33,8 @@ interface Props {
   onPost?: (p: Post) => void;
   /** The room was read: the daemon moved the owner's mark to its last post. */
   onRead?: () => void;
+  /** System lines (Fleet Manager's own posts, as "landed: …", and announcements) are shown; off, only the talk is. */
+  announcements?: boolean;
 }
 
 type OwnerKind = "message" | "announcement";
@@ -64,7 +66,7 @@ export function RoomChat(props: Props) {
   return <Chat key={props.room.id} {...props} />;
 }
 
-function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSource, onPost, onRead }: Props) {
+function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSource, onPost, onRead, announcements = true }: Props) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -170,6 +172,7 @@ function Chat({ baseUrl, room, client, persona, agents, factory = browserEventSo
   const rows: ReactNode[] = posts.flatMap((p) => {
     // An answer is drawn under its ask; one whose ask is not loaded stands on its own.
     if (p.kind === "answer" && p.reply_to != null && asked.has(p.reply_to)) return [];
+    if (!announcements && (p.sender === "daemon" || p.kind === "announcement")) return [];
     if (p.sender === "daemon") return [item(p, { type: "prompt", text: p.text, from: "system" })];
     if (p.kind === "announcement") return [item(p, { type: "prompt", text: `${p.sender_name} · ${p.text}`, from: "system" })];
     if (p.sender === "owner") return [item(p, { type: "prompt", text: p.text, from: "owner" })];
@@ -281,7 +284,7 @@ function RoomAsk({ ask, speaker, answer, answerable, client, onAnswered, onStale
 
   const open = answer === null && ask.answered_at == null;
   return (
-    <AskFrame caption={breakdown === null ? "Asks" : `Asks · breakdown v${breakdown}`} answered={answer ?? (open ? null : "")} error={error}>
+    <AskFrame caption={breakdown === null ? "Asks" : `Asks · breakdown v${breakdown}`} summary={ask.text} answered={answer ?? (open ? null : "")} error={error}>
       <Entry item={{ seq: ask.id, at: ask.at, body: { type: "reply", text: ask.text } }} speaker={speaker} />
       {open && answerable && (
         <form className="chat-ask-free" onSubmit={submit}>

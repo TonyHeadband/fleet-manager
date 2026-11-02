@@ -197,7 +197,8 @@ describe("ChatPane", () => {
     await userEvent.click(within(ask).getByRole("button", { name: "Allow once" }));
     expect(client.answerAsk).toHaveBeenCalledWith("a1", "k1", { choice: "allow", text: null });
     expect(ask).toHaveTextContent("Answered · Allow once");
-    expect(within(ask).queryAllByRole("button")).toHaveLength(0);
+    // Answered, it folds to one line: its options are gone, the line opens it again.
+    expect(within(ask).getAllByRole("button").map((b) => b.getAttribute("aria-expanded"))).toEqual(["false"]);
     // The daemon clears the ask: the answered message stays where it was.
     asks(null);
     expect(screen.getByRole("group", { name: "Wants to run" })).toHaveTextContent("Answered · Allow once");
@@ -210,7 +211,7 @@ describe("ChatPane", () => {
     const ask = screen.getByRole("group", { name: "Wants to run" });
     await userEvent.click(within(ask).getByRole("button", { name: "Deny" }));
     expect(ask).toHaveTextContent("Answered");
-    expect(within(ask).queryAllByRole("button")).toHaveLength(0);
+    expect(within(ask).getAllByRole("button").map((b) => b.getAttribute("aria-expanded"))).toEqual(["false"]);
   });
 
   it("a_question_ask_answers_with_its_options", async () => {

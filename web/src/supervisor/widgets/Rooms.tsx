@@ -3,6 +3,7 @@ import type { Post } from "../../api/generated/Post";
 import type { Room } from "../../api/generated/Room";
 import type { RoomKind } from "../../api/generated/RoomKind";
 import { replaceSupervisorRoom, useSupervisorRoom } from "../../shell/routes";
+import { Check } from "../../ui/Check";
 import { ErrorLine } from "../../ui/ErrorLine";
 import { ListDetail } from "../../ui/ListDetail";
 import { ListRow } from "../../ui/ListRow";
@@ -18,6 +19,7 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
   const [rooms, setRooms] = useState<Room[] | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [announcements, setAnnouncements] = useState(true);
   // A room the address names (a task notice's toast) is opened, and again each time the address names another.
   const named = useSupervisorRoom();
   useEffect(() => {
@@ -76,6 +78,11 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
           listLabel="Rooms"
           detailLabel={current?.title ?? "Room"}
           list={rooms !== null && list.length === 0 ? <p className="rooms-empty">No rooms yet.</p> : rows}
+          footer={
+            <Check checked={announcements} onChange={setAnnouncements} title="Fleet Manager's own posts (landed, migrations) and announcements">
+              Announcements
+            </Check>
+          }
           detail={
             current && (
               <RoomChat
@@ -87,6 +94,7 @@ function Rooms({ persona, agents, tasks, baseUrl, client, factory }: WidgetProps
                 factory={factory}
                 onPost={heard}
                 onRead={() => markRead(current.id)}
+                announcements={announcements}
               />
             )
           }

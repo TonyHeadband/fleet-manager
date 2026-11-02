@@ -283,7 +283,8 @@ describe("Rooms widget", () => {
       show(clientWith({ r1: [ask, answer] }));
       const feed = await log();
       const group = (await within(feed).findByText("Which findings?")).closest<HTMLElement>(".chat-ask")!;
-      // The answer is its own folded markdown block under a short "Answered" caption, not one long caption line.
+      // Answered, the ask is one line; opened, the answer is its own folded markdown block under a short caption.
+      await userEvent.click(within(group).getByRole("button", { expanded: false }));
       expect(within(group).getByText("Answered")).toBeInTheDocument();
       expect(within(group).getByText("first finding")).toBeInTheDocument();
       await userEvent.click(within(group).getByRole("button", { name: "Read more" }));
@@ -297,10 +298,49 @@ describe("Rooms widget", () => {
       const answer = post({ sender: "owner", sender_name: "owner", kind: "answer", reply_to: ask.id, text: "TALL comment with no line breaks at all" });
       show(clientWith({ r1: [ask, answer] }));
       const group = (await within(await log()).findByText("Breakdown v6?")).closest<HTMLElement>(".chat-ask")!;
-      expect(within(group).getByText(/Answered · TALL comment/)).toBeInTheDocument();
+      // Folded, the whole ask and its answer are one line; opened, the answer folds past eight lines.
+      expect(within(group).getByText(/Answered · TALL comment/)).toHaveClass("chat-ask-said");
+      await userEvent.click(within(group).getByRole("button", { expanded: false }));
+      expect(within(group).getByText(/Answered · TALL comment/)).toHaveClass("chat-ask-answered");
       expect(within(group).getByRole("button", { name: "Read more" })).toBeInTheDocument();
       vi.restoreAllMocks();
     });
+  });
+
+  it("an_answered_ask_folds_to_one_line_and_opens_again", async () => {
+    const ask = post({ sender: { agent: "t1" }, sender_name: "Fix login", kind: "ask", to: "owner", text: "Which port\nfor the dev server?" });
+    const answer = post({ sender: "owner", sender_name: "owner", kind: "answer", reply_to: ask.id, text: "8080" });
+    show(clientWith({ r1: [ask, answer] }));
+    const group = (await within(await log()).findByText(/Which port/)).closest<HTMLElement>(".chat-ask")!;
+    const line = within(group).getByRole("button", { expanded: false });
+    expect(line).toHaveTextContent("Asks");
+    // The ask on one line, then its answer.
+    expect(within(line).getByText("Which port for the dev server?")).toHaveClass("chat-ask-summary");
+    expect(within(line).getByText("Answered · 8080")).toBeInTheDocument();
+    expect(group.querySelector(".chat-speaker")).toBeNull();
+    await userEvent.click(line);
+    expect(line).toHaveAttribute("aria-expanded", "true");
+    expect(group.querySelector(".chat-speaker")).toHaveTextContent("Fix login");
+    await userEvent.click(line);
+    expect(group.querySelector(".chat-speaker")).toBeNull();
+  });
+
+  it("the_announcements_box_hides_system_lines_in_the_room", async () => {
+    const landed = post({ sender: "daemon", sender_name: "Fleet Manager", kind: "message", text: "landed: Chat polish · https://example.com/pull/1" });
+    const notice = post({ kind: "announcement", text: "freeze main" });
+    const said = post({ sender: { agent: "t1" }, sender_name: "Fix login", text: "on it" });
+    show(clientWith({ r1: [landed, notice, said] }));
+    const feed = await log();
+    await within(feed).findByText("on it");
+    expect(within(feed).getByText(/landed: Chat polish/)).toBeInTheDocument();
+    const box = screen.getByRole("checkbox", { name: "Announcements" });
+    expect(box).toBeChecked();
+    await userEvent.click(box);
+    expect(within(feed).queryByText(/landed: Chat polish/)).toBeNull();
+    expect(within(feed).queryByText(/freeze main/)).toBeNull();
+    expect(within(feed).getByText("on it")).toBeInTheDocument();
+    await userEvent.click(box);
+    expect(within(feed).getByText(/landed: Chat polish/)).toBeInTheDocument();
   });
 
   it("an_owner_ask_answers_inline", async () => {

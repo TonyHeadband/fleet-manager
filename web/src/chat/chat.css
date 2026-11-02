@@ -84,6 +84,12 @@
 .chat-ask[data-answered] { border-color: var(--text); }
 .chat-ask[data-answered] .chat-ask-caption { color: var(--text); }
 .chat-ask-caption { font-family: var(--font-mono); font-size: var(--size-meta); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--accent-text); font-weight: var(--weight-mono); }
+/* An answered ask folds to one line: its caption, the ask, then its answer, both cut to the width. */
+.chat-ask[data-compact] { padding-block: var(--layout-list-row-y); }
+.chat-ask-line { display: flex; align-items: center; gap: var(--space-item); width: 100%; min-width: 0; padding: 0; border: none; background: transparent; font-size: var(--size-code); letter-spacing: normal; text-transform: none; text-align: left; color: var(--text); }
+.chat-ask-line > .chat-ask-caption { flex: none; }
+.chat-ask-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-ask-line > .chat-ask-said { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-ask-call { display: flex; align-items: baseline; gap: var(--space-item); }
 .chat-ask-call pre,
 .chat-ask-screen { flex: 1; min-width: 0; margin: 0; max-height: var(--panel-output-max); overflow: auto; font-family: var(--font-mono); font-size: var(--size-code); color: var(--text-high); white-space: pre-wrap; font-weight: var(--weight-mono); }
