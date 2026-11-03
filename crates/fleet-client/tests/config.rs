@@ -1096,3 +1096,21 @@ fn mono_weight_round_trips() {
     let on_disk = std::fs::read_to_string(&p).unwrap();
     assert!(on_disk.contains("mono_weight = \"semibold\""), "{on_disk}");
 }
+
+/// A path under home is written `~/a/b` on every OS, the form the config file and the web UI read, never
+/// `~/a\b`; and it comes back as the OS's own path.
+#[test]
+fn home_paths_use_slashes_and_come_back_native() {
+    let home = Path::new("/h");
+    let deep = home.join("AppData").join("Local").join("fleet-manager");
+    assert_eq!(
+        fleet_client::config::shorten_home(&deep, home),
+        "~/AppData/Local/fleet-manager"
+    );
+    assert_eq!(fleet_client::config::shorten_home(home, home), "~");
+    assert_eq!(
+        fleet_client::config::expand_home("~/AppData/Local/fleet-manager", home),
+        deep
+    );
+    assert_eq!(fleet_client::config::expand_home("~", home), home);
+}
