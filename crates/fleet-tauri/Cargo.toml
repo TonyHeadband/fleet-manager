@@ -9,6 +9,11 @@ version.workspace = true
 name = "fleet-gui-tauri"
 path = "src/main.rs"
 
+[features]
+default = []
+# CI's smoke test only (e2e.rs): passes WebDriver's WebView2 flags in code. Never in a release build.
+e2e = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -30,4 +35,5 @@ tracing = "0.1"
 glib = "0.18"
 
 [dev-dependencies]
+toml = "1.1.8"
 tempfile = "3"
