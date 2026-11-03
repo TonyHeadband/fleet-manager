@@ -1,5 +1,6 @@
 // The Tauri app's smoke test (e2e/), run by scripts/tauri-smoke.sh in CI: tauri-driver starts the app through
-// WebKitWebDriver, which this config talks to. The script sets FLEET_TAURI_APP and the throwaway HOME.
+// WebKitWebDriver on Linux and msedgedriver on Windows (FLEET_NATIVE_DRIVER), which this config talks to. The script
+// sets FLEET_TAURI_APP and the throwaway home.
 import { spawn, type ChildProcess } from "node:child_process";
 
 let driver: ChildProcess | undefined;
@@ -17,7 +18,11 @@ export const config: WebdriverIO.Config = {
   framework: "mocha",
   mochaOpts: { ui: "bdd", timeout: 60_000 },
   beforeSession: () => {
-    driver = spawn("tauri-driver", [], { stdio: [null, process.stdout, process.stderr] });
+    // Windows names msedgedriver (WebView2's), matched to the installed WebView2; Linux finds WebKitWebDriver itself.
+    const native = process.env.FLEET_NATIVE_DRIVER;
+    driver = spawn("tauri-driver", native ? ["--native-driver", native] : [], {
+      stdio: [null, process.stdout, process.stderr],
+    });
   },
   afterSession: () => {
     driver?.kill();
