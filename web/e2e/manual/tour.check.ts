@@ -26,6 +26,9 @@ describe("Tour", () => {
   it("visits every view", async () => {
     await expect($("h1=Filters")).toBeDisplayed({ wait: 30_000 });
     await browser.setWindowSize(1600, 900).catch(() => undefined);
+    // The same theme on both OSes (System would follow each desktop's own): FLEET_THEME, dark by default.
+    const theme = process.env.FLEET_THEME ?? "dark";
+    await $(`aria/${theme[0]!.toUpperCase()}${theme.slice(1)} theme`).click();
     await shot("kanban");
 
     // A task's panel and each of its tabs.
