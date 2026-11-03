@@ -156,7 +156,7 @@ pub fn expand(env: &BTreeMap<String, String>, task_dir: &Path) -> BTreeMap<Strin
     env.iter()
         .map(|(k, v)| {
             let value = match v.strip_prefix(TASK_PREFIX) {
-                Some(rest) => task_dir.join(rest).to_string_lossy().into_owned(),
+                Some(rest) => under_task(task_dir, rest).to_string_lossy().into_owned(),
                 None => v.clone(),
             };
             (k.clone(), value)
@@ -168,8 +168,15 @@ pub fn expand(env: &BTreeMap<String, String>, task_dir: &Path) -> BTreeMap<Strin
 pub fn task_paths(env: &BTreeMap<String, String>, task_dir: &Path) -> Vec<PathBuf> {
     env.values()
         .filter_map(|v| v.strip_prefix(TASK_PREFIX))
-        .map(|rest| task_dir.join(rest))
+        .map(|rest| under_task(task_dir, rest))
         .collect()
+}
+
+/// `rest` (checked: `/`-separated, no empty, `.` or `..` part) under the task folder, one part at a time, so the
+/// path has the OS's separator throughout: `out/b` is `…\out\b` on Windows, not `…\out/b`.
+fn under_task(task_dir: &Path, rest: &str) -> PathBuf {
+    rest.split('/')
+        .fold(task_dir.to_path_buf(), |p, part| p.join(part))
 }
 
 /// The folders an orchestrated task's builds write into: each `{task}/…` path of its repo env and the gate's own,
@@ -259,11 +266,17 @@ mod tests {
         let env = BTreeMap::from([
             ("A".into(), "{task}/target".into()),
             ("B".into(), "-Dwarnings".into()),
+            ("C".into(), "{task}/out/b".into()),
         ]);
         let dir = Path::new("/t/x");
-        assert_eq!(expand(&env, dir)["A"], "/t/x/target");
+        let native = |p: PathBuf| p.to_string_lossy().into_owned();
+        assert_eq!(expand(&env, dir)["A"], native(dir.join("target")));
         assert_eq!(expand(&env, dir)["B"], "-Dwarnings");
-        assert_eq!(task_paths(&env, dir), [PathBuf::from("/t/x/target")]);
+        assert_eq!(expand(&env, dir)["C"], native(dir.join("out").join("b")));
+        assert_eq!(
+            task_paths(&env, dir),
+            [dir.join("target"), dir.join("out").join("b")]
+        );
     }
 
     #[test]
