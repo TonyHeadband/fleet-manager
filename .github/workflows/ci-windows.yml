@@ -27,7 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # Saved even when the run fails, so a red branch doesn't compile from scratch every time; the debug test build
+      # and the release tauri build keep separate caches.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          cache-on-failure: true
       # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
       # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
       - name: Use the runner's own temp folder
@@ -68,7 +73,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Saved even when the run fails, so a red branch doesn't compile from scratch every time; the debug test build
+      # and the release tauri build keep separate caches.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tauri
+          cache-on-failure: true
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -81,7 +91,14 @@ jobs:
       - run: pnpm --dir web build
       # The app, the daemon it reaches, and the smoke test's stand-ins for claude, gh and GitHub's API.
       - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins
-      - run: cargo install tauri-driver --locked
+      # tauri-driver is built once per version and kept, not compiled on every run.
+      - id: tauri-driver
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/tauri-driver*
+          key: tauri-driver-2.1.0-${{ runner.os }}
+      - if: steps.tauri-driver.outputs.cache-hit != 'true'
+        run: cargo install tauri-driver --version 2.1.0 --locked
       - name: TEMPORARY WebView2 debug
         shell: bash
         continue-on-error: true

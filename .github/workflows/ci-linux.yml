@@ -26,7 +26,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # Saved even when the run fails, so a red branch doesn't compile from scratch every time; the debug test build
+      # and the release tauri build keep separate caches.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          cache-on-failure: true
       # Formatting is the same on every OS: checked here only.
       - run: cargo fmt --all --check
       # The Tauri app links the system's WebKitGTK on Linux.
@@ -63,7 +68,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Saved even when the run fails, so a red branch doesn't compile from scratch every time; the debug test build
+      # and the release tauri build keep separate caches.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tauri
+          cache-on-failure: true
       - name: Tauri's Linux libraries, its WebDriver and Xvfb
         run: |
           sudo apt-get update
@@ -104,6 +114,13 @@ jobs:
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm
           retention-days: 7
-      - run: cargo install tauri-driver --locked
+      # tauri-driver is built once per version and kept, not compiled on every run.
+      - id: tauri-driver
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/tauri-driver*
+          key: tauri-driver-2.1.0-${{ runner.os }}
+      - if: steps.tauri-driver.outputs.cache-hit != 'true'
+        run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Smoke test
         run: scripts/tauri-smoke.sh
