@@ -87,6 +87,20 @@ git init -q "$W/bakery"
 echo "Recipes for the bakery." > "$W/bakery/README.txt"
 git -C "$W/bakery" add README.txt
 git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Start the bakery"
+if [ "${FLEET_WORLD:-}" = full ]; then
+  # A direct task needs the repo's workflow on its origin's default branch.
+  mkdir -p "$W/bakery/.fleet"
+  printf 'steps:
+  test:
+    run: "true"
+' > "$W/bakery/.fleet/workflow.yml"
+  git -C "$W/bakery" add .fleet/workflow.yml
+  git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Bake in one step"
+  git clone -q --bare "$W/bakery" "$W/bakery-origin.git"
+  git -C "$W/bakery" remote add origin "$(native "$W/bakery-origin.git")"
+  git -C "$W/bakery" fetch -q origin
+  git -C "$W/bakery" branch -q -u origin/"$(git -C "$W/bakery" branch --show-current)"
+fi
 
 # The persona's login check asks GitHub who the token is: the stand-in answers baker.
 "$bin/fleet-demo-forge$exe" --addr-file "$(native "$W/forge.addr")" > "$W/forge.out" 2>&1 &

@@ -147,8 +147,9 @@ fn run() -> Result<(), String> {
                     slug: None,
                     title: None,
                     persona: persona_id.clone(),
-                    kind: AgentKind::Solo,
-                    role: None,
+                    // Solo tasks are retired: a direct task, which needs the repo's origin and workflow.
+                    kind: AgentKind::Orchestrator,
+                    role: Some("direct".into()),
                 };
                 match client.spawn(&req) {
                     Ok(r) => {
