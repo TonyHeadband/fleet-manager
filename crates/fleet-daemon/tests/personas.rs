@@ -241,9 +241,15 @@ fn env_has_no_token_and_clears_helpers() {
         get("GIT_CONFIG_KEY_1"),
         Some("credential.https://github.com.helper")
     );
+    // The token path has the OS's separators, which need quoting for sh on Windows.
+    let token = if cfg!(windows) {
+        r"'/p\home\forge\token'"
+    } else {
+        "/p/home/forge/token"
+    };
     assert_eq!(
         get("GIT_CONFIG_VALUE_1"),
-        Some("!/bin/fleet-daemon git-credential /p/home/forge/token")
+        Some(format!("!/bin/fleet-daemon git-credential {token}").as_str())
     );
     assert!(!get("GIT_CONFIG_VALUE_1")
         .unwrap()
@@ -254,9 +260,14 @@ fn env_has_no_token_and_clears_helpers() {
         Path::new("/p q"),
         Path::new("/opt/my tools/it's/daemon"),
     );
+    let spaced_token = if cfg!(windows) {
+        r"'/p q\home\forge\token'"
+    } else {
+        "'/p q/home/forge/token'"
+    };
     assert!(spaced.vars.contains(&(
         "GIT_CONFIG_VALUE_1".into(),
-        r"!'/opt/my tools/it'\''s/daemon' git-credential '/p q/home/forge/token'".into()
+        format!(r"!'/opt/my tools/it'\''s/daemon' git-credential {spaced_token}")
     )));
     let under = |leaf: &str| Path::new("/p").join("home").join(leaf);
     assert_eq!(
@@ -281,7 +292,31 @@ fn env_has_no_token_and_clears_helpers() {
 #[test]
 fn git_asks_the_helper_for_the_personas_host() {
     let tmp = tempfile::tempdir().unwrap();
-    let personas = tmp.path().join("my personas");
+    let fill = git_fill(
+        tmp.path(),
+        &tmp.path().join("my personas"),
+        Path::new(env!("CARGO_BIN_EXE_fleet-daemon")),
+    );
+    assert!(fill("github.com").contains("password=ghp_secret\n"));
+    assert!(!fill("example.com").contains("password="));
+}
+
+/// A Windows user folder can have a space and an apostrophe; git's sh must still find the daemon and the token.
+#[test]
+fn the_helper_works_from_a_folder_with_a_space_and_an_apostrophe() {
+    let tmp = tempfile::tempdir().unwrap();
+    let user = tmp.path().join("Jean O'Brien");
+    std::fs::create_dir_all(&user).unwrap();
+    let daemon = Path::new(env!("CARGO_BIN_EXE_fleet-daemon"));
+    let moved = user.join(daemon.file_name().unwrap());
+    std::fs::copy(daemon, &moved).unwrap();
+    let fill = git_fill(tmp.path(), &user.join("personas"), &moved);
+    assert!(fill("github.com").contains("password=ghp_secret\n"));
+}
+
+/// A ready persona `home` with token `ghp_secret` under `personas`, and a `git credential fill` for a host with its
+/// env, the helper being `daemon`. Returns git's answer.
+fn git_fill<'a>(home: &'a Path, personas: &Path, daemon: &Path) -> impl Fn(&str) -> String + 'a {
     let row = PersonaRow {
         id: "home".into(),
         name: "Home".into(),
@@ -292,19 +327,15 @@ fn git_asks_the_helper_for_the_personas_host() {
         ready: true,
         created_at: 0,
     };
-    let token = fleet_daemon::forge::token::token_path(&personas, "home");
+    let token = fleet_daemon::forge::token::token_path(personas, "home");
     std::fs::create_dir_all(token.parent().unwrap()).unwrap();
     std::fs::write(&token, "ghp_secret\n").unwrap();
-    let env = persona_env(
-        &row,
-        &personas,
-        Path::new(env!("CARGO_BIN_EXE_fleet-daemon")),
-    );
-    let fill = |host: &str| {
+    let env = persona_env(&row, personas, daemon);
+    move |host: &str| {
         use std::io::Write;
         let mut cmd = std::process::Command::new("git");
         cmd.args(["credential", "fill"])
-            .env("HOME", tmp.path())
+            .env("HOME", home)
             .envs(env.vars.iter().map(|(k, v)| (k, v)))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -317,9 +348,7 @@ fn git_asks_the_helper_for_the_personas_host() {
             .write_all(format!("protocol=https\nhost={host}\n\n").as_bytes())
             .unwrap();
         String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
-    };
-    assert!(fill("github.com").contains("password=ghp_secret\n"));
-    assert!(!fill("example.com").contains("password="));
+    }
 }
 
 #[test]

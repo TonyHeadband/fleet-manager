@@ -1021,10 +1021,16 @@ fn migrate_waits_for_a_persona() {
     assert!(!personas.exists());
 }
 
+/// The files under `dir`, relative and `/`-joined on every OS, sorted.
 fn files_in(dir: &Path) -> Vec<String> {
     let mut out: Vec<String> = files_under(dir)
         .iter()
-        .map(|p| p.strip_prefix(dir).unwrap().to_string_lossy().into_owned())
+        .map(|p| {
+            let rel = p.strip_prefix(dir).unwrap().components();
+            rel.map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
         .collect();
     out.sort();
     out
