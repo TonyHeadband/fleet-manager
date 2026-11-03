@@ -51,6 +51,24 @@ fn fixture_on(tag: &str, port: u16) -> Fx {
     }
 }
 
+/// Stops the fixture's daemon; a failure shows the daemon's own log, so a slow stop says where the time went.
+fn stop(fx: &Fx) {
+    if let Err(e) = stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()) {
+        let log = std::fs::read_to_string(fx.cfg.log_file()).unwrap_or_default();
+        let tail: Vec<&str> = log.lines().rev().take(40).collect();
+        let tail: Vec<&str> = tail.into_iter().rev().collect();
+        panic!(
+            "{e:?}
+== daemon log
+{}",
+            tail.join(
+                "
+"
+            )
+        );
+    }
+}
+
 fn wait_until(mut f: impl FnMut() -> bool) -> bool {
     let end = Instant::now() + Duration::from_secs(10);
     while Instant::now() < end {
@@ -117,7 +135,7 @@ fn ensure_daemon_starts_the_real_binary_and_a_second_call_reports_already_runnin
         ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)),
         Ok(Started::AlreadyRunning)
     ));
-    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
+    stop(&fx);
 }
 
 #[test]
@@ -195,7 +213,7 @@ fn connect_or_start_uses_a_running_daemon_without_looking_for_the_binary() {
         Duration::from_secs(2),
     );
     assert!(matches!(found, Ok(Started::AlreadyRunning)), "{found:?}");
-    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
+    stop(&fx);
 }
 
 #[test]
@@ -255,7 +273,7 @@ fn a_daemon_on_port_zero_records_the_address_it_serves_on_and_removes_it_on_stop
 fn stop_daemon_ends_the_process_and_removes_the_pidfile() {
     let fx = fixture("stop");
     ensure_daemon(&fx.cfg, Path::new(DAEMON), Duration::from_secs(10)).unwrap();
-    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
+    stop(&fx);
     assert!(
         wait_until(|| !is_up(&fx.cfg.base_url())),
         "daemon still answering after stop"
@@ -331,7 +349,7 @@ fn a_stale_pidfile_for_a_dead_pid_is_cleaned_not_signalled() {
         .unwrap();
     done.wait().unwrap();
     std::fs::write(fx.cfg.pidfile(), format!("{}\n", done.id())).unwrap();
-    stop_daemon(&fx.cfg.state_dir, &fx.cfg.base_url()).unwrap();
+    stop(&fx);
     assert!(!fx.cfg.pidfile().exists(), "stale pidfile kept");
 }
 
