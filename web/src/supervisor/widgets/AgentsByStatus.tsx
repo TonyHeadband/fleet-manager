@@ -1,7 +1,7 @@
 import type { Status } from "../../api/generated/Status";
 import { ColumnBars, Stat } from "../../charts";
 import { TONE } from "../ConversationSelector";
-import type { WidgetDef, WidgetProps } from "./widget";
+import type { WidgetDef, WidgetProps } from "./widgetModel";
 import { Widget } from "./Widget";
 
 const BARS: { status: Status; label: string }[] = [

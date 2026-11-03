@@ -11,7 +11,7 @@ import { ErrorLine } from "../ui/ErrorLine";
 import { Mark } from "../ui/icons";
 import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
-import { settled, type PersonasApi } from "./personas";
+import { settled, type PersonasApi } from "./personasModel";
 
 // A port of crates/fleet-gui/src/views/management/personas.rs: the personas on the left, the selected one on the
 // right, and app/setup.rs's selection, checks and Delete dialog.

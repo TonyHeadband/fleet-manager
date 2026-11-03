@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { WidgetDef } from "./widget";
+import type { WidgetDef } from "./widgetModel";
 import "./widgets.css";
 
 /** The frame every widget shares: the title, and the chart block filling the body. */

@@ -20,6 +20,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+      # Windows and macOS see two names that differ only by case as one file.
+      - name: No file names that differ only by case
+        shell: bash
+        run: bash scripts/case-twins.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the

@@ -14,7 +14,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Details } from "./panel/Details";
 import { fleetPanel, useFleetViews } from "./panel/fleetViews";
 import { Breakdown } from "./panel/Breakdown";
-import { BREAKDOWN_DECISION, pending } from "./panel/breakdown";
+import { BREAKDOWN_DECISION, pending } from "./panel/breakdownModel";
 import { useBreakdownDecisions } from "./panel/decisions";
 import { REPO_REQUEST, RepoRequestBox, type RequestDraft } from "./panel/RepoRequestBox";
 import { usableForm } from "./api/forms";
@@ -90,12 +90,12 @@ import { Workflow } from "./management/Workflow";
 import { useAgentConfig } from "./management/agentConfig";
 import { Instructions } from "./management/Instructions";
 import { AgentSettings } from "./management/AgentSettings";
-import { DEF_TABS, usable, useDefinitions } from "./management/definitions";
+import { DEF_TABS, usable, useDefinitions } from "./management/definitionsModel";
 import { Definitions } from "./management/Definitions";
-import { usePersonasTab } from "./management/personas";
+import { usePersonasTab } from "./management/personasModel";
 import { Personas } from "./management/Personas";
 import { NewProduct } from "./management/NewProduct";
-import { useProductsTab } from "./management/products";
+import { useProductsTab } from "./management/productsModel";
 import { Products } from "./management/Products";
 
 interface Props {

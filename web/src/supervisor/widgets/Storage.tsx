@@ -6,7 +6,7 @@ import { SegmentedBar } from "../../charts";
 import { formatBytes } from "../../shell/counts";
 import { look, taskOutcome } from "../../tasks/model";
 import { Button } from "../../ui/Button";
-import type { WidgetDef, WidgetProps } from "./widget";
+import type { WidgetDef, WidgetProps } from "./widgetModel";
 import { Widget } from "./Widget";
 
 /** How many tasks the clean-up list shows. */

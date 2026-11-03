@@ -7,7 +7,7 @@ import { inputs } from "../api/forms";
 import { specialistLabel } from "../board/groups";
 import { prUrl } from "./fleetViews";
 import { Button } from "../ui/Button";
-import { approvalText, failedStep, gateText, stateText, stepLine } from "./breakdown";
+import { approvalText, failedStep, gateText, stateText, stepLine } from "./breakdownModel";
 import { Avatar } from "../ui/Avatar";
 
 interface Props {

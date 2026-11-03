@@ -12,7 +12,7 @@ import { ListRow } from "../ui/ListRow";
 import { SaveBar } from "../ui/SaveBar";
 import { NewDefinitionDialog } from "./NewDefinitionDialog";
 import { SpecialistForm } from "./SpecialistForm";
-import { defDirty, usable, type DefinitionsApi } from "./definitions";
+import { defDirty, usable, type DefinitionsApi } from "./definitionsModel";
 import { writeDef } from "./frontmatter";
 
 // A port of crates/fleet-gui/src/views/management/definitions.rs: one tab's definitions, built-in or the user's, with
