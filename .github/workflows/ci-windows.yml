@@ -99,10 +99,6 @@ jobs:
           key: tauri-driver-2.1.0-${{ runner.os }}
       - if: steps.tauri-driver.outputs.cache-hit != 'true'
         run: cargo install tauri-driver --version 2.1.0 --locked
-      - name: TEMPORARY WebView2 debug
-        shell: bash
-        continue-on-error: true
-        run: bash scripts/zz-webview2-debug.sh
       - name: Smoke test
         shell: bash
         run: |
