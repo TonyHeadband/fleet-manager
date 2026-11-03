@@ -5360,11 +5360,11 @@ async fn gate_shares_the_task_build_folder() {
 async fn clean_gate_builds_in_a_fresh_folder() {
     let fx = fixture().await;
     let (a, task, _) = done_task_with_env(&fx, |task| {
-        let gate = task.join("gate-build");
+        let target = task.join("gate-build").join("target");
         one_step(&format!(
-            "test \"$CARGO_TARGET_DIR\" = \"{0}/target\" && test -z \"$(ls -A \"$CARGO_TARGET_DIR\" 2>/dev/null)\" \
+            "test \"$CARGO_TARGET_DIR\" = \"{0}\" && test -z \"$(ls -A \"$CARGO_TARGET_DIR\" 2>/dev/null)\" \
              && mkdir -p \"$CARGO_TARGET_DIR\" && touch \"$CARGO_TARGET_DIR/built\"",
-            gate.display()
+            target.display()
         ))
     })
     .await;
