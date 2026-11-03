@@ -12,8 +12,9 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*) windows=1 exe=.exe ;;
   *) windows= exe= ;;
 esac
-# A path as the OS's own programs take it: `C:/…` on Windows (TOML and every Windows program read `/`).
-native() { if [ -n "$windows" ]; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
+# A path as the OS writes it, `C:\…` on Windows as the app's own first-run config does, so whatever the app shows
+# is its own doing (the config's strings are TOML literal ones, where `\` is no escape).
+native() { if [ -n "$windows" ]; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
 # True when something accepts connections on the loopback port.
 listening() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
 
@@ -87,6 +88,20 @@ git init -q "$W/bakery"
 echo "Recipes for the bakery." > "$W/bakery/README.txt"
 git -C "$W/bakery" add README.txt
 git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Start the bakery"
+if [ "${FLEET_WORLD:-}" = full ]; then
+  # A direct task needs the repo's workflow on its origin's default branch.
+  mkdir -p "$W/bakery/.fleet"
+  printf 'steps:
+  test:
+    run: "true"
+' > "$W/bakery/.fleet/workflow.yml"
+  git -C "$W/bakery" add .fleet/workflow.yml
+  git -C "$W/bakery" -c user.name=Baker -c user.email=baker@pie.example commit -q -m "Bake in one step"
+  git clone -q --bare "$W/bakery" "$W/bakery-origin.git"
+  git -C "$W/bakery" remote add origin "$(native "$W/bakery-origin.git")"
+  git -C "$W/bakery" fetch -q origin
+  git -C "$W/bakery" branch -q -u origin/"$(git -C "$W/bakery" branch --show-current)"
+fi
 
 # The persona's login check asks GitHub who the token is: the stand-in answers baker.
 "$bin/fleet-demo-forge$exe" --addr-file "$(native "$W/forge.addr")" > "$W/forge.out" 2>&1 &
@@ -98,16 +113,27 @@ export FLEET_FORGE_API
 "$bin/fleet-daemon$exe" > "$W/daemon.out" 2>&1 &
 DAEMON_PID=$!
 for _ in $(seq 150); do listening "$port" && break; sleep 0.1; done
+# FLEET_WORLD=full plays the demo's whole timeline (its tasks, answers and terminal) before the app opens, for the
+# Windows/Linux tour (scripts/tauri-tour.sh); by default only the persona is set up.
+world=--persona-only
+[ "${FLEET_WORLD:-}" = full ] && world=
 "$bin/fleet-demo-director$exe" --base-url "http://127.0.0.1:$port" --timeline "$(native "$root/demo/timeline.toml")" \
-  --cues "$(native "$W/cues")" --repo "$(native "$W/bakery")" --persona-only > "$W/director.out" 2>&1 || {
+  --cues "$(native "$W/cues")" --repo "$(native "$W/bakery")" $world > "$W/director.out" 2>&1 || {
   cat "$W/director.out" "$W/daemon.out" >&2
   exit 1
 }
 
 FLEET_TAURI_APP=$(native "$bin/fleet-gui-tauri$exe")
 export FLEET_TAURI_APP
+# FLEET_MANUAL=1: no WebDriver, the app opens on the desktop for a person to use; the world goes when it closes.
+if [ "${FLEET_MANUAL:-}" = 1 ]; then
+  echo "Fleet Manager is open on the demo world ($W); close its window to end." >&2
+  "$bin/fleet-gui-tauri$exe"
+  exit 0
+fi
 cd "$root/web"
-if [ -n "$windows" ]; then
+# FLEET_SHOW=1 opens the window on the desktop (WSLg, a Linux session) instead of Xvfb.
+if [ -n "$windows" ] || [ "${FLEET_SHOW:-}" = 1 ]; then
   pnpm exec wdio run wdio.conf.ts
 else
   xvfb-run -a pnpm exec wdio run wdio.conf.ts

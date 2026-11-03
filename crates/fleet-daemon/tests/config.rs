@@ -63,6 +63,26 @@ path = "~/dev/core"
     assert_eq!(c.branch_prefix, "alice");
 }
 
+/// `~/a/b` comes back as the OS's own path, not a mixed `…\a/b` on Windows.
+#[test]
+fn home_paths_with_several_parts_come_back_native() {
+    let e = env();
+    let p = write(&e, "state_dir = \"~/AppData/Local/fleet-manager\"\n");
+    let c = load_with_home(&p, &e.home).unwrap();
+    assert_eq!(
+        c.state_dir,
+        e.home.join("AppData").join("Local").join("fleet-manager")
+    );
+    assert_eq!(
+        c.state_dir.to_string_lossy(),
+        e.home
+            .join("AppData")
+            .join("Local")
+            .join("fleet-manager")
+            .to_string_lossy()
+    );
+}
+
 #[test]
 fn claude_command_defaults_to_plain_claude_and_can_carry_flags() {
     let e = env();
@@ -160,7 +180,10 @@ fn personas_dir_defaults_and_expands() {
     );
     let c = load_with_home(&p, &e.home).unwrap();
     assert_eq!(c.personas_dir, e.home.join("work/personas"));
-    assert_eq!(c.gh_command, e.home.join("opt/gh").to_string_lossy());
+    assert_eq!(
+        c.gh_command,
+        e.home.join("opt").join("gh").to_string_lossy()
+    );
 }
 
 #[test]

@@ -123,11 +123,15 @@ fn is_scp_like(s: &str) -> bool {
         && !path.is_empty()
 }
 
-/// git's own rule for `host:path` without a scheme: ssh, when no `/` comes before the first `:`.
+/// git's own rule for `host:path` without a scheme: ssh, when no `/` comes before the first `:`. Git for Windows reads
+/// a drive (`C:/…`, `C:\…`) as a local path instead, so this daemon does on Windows.
 fn is_ssh_shorthand(s: &str) -> bool {
     !s.contains("://")
-        && s.split_once(':')
-            .is_some_and(|(host, _)| !host.contains('/'))
+        && s.split_once(':').is_some_and(|(host, _)| {
+            let drive =
+                cfg!(windows) && host.len() == 1 && host.as_bytes()[0].is_ascii_alphabetic();
+            !host.contains('/') && !drive
+        })
 }
 
 /// The strict host rule: a persona reaches only its own GitHub host, and only over HTTPS, so its login is the only

@@ -1112,6 +1112,34 @@ fn file_url_is_accepted() {
     check_host("/home/u/src/x", &pe()).unwrap();
 }
 
+/// Git for Windows reads `C:/…` and `C:\…` as a local path, not as host `C`; git elsewhere reads them as ssh.
+#[test]
+fn a_drive_path_is_local_on_windows_as_git_reads_it() {
+    for u in [r"C:/Users/u/x.git", r"c:\Users\u\x.git", "D:x"] {
+        if cfg!(windows) {
+            check_host(u, &pe()).unwrap();
+            // Not a clone URL (no path is), but not called ssh either.
+            assert!(
+                !matches!(
+                    fleet_daemon::repos::check_clone_url(u),
+                    Err(RepoError::Ssh(_))
+                ),
+                "{u}"
+            );
+        } else {
+            assert!(
+                matches!(check_host(u, &pe()), Err(RepoError::Ssh(_))),
+                "{u}"
+            );
+        }
+    }
+    // Two letters before the colon are a host on every OS.
+    assert!(matches!(
+        check_host("ab:x/y", &pe()),
+        Err(RepoError::Ssh(_))
+    ));
+}
+
 #[tokio::test]
 async fn path_repo_checks_origin() {
     let f = fx().await;

@@ -355,9 +355,13 @@ fn optional_limit(key: &'static str, value: Option<u32>) -> Result<Option<u32>, 
     }
 }
 
+/// `~` and `~/…` under `home`, joined part by part so the path has the OS's own separators throughout.
 pub(crate) fn expand(p: &str, home: &Path) -> PathBuf {
     match p.strip_prefix("~/") {
-        Some(rest) => home.join(rest),
+        Some(rest) => rest
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .fold(home.to_path_buf(), |dir, part| dir.join(part)),
         None if p == "~" => home.to_path_buf(),
         None => PathBuf::from(p),
     }

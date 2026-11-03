@@ -218,10 +218,14 @@ pub fn exists(path: &Path) -> bool {
     path.is_file()
 }
 
-/// `~` and `~/…` become paths under `home`; anything else is taken as written.
+/// `~` and `~/…` become paths under `home`, joined part by part so the result has the OS's own separators; anything
+/// else is taken as written.
 pub fn expand_home(p: &str, home: &Path) -> PathBuf {
     match p.strip_prefix("~/") {
-        Some(rest) => home.join(rest),
+        Some(rest) => rest
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .fold(home.to_path_buf(), |dir, part| dir.join(part)),
         None if p == "~" => home.to_path_buf(),
         None => PathBuf::from(p),
     }
@@ -312,11 +316,15 @@ fn from_raw(raw: Raw, path: &Path, home: &Path) -> ClientConfig {
     }
 }
 
-/// A path under `home` written with `~`, the way the config file and the user write it.
+/// A path under `home` written with `~`, the way the config file and the user write it: `~/a/b` on every OS (not
+/// `~/a\b` on Windows), which `expand_home` and the web UI read.
 pub fn shorten_home(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
         Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-        Ok(rest) => format!("~/{}", rest.display()),
+        Ok(rest) => {
+            let parts: Vec<_> = rest.iter().map(|p| p.to_string_lossy()).collect();
+            format!("~/{}", parts.join("/"))
+        }
         Err(_) => path.display().to_string(),
     }
 }
