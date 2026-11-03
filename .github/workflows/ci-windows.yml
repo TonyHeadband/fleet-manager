@@ -82,6 +82,10 @@ jobs:
       # The app, the daemon it reaches, and the smoke test's stand-ins for claude, gh and GitHub's API.
       - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins
       - run: cargo install tauri-driver --locked
+      - name: TEMPORARY WebView2 debug
+        shell: bash
+        continue-on-error: true
+        run: bash scripts/zz-webview2-debug.sh
       - name: Smoke test
         shell: bash
         run: |
