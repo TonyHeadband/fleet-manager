@@ -198,7 +198,7 @@ fn a_shortcut_under_the_old_name_is_recognised_and_cleaned_up() {
     std::fs::create_dir_all(&f.places.menu).unwrap();
     std::fs::write(old(&f.places.menu), b"old").unwrap();
     // Seen, and stale, so Update rewrites it.
-    assert_eq!(shortcuts::existing(&f.places, shortcuts::EGUI).menu, true);
+    assert!(shortcuts::existing(&f.places, shortcuts::EGUI).menu);
     assert_eq!(
         shortcuts::state(&f.places, &f.exe, shortcuts::EGUI),
         ShortcutState::Stale
