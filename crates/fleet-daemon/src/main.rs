@@ -367,7 +367,14 @@ fn main() -> ExitCode {
         .enable_all()
         .build()
     {
-        Ok(rt) => rt.block_on(daemon()),
+        Ok(rt) => {
+            let code = rt.block_on(daemon());
+            // Dropping the runtime waits for every blocking task still running (a boot-time git call, a folder
+            // measure), so a daemon stopped just after starting could outlive its "stopped" line by seconds. Give
+            // them the shutdown grace, then exit: a stop must not wait on them.
+            rt.shutdown_timeout(SHUTDOWN_GRACE);
+            code
+        }
         Err(e) => {
             eprintln!("fleet-daemon: cannot start the async runtime: {e}");
             ExitCode::FAILURE
