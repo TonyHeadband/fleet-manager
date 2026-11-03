@@ -181,12 +181,18 @@ fn each_start_writes_a_new_owner_only_app_token_the_tauri_origin_needs() {
         assert_eq!(mode & 0o777, 0o600, "{mode:o}");
     }
 
+    // The Tauri app's webview origin on this OS.
+    let origin = if cfg!(windows) {
+        "https://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
     let tauri_get = |token: Option<&str>| {
         let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
         let header = token.map_or(String::new(), |t| format!("X-Fleet-Token: {t}\r\n"));
         write!(
             s,
-            "GET /api/agents HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nOrigin: tauri://localhost\r\n{header}\r\n"
+            "GET /api/agents HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\n{header}\r\n"
         )
         .unwrap();
         let mut raw = String::new();

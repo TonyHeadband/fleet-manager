@@ -12,6 +12,18 @@ use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+/// The Tauri app's webview origin: WebKitGTK's custom scheme on Linux, WebView2's https one on Windows.
+const TAURI: &str = if cfg!(windows) {
+    "https://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
+const OTHER_TAURI: &str = if cfg!(windows) {
+    "tauri://localhost"
+} else {
+    "https://tauri.localhost"
+};
+
 struct Server {
     addr: SocketAddr,
     fx: Fx,
@@ -2436,15 +2448,12 @@ async fn the_tauri_webview_origin_is_accepted_with_cors_and_the_token() {
         &srv,
         "GET",
         "/api/agents",
-        &[
-            ("Origin", "tauri://localhost"),
-            ("X-Fleet-Token", srv.state.api_token()),
-        ],
+        &[("Origin", TAURI), ("X-Fleet-Token", srv.state.api_token())],
     )
     .await;
     assert_eq!(s, 200, "{head}");
     assert!(
-        head.contains("access-control-allow-origin: tauri://localhost"),
+        head.contains(format!("access-control-allow-origin: {TAURI}").as_str()),
         "{head}"
     );
     assert!(head.contains("vary: origin"), "{head}");
@@ -2455,7 +2464,7 @@ async fn the_tauri_origin_without_the_right_token_is_refused_readably() {
     let srv = start().await;
     let wrong = "0".repeat(srv.state.api_token().len());
     for token in [None, Some(""), Some("short"), Some(wrong.as_str())] {
-        let mut headers = vec![("Origin", "tauri://localhost")];
+        let mut headers = vec![("Origin", TAURI)];
         if let Some(t) = token {
             headers.push(("X-Fleet-Token", t));
         }
@@ -2466,7 +2475,7 @@ async fn the_tauri_origin_without_the_right_token_is_refused_readably() {
         // CORS headers on the refusal too, so the page can read why.
         let (_, head) = head_of(&srv, "GET", "/api/agents", &headers).await;
         assert!(
-            head.contains("access-control-allow-origin: tauri://localhost"),
+            head.contains(format!("access-control-allow-origin: {TAURI}").as_str()),
             "{head}"
         );
     }
@@ -2476,7 +2485,7 @@ async fn the_tauri_origin_without_the_right_token_is_refused_readably() {
 async fn the_token_as_a_query_parameter_opens_only_the_streams() {
     let srv = start().await;
     let token = srv.state.api_token().to_string();
-    let tauri = [("Origin", "tauri://localhost")];
+    let tauri = [("Origin", TAURI)];
     let mut c = SseClient::connect(srv.addr, &format!("/api/events?token={token}"), &tauri).await;
     assert_eq!(c.next().await.event.as_deref(), Some("snapshot"));
     let (s, _) = head_of(&srv, "GET", "/api/events", &tauri).await;
@@ -2513,7 +2522,7 @@ async fn a_preflight_from_the_tauri_webview_is_answered() {
         "OPTIONS",
         "/api/agents",
         &[
-            ("Origin", "tauri://localhost"),
+            ("Origin", TAURI),
             ("Access-Control-Request-Method", "POST"),
             (
                 "Access-Control-Request-Headers",
@@ -2525,7 +2534,7 @@ async fn a_preflight_from_the_tauri_webview_is_answered() {
     // A preflight carries no token: the browser sends it without the request's headers.
     assert_eq!(s, 204, "{head}");
     for want in [
-        "access-control-allow-origin: tauri://localhost",
+        format!("access-control-allow-origin: {TAURI}").as_str(),
         "access-control-allow-methods: get, post, put, patch, delete",
         "access-control-allow-headers: content-type, x-fleet-token",
         "access-control-max-age: 600",
@@ -2540,7 +2549,10 @@ async fn an_ordinary_web_origin_is_still_refused() {
     for origin in [
         "http://evil.example",
         "tauri://evil",
+        // Any local web page can have this one; the app's is https on Windows.
         "http://tauri.localhost",
+        // The other OS's webview origin.
+        OTHER_TAURI,
     ] {
         let (s, head) = head_of(&srv, "GET", "/api/agents", &[("Origin", origin)]).await;
         assert_eq!(s, 403, "{origin}: {head}");
@@ -2569,7 +2581,7 @@ async fn a_tauri_origin_with_a_foreign_host_is_refused() {
         srv.addr,
         "GET",
         "/api/agents",
-        &[("Origin", "tauri://localhost"), ("Host", "evil.example")],
+        &[("Origin", TAURI), ("Host", "evil.example")],
         None,
     )
     .await;

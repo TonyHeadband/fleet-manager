@@ -296,10 +296,17 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// The Tauri app's webview on Linux. No web page can send it: browsers set Origin from the page's own scheme and
-/// host, and `tauri:` is not one a page can have. Every Tauri app on the machine shares it, though, so it is let in
-/// only with this daemon's token, which only a process that can read the state dir has.
-const TAURI_ORIGIN: &str = "tauri://localhost";
+/// The Tauri app's webview. On Linux no web page can send it: browsers set Origin from the page's own scheme and
+/// host, and `tauri:` is not one a page can have. On Windows WebView2 serves the app as `https://tauri.localhost`
+/// (`useHttpsScheme`, tauri.windows.conf.json), which a page could only have with a trusted certificate for that name;
+/// the plain-http default, which any local web server could claim, is not let in. Every Tauri app on the machine
+/// shares the origin, though, so it is let in only with this daemon's token, which only a process that can read the
+/// state dir has.
+const TAURI_ORIGIN: &str = if cfg!(windows) {
+    "https://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
 
 /// The header the Tauri app sends its token in.
 const TOKEN_HEADER: &str = "x-fleet-token";
