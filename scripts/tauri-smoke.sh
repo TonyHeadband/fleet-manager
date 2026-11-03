@@ -17,6 +17,8 @@ native() { if [ -n "$windows" ]; then cygpath -m "$1"; else printf '%s\n' "$1"; 
 # True when something accepts connections on the loopback port.
 listening() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
 
+# When the run began, in local time as Windows reports process starts: the cleanup leaves anything older alone.
+started=$(date '+%Y-%m-%dT%H:%M:%S.%3N')
 W=$(mktemp -d "${TMPDIR:-/tmp}/fleet-smoke.XXXXXX")
 DAEMON_PID= FORGE_PID=
 cleanup() {
@@ -32,13 +34,16 @@ cleanup() {
   [ -z "$DAEMON_PID" ] || kill "$DAEMON_PID" 2>/dev/null || true
   [ -z "$FORGE_PID" ] || kill "$FORGE_PID" 2>/dev/null || true
   if [ -n "$windows" ]; then
-    # No pkill in Git Bash: anything naming this run's folder or started from this build's binaries.
-    local w b
-    w=$(cygpath -w "$W") b=$(cygpath -w "$bin")
-    W_DIR=$w BIN_DIR=$b powershell.exe -NoProfile -Command \
-      'Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -and $_.CommandLine.Contains($env:W_DIR)) -or
-        ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:BIN_DIR + "\")) } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' 2>/dev/null
+    # No pkill in Git Bash: what this run started, so only processes created since it began, and of those the ones
+    # naming its folder (either spelling) or run from this build. Your own app or daemon from target\release is older.
+    W_WIN=$(cygpath -w "$W")\\ W_MIX=$(cygpath -m "$W")/ BIN_DIR=$(cygpath -w "$bin")\\ SINCE=$started \
+      powershell.exe -NoProfile -Command '
+        $since = [datetime]::Parse($env:SINCE, [Globalization.CultureInfo]::InvariantCulture)
+        Get-CimInstance Win32_Process | Where-Object { $_.CreationDate -ge $since -and (
+            ($_.CommandLine -and ($_.CommandLine.IndexOf($env:W_WIN, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+              $_.CommandLine.IndexOf($env:W_MIX, [StringComparison]::OrdinalIgnoreCase) -ge 0)) -or
+            ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:BIN_DIR, [StringComparison]::OrdinalIgnoreCase))) } |
+          ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' 2>/dev/null
   else
     # Anything still naming this run's folder; the escaped dot keeps the pattern to it.
     local pattern="${W//./\\.}/"
