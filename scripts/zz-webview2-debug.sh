@@ -6,8 +6,6 @@ echo "== whoami: $(whoami)  session: $(powershell -NoProfile -c '(Get-Process -I
 reg query 'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' //v pv
 reg query 'HKLM\SOFTWARE\Policies\Microsoft\Edge' 2>&1 | head -20
 reg query 'HKLM\SOFTWARE\Policies\Microsoft\Edge\WebView2' 2>&1 | head -20
-reg query 'HKCU\SOFTWARE\Policies\Microsoft\Edge' //s 2>&1 | head -20
-env | grep -i webview2
 for mode in plain override; do
   echo "== mode $mode"
   data="$LOCALAPPDATA/com.proxima-station.fleet-manager/EBWebView"
@@ -19,10 +17,9 @@ for mode in plain override; do
     echo $! > "$home/pid"
   )
   ok=no
-  for _ in $(seq 120); do curl -fs http://127.0.0.1:9333/json/version > "$home/v.json" 2>/dev/null && { ok=yes; break; }; sleep 0.5; done
+  for _ in $(seq 40); do curl -fs http://127.0.0.1:9333/json/version > "$home/v.json" 2>/dev/null && { ok=yes; break; }; sleep 0.5; done
   echo "devtools reachable: $ok"; cat "$home/v.json" 2>/dev/null; echo
-  powershell -NoProfile -c "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | ForEach-Object { \$_.ProcessId.ToString() + ' ' + \$_.CommandLine.Substring(0, [Math]::Min(3000, \$_.CommandLine.Length)) }" | grep -v -- "--type=" | head -5
-  netstat -ano | grep LISTENING | grep -E ":93|:9222" | head
+  tasklist | grep -icE "msedgewebview" 
   echo "-- app.out"; tail -20 "$home/app.out"
   echo "-- data dir"; ls -la "$data" 2>&1 | head; find "$LOCALAPPDATA/com.proxima-station.fleet-manager" -maxdepth 3 -name '*.log' 2>/dev/null | while read f; do echo "--- $f"; tail -30 "$f"; done
   # Only this app's own process tree: never other apps' WebView2.
