@@ -3,7 +3,7 @@ import type { FleetClient } from "../api/client";
 import type { EffectiveSettings } from "../api/generated/EffectiveSettings";
 import type { Product } from "../api/generated/Product";
 import type { Load } from "../shell/choices";
-import { useInternal } from "./internal";
+import { useInternal } from "./internalModel";
 import { drafts, editRow, newOverride, sameRows, toOverride, type OverrideDraft } from "./overrides";
 import { diff, emptyForm, formOf, type ProductForm, type ProductSave } from "./productForm";
 

@@ -4,7 +4,7 @@ import { Button } from "../ui/Button";
 import { ErrorLine } from "../ui/ErrorLine";
 import { ListRow } from "../ui/ListRow";
 import { Select } from "../ui/Select";
-import type { InternalApi } from "./internal";
+import type { InternalApi } from "./internalModel";
 
 // A port of crates/fleet-gui/src/views/management/internal.rs's `internal_section`: a header that opens on the
 // branches, the files of one, and one file's text with the commit that last touched it.

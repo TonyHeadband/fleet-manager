@@ -8,7 +8,7 @@ import type { DefFile } from "../api/generated/DefFile";
 import type { DefInfo } from "../api/generated/DefInfo";
 import type { DefKind } from "../api/generated/DefKind";
 import { fakeClient } from "../test/fixtures";
-import { useDefinitions } from "./definitions";
+import { useDefinitions } from "./definitionsModel";
 import { Definitions } from "./Definitions";
 import { SpecialistForm } from "./SpecialistForm";
 

@@ -9,7 +9,7 @@ import { ListDetail } from "../../ui/ListDetail";
 import { ListRow } from "../../ui/ListRow";
 import { pad2 } from "../../ui/Readout";
 import { RoomChat, message } from "./RoomChat";
-import type { WidgetDef, WidgetProps } from "./widget";
+import type { WidgetDef, WidgetProps } from "./widgetModel";
 import { Widget } from "./Widget";
 import "./rooms.css";
 

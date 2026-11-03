@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      # Windows and macOS see two names that differ only by case as one file.
+      - name: No file names that differ only by case
+        run: bash scripts/case-twins.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

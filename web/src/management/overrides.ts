@@ -2,7 +2,7 @@ import type { DefInfo } from "../api/generated/DefInfo";
 import type { EffectiveSettings } from "../api/generated/EffectiveSettings";
 import type { Product } from "../api/generated/Product";
 import type { ProductOverride } from "../api/generated/ProductOverride";
-import { usable } from "./definitions";
+import { usable } from "./definitionsModel";
 
 // A port of the override rows' rules in crates/fleet-gui/src/views/management/products.rs.
 

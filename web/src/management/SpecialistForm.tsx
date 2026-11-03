@@ -11,7 +11,7 @@ import { ErrorLine } from "../ui/ErrorLine";
 import { SaveBar } from "../ui/SaveBar";
 import { Section } from "../ui/Section";
 import { Select } from "../ui/Select";
-import { defDirty, type DefinitionsApi } from "./definitions";
+import { defDirty, type DefinitionsApi } from "./definitionsModel";
 import { fieldOfError, parseDef, pruneDef, writeDef, type DefDraft, type DefField } from "./frontmatter";
 
 // A specialist's or orchestrator's file as a form. The hook's text draft is the one source of truth: the fields are read

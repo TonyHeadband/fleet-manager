@@ -8,12 +8,12 @@ import { ListDetail } from "../ui/ListDetail";
 import { ListRow } from "../ui/ListRow";
 import { Section } from "../ui/Section";
 import { Select } from "../ui/Select";
-import { usable } from "./definitions";
+import { usable } from "./definitionsModel";
 import { Internal } from "./Internal";
 import { keyOptions, ready, replaces, SECTIONS, valueHint, valueOptions } from "./overrides";
 import { ProductFields } from "./ProductFields";
 import { canSave } from "./productForm";
-import { dirty, hiddenToSend, overridesDirty, sameNames, type ProductsApi } from "./products";
+import { dirty, hiddenToSend, overridesDirty, sameNames, type ProductsApi } from "./productsModel";
 
 // A port of crates/fleet-gui/src/views/management/products.rs: the products on the left, the selected one's form,
 // its sections and Delete product on the right.
