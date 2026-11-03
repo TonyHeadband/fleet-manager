@@ -61,7 +61,7 @@ jobs:
       # After the web build, so the daemon embeds the real UI as it does in the tests below. Windows-only code is
       # linted only here.
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked -j2
+      - run: cargo test --workspace --locked
       - name: No files changed by the build or tests
         shell: bash
         run: git diff --exit-code
