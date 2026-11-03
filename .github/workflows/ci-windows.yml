@@ -89,8 +89,10 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir web install --frozen-lockfile
       - run: pnpm --dir web build
-      # The app, the daemon it reaches, and the smoke test's stand-ins for claude, gh and GitHub's API.
-      - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins
+      # The app, the daemon it reaches, and the smoke test's stand-ins for claude, gh and GitHub's API. The runner runs
+      # elevated, where WebView2 ignores WebDriver's flags from the environment: the e2e build passes them in code
+      # (crates/fleet-tauri/src/e2e.rs). No release is built with it.
+      - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins --features fleet-tauri/e2e
       # tauri-driver is built once per version and kept, not compiled on every run.
       - id: tauri-driver
         uses: actions/cache@v4

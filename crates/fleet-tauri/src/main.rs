@@ -4,6 +4,8 @@
 
 mod bridge;
 mod close;
+#[cfg(any(test, feature = "e2e"))]
+mod e2e;
 mod log;
 #[cfg(target_os = "linux")]
 mod webkit;
@@ -98,6 +100,24 @@ fn main() {
             close::answer_close,
             close::set_close_armed
         ])
-        .run(tauri::generate_context!())
+        .run(context())
         .expect("run the Tauri app");
+}
+
+#[cfg(not(all(windows, feature = "e2e")))]
+fn context() -> tauri::Context {
+    tauri::generate_context!()
+}
+
+/// CI's smoke build only (e2e.rs): the main window gets WebDriver's WebView2 flags in code.
+#[cfg(all(windows, feature = "e2e"))]
+fn context() -> tauri::Context {
+    let mut ctx = tauri::generate_context!();
+    let env = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").ok();
+    if let Some(args) = e2e::browser_args(env.as_deref()) {
+        for w in &mut ctx.config_mut().app.windows {
+            w.additional_browser_args = Some(args.clone());
+        }
+    }
+    ctx
 }
