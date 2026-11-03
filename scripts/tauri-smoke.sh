@@ -125,6 +125,12 @@ world=--persona-only
 
 FLEET_TAURI_APP=$(native "$bin/fleet-gui-tauri$exe")
 export FLEET_TAURI_APP
+# FLEET_MANUAL=1: no WebDriver, the app opens on the desktop for a person to use; the world goes when it closes.
+if [ "${FLEET_MANUAL:-}" = 1 ]; then
+  echo "Fleet Manager is open on the demo world ($W); close its window to end." >&2
+  "$bin/fleet-gui-tauri$exe"
+  exit 0
+fi
 cd "$root/web"
 # FLEET_SHOW=1 opens the window on the desktop (WSLg, a Linux session) instead of Xvfb.
 if [ -n "$windows" ] || [ "${FLEET_SHOW:-}" = 1 ]; then
