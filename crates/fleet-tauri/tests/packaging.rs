@@ -1,5 +1,6 @@
 //! The desktop finds the window's icon through the `.desktop` file named after its app id (#411): the packages'
-//! entry, the menu shortcut and the window must all agree on it.
+//! entry, the menu shortcut and the window must all agree on it. Linux only: the packages are Linux's.
+#![cfg(target_os = "linux")]
 use fleet_client::shortcuts::TAURI;
 
 const DIR: &str = env!("CARGO_MANIFEST_DIR");
@@ -8,7 +9,6 @@ fn read(name: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(DIR).join(name)).unwrap()
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn the_packages_entry_is_named_after_the_app_id() {
     let linux: serde_json::Value = serde_json::from_str(&read("tauri.linux.conf.json")).unwrap();
