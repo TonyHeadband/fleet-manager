@@ -1095,7 +1095,7 @@ mod tests {
         std::fs::create_dir_all(&state).unwrap();
         std::fs::write(state.join("daemon.addr"), addr.to_string()).unwrap();
         let toml = format!(
-            "listen = \"127.0.0.1:0\"\nstate_dir = \"{}\"\n",
+            "listen = \"127.0.0.1:0\"\nstate_dir = '{}'\n",
             state.display()
         );
         let reply = start_with(
@@ -1131,7 +1131,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // Port 1 never answers, so the start looks for a binary and finds none.
         let toml = format!(
-            "listen = \"127.0.0.1:1\"\nstate_dir = \"{}\"\n",
+            "listen = \"127.0.0.1:1\"\nstate_dir = '{}'\n",
             dir.path().join("state").display()
         );
         let owner = Owner::default();
@@ -1158,7 +1158,7 @@ mod tests {
     #[test]
     fn the_state_dir_is_the_configs() {
         let dir = tempfile::tempdir().unwrap();
-        let toml = format!("state_dir = \"{}\"\n", dir.path().join("st").display());
+        let toml = format!("state_dir = '{}'\n", dir.path().join("st").display());
         assert_eq!(
             paths_in(dir.path(), Some(&toml)).load().state_dir,
             dir.path().join("st")
@@ -1232,7 +1232,7 @@ mod tests {
     fn daemon_paths(dir: &Path) -> Paths {
         let state = dir.join("state");
         std::fs::create_dir_all(&state).unwrap();
-        paths_in(dir, Some(&format!("state_dir = \"{}\"\n", state.display())))
+        paths_in(dir, Some(&format!("state_dir = '{}'\n", state.display())))
     }
 
     #[test]
@@ -1299,7 +1299,7 @@ mod tests {
         std::fs::write(
             &paths.config,
             format!(
-                "state_dir = \"{}\"\nlisten = \"127.0.0.1:9999\"\n",
+                "state_dir = '{}'\nlisten = \"127.0.0.1:9999\"\n",
                 moved.display()
             ),
         )
@@ -1343,12 +1343,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         std::fs::create_dir_all(&state).unwrap();
-        let toml = |root: &str| {
-            format!(
-                "state_dir = \"{}\"\ntasks_root = \"{root}\"\n",
-                state.display()
-            )
-        };
+        let toml =
+            |root: &str| format!("state_dir = '{}'\ntasks_root = '{root}'\n", state.display());
         let paths = paths_in(dir.path(), Some(&toml("~/tasks")));
         let owner = Owner::default();
         restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
@@ -1378,12 +1374,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         std::fs::create_dir_all(&state).unwrap();
-        let toml = |root: &str| {
-            format!(
-                "state_dir = \"{}\"\ntasks_root = \"{root}\"\n",
-                state.display()
-            )
-        };
+        let toml =
+            |root: &str| format!("state_dir = '{}'\ntasks_root = '{root}'\n", state.display());
         let paths = paths_in(dir.path(), Some(&toml("~/tasks")));
         let owner = Owner::default();
         restart_with(&paths, &owner, |_| Ok(()), |_| Ok(Started::AlreadyRunning)).unwrap();
@@ -1655,7 +1647,7 @@ mod tests {
         // A state_dir edited since must not hide the connected daemon's token.
         std::fs::write(
             &paths.config,
-            format!("state_dir = \"{}\"\n", dir.path().join("moved").display()),
+            format!("state_dir = '{}'\n", dir.path().join("moved").display()),
         )
         .unwrap();
         assert_eq!(daemon_token_of(&paths, &owner).as_deref(), Some("def456"));
