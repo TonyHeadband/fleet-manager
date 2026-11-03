@@ -98,8 +98,12 @@ export FLEET_FORGE_API
 "$bin/fleet-daemon$exe" > "$W/daemon.out" 2>&1 &
 DAEMON_PID=$!
 for _ in $(seq 150); do listening "$port" && break; sleep 0.1; done
+# FLEET_WORLD=full plays the demo's whole timeline (its tasks, answers and terminal) before the app opens, for the
+# Windows/Linux tour (scripts/tauri-tour.sh); by default only the persona is set up.
+world=--persona-only
+[ "${FLEET_WORLD:-}" = full ] && world=
 "$bin/fleet-demo-director$exe" --base-url "http://127.0.0.1:$port" --timeline "$(native "$root/demo/timeline.toml")" \
-  --cues "$(native "$W/cues")" --repo "$(native "$W/bakery")" --persona-only > "$W/director.out" 2>&1 || {
+  --cues "$(native "$W/cues")" --repo "$(native "$W/bakery")" $world > "$W/director.out" 2>&1 || {
   cat "$W/director.out" "$W/daemon.out" >&2
   exit 1
 }
@@ -107,7 +111,8 @@ for _ in $(seq 150); do listening "$port" && break; sleep 0.1; done
 FLEET_TAURI_APP=$(native "$bin/fleet-gui-tauri$exe")
 export FLEET_TAURI_APP
 cd "$root/web"
-if [ -n "$windows" ]; then
+# FLEET_SHOW=1 opens the window on the desktop (WSLg, a Linux session) instead of Xvfb.
+if [ -n "$windows" ] || [ "${FLEET_SHOW:-}" = 1 ]; then
   pnpm exec wdio run wdio.conf.ts
 else
   xvfb-run -a pnpm exec wdio run wdio.conf.ts
