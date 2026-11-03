@@ -25,6 +25,8 @@ jobs:
         shell: bash
         run: bash scripts/case-twins.sh
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       # Windows runners default TEMP to an 8.3 short path (C:\Users\RUNNER~1\…), which the app canonicalizes to the
       # long form while tests compare against the short one. RUNNER_TEMP is a plain long path on every OS.
@@ -34,6 +36,26 @@ jobs:
           echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The web UI's own tests, and its build, which the daemon and the Tauri app embed. As on Linux; formatting is
+      # checked there only, since it is the same on every OS.
+      - name: Web UI
+        shell: bash
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web test
+          pnpm --dir web typecheck
+          pnpm --dir web build
+      # After the web build, so the daemon embeds the real UI as it does in the tests below. Windows-only code is
+      # linted only here.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked -j2
       - name: No files changed by the build or tests
         shell: bash
