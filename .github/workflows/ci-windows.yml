@@ -60,3 +60,31 @@ jobs:
       - name: No files changed by the build or tests
         shell: bash
         run: git diff --exit-code
+
+  # The Tauri app's smoke test against a real daemon, as on Linux: WebdriverIO drives the release app in WebView2
+  # through tauri-driver and an msedgedriver matched to the runner's WebView2. No packages: Windows ships a portable zip.
+  tauri:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web build
+      # The app, the daemon it reaches, and the smoke test's stand-ins for claude, gh and GitHub's API.
+      - run: cargo build --release --locked -p fleet-daemon -p fleet-client -p fleet-demo -p fleet-tauri --bins
+      - run: cargo install tauri-driver --locked
+      - name: Smoke test
+        shell: bash
+        run: |
+          FLEET_NATIVE_DRIVER=$(scripts/msedgedriver.sh "$RUNNER_TEMP/edgedriver")
+          export FLEET_NATIVE_DRIVER
+          scripts/tauri-smoke.sh
