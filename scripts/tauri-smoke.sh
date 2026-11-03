@@ -23,6 +23,12 @@ cleanup() {
   local rc=$?
   # The test's own status is the script's: nothing below may change it.
   set +e
+  # A failed run shows what the daemon and the app said: the test itself only sees the page.
+  if [ "$rc" != 0 ]; then
+    for f in "$W/daemon.out" "$W/state/gui.log"; do
+      [ -s "$f" ] && { echo "== $f" >&2; tail -n 60 "$f" >&2; }
+    done
+  fi
   [ -z "$DAEMON_PID" ] || kill "$DAEMON_PID" 2>/dev/null || true
   [ -z "$FORGE_PID" ] || kill "$FORGE_PID" 2>/dev/null || true
   if [ -n "$windows" ]; then
