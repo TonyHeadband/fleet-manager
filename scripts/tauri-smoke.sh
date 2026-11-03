@@ -12,8 +12,9 @@ case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*) windows=1 exe=.exe ;;
   *) windows= exe= ;;
 esac
-# A path as the OS's own programs take it: `C:/…` on Windows (TOML and every Windows program read `/`).
-native() { if [ -n "$windows" ]; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
+# A path as the OS writes it, `C:\…` on Windows as the app's own first-run config does, so whatever the app shows
+# is its own doing (the config's strings are TOML literal ones, where `\` is no escape).
+native() { if [ -n "$windows" ]; then cygpath -w "$1"; else printf '%s\n' "$1"; fi; }
 # True when something accepts connections on the loopback port.
 listening() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
 
