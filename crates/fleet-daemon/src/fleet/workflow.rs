@@ -495,6 +495,9 @@ mod tests {
             // Windows drops a trailing `.` or space: these are `internal` and `fleet`.
             ("A: '{task}/internal.'", "A"),
             ("A: '{task}/fleet /x'", "A"),
+            // Windows reads a `C:` part as a drive: joined, it replaces the task folder.
+            ("A: '{task}/C:/x'", "A"),
+            ("A: '{task}/out/D:x'", "A"),
         ] {
             let err = parse(&format!("{STEPS}env:\n  {bad}\n")).unwrap_err();
             assert!(err.contains(names), "{bad}: {err}");
