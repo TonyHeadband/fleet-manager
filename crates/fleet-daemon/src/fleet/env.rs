@@ -108,6 +108,10 @@ fn check_value(name: &str, value: &str) -> Result<(), String> {
     if rest.contains('\\') {
         return Err(format!("env `{name}`: use `/` in the path, not `\\`"));
     }
+    // Windows reads a part like `C:` as a drive, and joining it replaces the task folder.
+    if rest.contains(':') {
+        return Err(format!("env `{name}`: the path must not have a `:`"));
+    }
     // An empty component would make `Path::join` see an absolute path and leave the task folder.
     let parts: Vec<&str> = rest.split('/').collect();
     if parts
