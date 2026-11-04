@@ -11,9 +11,11 @@ key='{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
 version=
 for root in 'HKLM\SOFTWARE\WOW6432Node' 'HKCU\SOFTWARE'; do
   version=$(reg query "$root\\Microsoft\\EdgeUpdate\\Clients\\$key" //v pv 2> /dev/null | awk '/pv/ { print $3 }') || true
-  [ -z "$version" ] || break
+  # `0.0.0.0` is what an uninstalled runtime leaves behind (Microsoft's own check): not a version to fetch.
+  [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && $version != 0.0.0.0 ]] && break
+  version=
 done
-[ -n "$version" ] || { echo "no WebView2 runtime found" >&2; exit 1; }
+[ -n "$version" ] || { echo "no WebView2 runtime found: install it from https://developer.microsoft.com/microsoft-edge/webview2/" >&2; exit 1; }
 
 mkdir -p "$dir"
 zip=$dir/edgedriver-$version.zip
